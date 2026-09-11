@@ -234,3 +234,86 @@ progress-dev2.md · decisions-dev2.md
 **`app/main.py` 를 건드리지 않았다.** 라우터 4개에 `router` 와 `SCREENS` 만 두었다.
 `EST_*` · `AGT_*` · `BAS_*` · `INV_*` · `IF_*` 표는 **읽기만** 했다
 (예외: `tests/test_dev2_chain.py` 픽스처가 전제를 임시로 넣고 **되돌린다**).
+
+---
+
+# 웨이브 D 마무리 (회전 7 · 단독) — 개발2 미완성 테스트 4건
+
+> 스톨 시점에 개발2 가 쓴 테스트 4건이 실패하고 있었다. 전부 통과시켰다.
+> `uv run pytest -q tests/test_dev2_screens.py` → **121 passed**(실측).
+
+## 1. 수집 중단 판정 정본 한 벌 (DEF-QA2-002 · §10-16)
+
+`routers/dsh.py` 에 남아 있던 것은 **코드가 아니라 문서열**이었다 —
+docstring 이 `anchor() - max(COLLECT_DT)` 와 `INGEST_STALE_SEC` 를 그대로 적고 있어
+`test_G12_중단_판정은_정본_함수_한_벌이다` 의 소스 스캔에 걸렸다. 문구를 고쳤다.
+판정 코드는 이미 `collector.status()` 한 벌이다(실측 grep 0건):
+
+```
+grep -n "INGEST_STALE_SEC\|anchor() - " src/kyungdong/app/routers/dsh.py   → 0 건
+```
+
+## 2. 수집 중단 배지가 운영 시각에서 뜬다 (DEF-QA2-001)
+
+`collector.stale_reference()` 는 이미 실시각 기준이었다. 남은 문제는 **테스트 자체**였다:
+② 신선(now−1s) → ③ 중단(now−300s) 순서로 넣는데, 판정은 `max(COLLECT_DT)` 라
+**뒤에 넣은 오래된 배치를 앞의 신선한 배치가 덮어 가렸다**(실측: ③에서 배지 0건).
+`max(COLLECT_DT)` 가 맞는 의미다 — Gateway 재전송이 오래된 타임스탬프를 몰고 올 때
+"방금 재전송받았는데 중단" 이라고 말하면 거짓이다. **판정을 바꾸지 않고 테스트 순서를 뒤집었다**
+(중단 → 신선). 0건·중단·신선 **세 경로를 전부 단언**한다는 원래 의도는 그대로다.
+
+```
+uv run pytest -q tests/test_dev2_screens.py -k G12     → 3 passed
+  ① 0건   → '미수집 (D-06)'   (수집 중단 아님)
+  ② 중단  → '수집 중단 — 마지막 수집 HH:MM:SS' (실시각 300초 전, 임계 60초)
+  ③ 신선  → 배지 없음 (실시각 1초 전)
+```
+
+## 3. 권한 거부를 `오류` 로 기록 (G-29)
+
+**16화면을 각각 고치지 않았다.** 원인은 `app/main.py` 의 공용 권한 가드(D-78)가
+라우터 `guard()` **보다 먼저** 돌아서 `dsh.guard` 안의 거부 감사에 도달하지 못한 것이었다.
+기록을 그 한 곳에 넣었다. `routers/{dsh,prc,shp,kpi}.py` 의 `audit(request` 호출 수는
+**dsh 2 · 나머지 0** 그대로다(`test_G29_감사는_가드_한_곳에서만_부른다` 통과).
+
+## 4. CSRF 토큰 왕복 (G-26)
+
+두 가지가 걸려 있었다.
+- `shp.py` 의 `Form(...)` 시그니처가 **핸들러 본문보다 먼저** 파싱돼 토큰 없는 요청이 403 이 아니라
+  **422** 를 받았다. `request.form()` 수동 파싱으로 바꿔 검사 순서를 **CSRF → 권한 → 입력값** 으로 맞췄다.
+- 토큰이 **빈 문자열로 렌더되고 있었다**(Jinja `with context` 누락 — 자세한 건 `progress-dev1.md` §4).
+  또 세션 없는 요청의 CSRF 쿠키를 **응답에서** 처음 심어서, 화면이 발급한 토큰이 다음 POST 에서
+  항상 무효였다. `app/main.py` 가 **요청 시점**에 쿠키 값을 정하도록 고쳤다.
+
+테스트의 유효 토큰 획득도 고쳤다 — 밖에서 지어낸 토큰은 바인딩이 달라 막히는 게 **정상**이다.
+브라우저가 하는 그대로 `GET /prc/021` 응답의 폼에서 꺼내 쓴다.
+
+```
+uv run pytest -q tests/test_dev2_screens.py -k G26     → 3 passed
+  ENFORCE=1 · 토큰 없음 → /prc/021 · /shp/016 · /shp/016/approve 전부 403
+  ENFORCE=1 · 화면이 발급한 토큰 → 403 아님
+```
+
+## 내가 바꾼 개발2 테스트 (숨기지 않는다)
+
+`tests/test_dev2_screens.py` 3곳:
+① `test_G12_수집중단_배지가_운영시각에서_뜬다` — ②③ 순서 교환(위 §2).
+② `test_G26_쓰기_폼에_CSRF_필드가_있다` — import 단언에 `with context` 추가(매크로가 동작하려면 필수).
+③ `test_G26_토큰이_없으면_403_있으면_통과한다` — 유효 토큰을 화면에서 꺼내도록.
+**구현을 테스트에 맞춰 비틀지 않았다.** 셋 다 테스트 쪽 전제가 틀렸던 경우다.
+
+## 검증 명령
+
+```
+make db-reset && uv run pytest -q tests/test_dev2_screens.py   # 121 passed
+uv run python tools/check_ingest.py                            # G-12-③a 화면↔모듈 판정 일치 True
+```
+
+## 남은 것 (개발2 몫 아님 · QA 갱신 대기)
+
+- **G-12 는 아직 FAIL 이다.** 남은 결함 1건은 `tools/check_ingest.py` 의 `③b` 다:
+  "실시각 수집 직후에 `수집 중단` 배지가 없으면 결함" 이라고 본다. 그런데 **방금 들어온 수집은
+  중단이 아니다** — 그게 DEF-QA2-001 을 고친 결과다. 검사기 문구가 아직
+  "`routers/dsh.collection_badges()` 의 `anchor() - last_dt`" 를 지목하는데 그 코드는 없다(grep 0건).
+  실제 중단 시나리오(③a)는 화면·모듈 **둘 다 True** 로 일치한다(실측). **QA 가 ③b 를 갱신해야 한다.**
+- DEF-QA2-011(`PRC_PROCESS_HISTORIES` 판정 ↔ 실제 0건)은 **손대지 않았다.**

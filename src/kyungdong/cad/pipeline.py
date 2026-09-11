@@ -15,7 +15,7 @@ import conn
 
 from ..app import rbac
 from ..app.settings import settings
-from ..app.util import http
+from ..app.util import clock, http
 from ..ingest import preprocess
 from . import inventory as inv
 from . import provider
@@ -75,7 +75,7 @@ def import_inventory(*, limit: int | None = None, scope: str = "product",
     정제 **처리 건수는 `DAT_JOB_LOGS` 에 남는다**(G-13 · DEF-QA2-006) —
     단계별 이력(`IF_CAD_IMPORT_LOGS`)과 실행 단위 집계는 다른 것이다.
     """
-    started = datetime.now()
+    started = clock.real_now()
     files = inv.read_inventory()
     cleaned = inv.clean(files, scope)
     if limit is not None:
@@ -128,7 +128,7 @@ def import_inventory(*, limit: int | None = None, scope: str = "product",
     # 실행 1회 = `DAT_JOB_LOGS` 1행. 제외 건수는 **실패가 아니라 정제 결과**지만
     # TD5 에 '제외 건수' 컬럼이 없어 `FAIL_CNT`(= 적재되지 않은 건수)로 남기고 사유를 적는다.
     res.job_log_id = preprocess.log_job(
-        preprocess.JOB_CAD, started=started, ended=datetime.now(),
+        preprocess.JOB_CAD, started=started, ended=clock.real_now(),
         processed=res.registered, failed=res.excluded,
         result=("성공" if res.registered and not res.excluded
                 else "부분성공" if res.registered else "실패"),

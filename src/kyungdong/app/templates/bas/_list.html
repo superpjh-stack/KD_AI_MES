@@ -4,7 +4,7 @@
    inv·bas·sys·dat 15화면이 이 한 파일을 쓴다(개발1 소유).
    **미디어쿼리를 쓰지 않는다**(§10-13) — 반응형은 app/static/app.css 단일 파일이 한다. #}
 {% extends "base.html" %}
-{% from "_macros.html" import csrf_field %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
 
 {% macro cell(c) %}

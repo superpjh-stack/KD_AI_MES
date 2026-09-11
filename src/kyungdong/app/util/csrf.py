@@ -38,12 +38,26 @@ def _secret() -> bytes:
     return (s.session_secret or "dev-only-not-a-secret").encode()
 
 
+def pending_cookie(request: Any) -> str:
+    """세션이 없을 때 토큰을 묶을 쿠키 값.
+
+    **요청에 쿠키가 아직 없으면 그 요청에서 발급한 값**(`request.state.csrf_cookie`)을 쓴다.
+    이게 없으면 첫 화면에서 발급한 토큰이 다음 POST 에서 항상 무효가 된다 —
+    쿠키는 응답에 심기는데 토큰은 쿠키가 없던 시점에 만들어지기 때문이다(실측 재현).
+    """
+    got = request.cookies.get(COOKIE)
+    if got:
+        return got
+    state = getattr(request, "state", None)
+    return getattr(state, "csrf_cookie", "") or "" if state is not None else ""
+
+
 def _bind(request: Any) -> str:
     """토큰을 묶을 대상. 세션이 있으면 세션, 없으면 CSRF 쿠키."""
     sess = getattr(request.state, "session", None)
     if sess is not None:
         return f"sid:{sess.sid}"
-    return f"cookie:{request.cookies.get(COOKIE, '')}"
+    return f"cookie:{pending_cookie(request)}"
 
 
 def _sign(nonce: str, bind: str) -> str:
@@ -72,6 +86,19 @@ def require(request: Any, token: str | None) -> None:
         return
     if not valid(request, token):
         raise http.fail("forbidden", "CSRF 토큰이 없거나 유효하지 않습니다")
+
+
+def token_of(request: Any, form: Any = None) -> str | None:
+    """요청이 실어 온 토큰. **폼 필드 → 헤더** 순으로 본다.
+
+    화면 폼은 `_macros.html` 의 `csrf_field()` 로 `_csrf` 를 싣고,
+    **폼이 아닌 JSON API**(`/api/ingest/plc` 등)는 헤더 `X-CSRF-Token` 으로 싣는다(§5).
+    """
+    if form is not None:
+        got = form.get(FORM_FIELD)
+        if got:
+            return str(got)
+    return request.headers.get(HEADER)
 
 
 def enforced() -> bool:

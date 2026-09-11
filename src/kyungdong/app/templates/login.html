@@ -1,7 +1,7 @@
 {# 공통화면 `login` — GET 은 main.py(아키텍트), POST 는 app/auth.py(개발1) 가 렌더한다.
    칸·버튼 문구는 SF-TD3 common(login) mockup 에서 온다 — 지어내지 않는다. #}
 {% extends "base.html" %}
-{% from "_macros.html" import csrf_field %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}로그인 — {{ system_name }}{% endblock %}
 {% block content %}
 <div class="card">

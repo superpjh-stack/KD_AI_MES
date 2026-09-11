@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, Request
+from typing import Any
+
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from ..templating import render
@@ -139,14 +141,31 @@ async def shipments(request: Request):
     ))
 
 
+def _int_field(form: Any, name: str) -> int:
+    """필수 정수 폼 값. 없거나 숫자가 아니면 **422** 다 (§2.5 validation)."""
+    raw = (form.get(name) or "").strip()
+    if not raw:
+        raise http.fail("validation", f"필수값 누락: {name}")
+    try:
+        return int(raw)
+    except ValueError:
+        raise http.fail("validation", f"{name} 은 정수여야 한다: {raw!r}") from None
+
+
 @router.post("/shp/016")
-async def create_shipment(request: Request, lot_trace_id: int = Form(...),
-                          plan_dt: str = Form("")):
-    """출하 등록. **검사 합격 LOT 만** 선택할 수 있다 — 아니면 422."""
+async def create_shipment(request: Request):
+    """출하 등록. **검사 합격 LOT 만** 선택할 수 있다 — 아니면 422.
+
+    `Form(...)` 을 시그니처에 두지 않는다 — FastAPI 가 **핸들러 본문보다 먼저** 파싱해서
+    토큰이 없는 요청이 403 이 아니라 422 를 받는다(실측). 검사 순서는 계약 §4.0 이다:
+    **CSRF → 권한 → 입력값.**
+    """
     import conn
     form = await request.form()
-    csrf.require(request, form.get(csrf.FORM_FIELD))     # 핸들러 첫 줄 (contracts §5 · G-26)
+    csrf.require(request, csrf.token_of(request, form))  # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3 = guard(request, "MES-TD3-016", write=True)
+    lot_trace_id = _int_field(form, "lot_trace_id")
+    plan_dt = (form.get("plan_dt") or "").strip()
 
     lot = conn.q1(
         "select lt.LOT_TRACE_ID, lt.PRODUCT_LOT_NO, pj.PROJECT_ID, pj.PROJECT_NO, "
@@ -198,12 +217,13 @@ async def create_shipment(request: Request, lot_trace_id: int = Form(...),
 
 
 @router.post("/shp/016/approve")
-async def approve_shipment(request: Request, shipment_id: int = Form(...)):
+async def approve_shipment(request: Request):
     """출하 확정. **승인 권한이 없으면 403** 이고, 확정 시각과 승인자를 남긴다(G-24)."""
     import conn
     form = await request.form()
-    csrf.require(request, form.get(csrf.FORM_FIELD))     # 핸들러 첫 줄 (contracts §5 · G-26)
+    csrf.require(request, csrf.token_of(request, form))  # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3 = guard(request, "MES-TD3-016", approve=True)
+    shipment_id = _int_field(form, "shipment_id")
 
     sh = conn.q1(
         "select SHIPMENT_ID, SHIPMENT_NO, SHIP_DT, DUE_DT from SHP_SHIPMENTS where SHIPMENT_ID = %s",

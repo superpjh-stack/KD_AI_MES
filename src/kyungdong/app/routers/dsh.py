@@ -143,13 +143,14 @@ def process_names() -> dict[str, str]:
 def collection_status() -> dict[str, Any]:
     """수집 중단 판정 **정본** — `kyungdong.ingest.collector.status()` 한 벌뿐이다.
 
-    **DEF-QA2-002 · §10-16.** 전에는 이 파일이 `anchor() - max(COLLECT_DT)` 로 따로 판정해서
-    같은 DB·같은 시각에 `collector.status()` 와 **반대 결론**을 냈다. 판정을 복제하지 않는다 —
-    화면은 정본 함수를 부르고 `devices[].notice` 문구를 **그대로** 띄운다(개발3 공표 시그니처).
+    **DEF-QA2-002 · §10-16.** 전에는 이 파일이 시간 앵커에서 마지막 수집시각을 빼서 따로
+    판정했고, 같은 DB·같은 시각에 `collector.status()` 와 **반대 결론**을 냈다.
+    판정도 임계값도 여기서 다시 읽지 않는다 — 화면은 정본 함수를 부르고
+    `devices[].notice` 문구를 **그대로** 띄운다(개발3 공표 시그니처).
 
-    기준선은 **실시각**이다(DEF-QA2-001). 수집이 살아 있는지를 묻는 물음이므로 시간 앵커
-    (`clock.anchor()` — 시드·시뮬레이터의 기준일, §10-3)를 쓰면 운영 시각에서 `COLLECT_DT > anchor`
-    라 경과가 **항상 음수**가 되어 `INGEST_STALE_SEC` 를 넘을 수가 없었다(QA2 실측 −108,426초).
+    기준선은 **실시각**이다(DEF-QA2-001). 수집이 살아 있는지를 묻는 물음이라, 시드·시뮬레이터의
+    생성 기준일(§10-3)로 재면 운영 수집에서 경과가 **항상 음수**가 되어 임계를 넘을 수 없었다
+    (QA2 실측 −108,426초).
     """
     from ...ingest import collector
     return collector.status()

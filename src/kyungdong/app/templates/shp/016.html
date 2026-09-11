@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
-{% from "_macros.html" import csrf_field %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}

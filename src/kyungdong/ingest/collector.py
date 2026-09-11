@@ -265,9 +265,12 @@ def resend(device_id: int | None = None) -> dict[str, Any]:
 #   · `--realtime` 수집: 마지막 수집이 곧 지금이므로 중단이 아니다.
 # 앵커를 섞는 이유는 앵커가 **미래**로 발급된 창에서도 같은 답을 내기 위해서다.
 def stale_reference(now: datetime | None = None) -> datetime:
-    """중단 판정의 기준 시각. **이 함수 밖에서 기준을 다시 정하지 않는다.**"""
+    """중단 판정의 기준 시각. **이 함수 밖에서 기준을 다시 정하지 않는다.**
+
+    실시각은 `clock.real_now()`(DB 시계) 하나만 읽는다 — 파이썬 시계를 따로 보지 않는다(§10-3).
+    """
     from ..app.util import clock
-    real = now or datetime.now()
+    real = now or clock.real_now()
     try:
         return max(real, clock.anchor())
     except RuntimeError:

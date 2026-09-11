@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from ...cad import inventory as cad_inventory
@@ -21,7 +21,7 @@ from ...ml import datasets as ml_datasets
 from ...ml import registry as ml_registry
 from .. import design, nav, rbac
 from ..templating import render
-from ..util import http
+from ..util import csrf, http
 from ..util.audit import audit
 
 import conn  # noqa: E402  (kyungdong.cad 가 db 경로를 붙인 뒤에 들어온다)
@@ -128,7 +128,7 @@ async def cad_analysis(request: Request):
         _row([i, r["drawing_no"], r["project_no"] or http.undetermined("D-03"), r["file_type"],
               r["analysis_status"], r["objects"] or "-",
               r["file_mtime"].date() if r["file_mtime"] else ""],
-             link=f"/prc/024?lot={r['project_no']}" if r["project_no"] else None, link_index=2)
+             link=f"/prc/024?project={r['project_no']}" if r["project_no"] else None, link_index=2)
         for i, r in enumerate(rows, 1)
     ]
     try:
@@ -200,11 +200,39 @@ async def object_reviews(request: Request):
     )
 
 
+def _form_int(form: Any, name: str) -> int:
+    """필수 정수 폼 값. 없거나 숫자가 아니면 **422** (§2.5 validation)."""
+    raw = str(form.get(name) or "").strip()
+    if not raw:
+        raise http.fail("validation", f"필수값 누락: {name}")
+    try:
+        return int(raw)
+    except ValueError:
+        raise http.fail("validation", f"{name} 은 정수여야 한다: {raw!r}") from None
+
+
+def _form_str(form: Any, name: str, *, required: bool = False) -> str:
+    raw = str(form.get(name) or "").strip()
+    if required and not raw:
+        raise http.fail("validation", f"필수값 누락: {name}")
+    return raw
+
+
 @router.post("/est/011/review")
-async def object_review(request: Request, object_id: int = Form(...), result: str = Form(...),
-                        before: str = Form(""), after: str = Form(""), comment: str = Form("")):
-    """**`CONFIRM_YN` 을 바꾸는 유일한 HTTP 경로** (G-24). 승인 권한 없으면 403."""
+async def object_review(request: Request):
+    """**`CONFIRM_YN` 을 바꾸는 유일한 HTTP 경로** (G-24). 승인 권한 없으면 403.
+
+    `Form(...)` 을 시그니처에 두면 FastAPI 가 본문보다 먼저 파싱해서 토큰 없는 요청이
+    403 이 아니라 422 를 받는다 — 검사 순서는 **CSRF → 권한 → 입력값** 이다(계약 §4.0).
+    """
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, _td3, role = _guard(request, "MES-TD3-011")
+    object_id = _form_int(form, "object_id")
+    result = _form_str(form, "result", required=True)
+    before = _form_str(form, "before")
+    after = _form_str(form, "after")
+    comment = _form_str(form, "comment")
     user_id = _user_id(request)
     if user_id is None:
         raise http.fail("unauthenticated", "검토자 계정을 확인할 수 없다 — EST_OBJECT_REVIEWS.REVIEWER_ID 는 필수다")
@@ -238,7 +266,7 @@ async def quotations(request: Request):
     grid = [_row([i, r["quote_no"], r["project_no"], r["calc_method"],
                   f"{int(r['total_amount']):,}" if r["total_amount"] is not None else "",
                   r["confidence_score"], r["quote_status"]],
-                 link=f"/prc/024?lot={r['project_no']}", link_index=2)
+                 link=f"/prc/024?project={r['project_no']}", link_index=2)
             for i, r in enumerate(rows, 1)]
     counts = {
         "cost_rates": _n("select count(*) as n from EST_COST_RATES where USE_YN = 'Y'"),
@@ -261,9 +289,12 @@ async def quotations(request: Request):
 
 
 @router.post("/est/012/confirm")
-async def confirm_quote(request: Request, quote_id: int = Form(...)):
+async def confirm_quote(request: Request):
     """견적 확정 — **승인 권한이 없으면 403**, 승인 전 확정은 422 (G-24 · §2.5)."""
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, _td3, role = _guard(request, "MES-TD3-012")
+    quote_id = _form_int(form, "quote_id")
     if not rbac.can_approve(role, EST_AREA):
         raise http.fail("forbidden", f"{EST_AREA} 승인 권한 없음 — 견적을 확정할 수 없다 (G-24)")
     row = conn.q1("select QUOTE_ID, QUOTE_STATUS from EST_QUOTATIONS where QUOTE_ID = %s", (quote_id,))
@@ -300,7 +331,7 @@ async def boms(request: Request):
         f"{where}order by b.BOM_ID limit %s offset %s", [*params, size, off])
     grid = [_row([i, r["bom_no"], r["project_no"], r["gen_method"], r["bom_version"],
                   r["accuracy_rate"], r["confirm_yn"]],
-                 link=f"/prc/024?lot={r['project_no']}", link_index=2)
+                 link=f"/prc/024?project={r['project_no']}", link_index=2)
             for i, r in enumerate(rows, 1)]
     counts = {
         "item_codes": _n("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = '품목' and USE_YN='Y'"),
@@ -324,9 +355,12 @@ async def boms(request: Request):
 
 
 @router.post("/est/013/confirm")
-async def confirm_bom(request: Request, bom_id: int = Form(...)):
+async def confirm_bom(request: Request):
     """BOM 확정 — **승인 권한이 없으면 403** (G-24)."""
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, _td3, role = _guard(request, "MES-TD3-013")
+    bom_id = _form_int(form, "bom_id")
     if not rbac.can_approve(role, EST_AREA):
         raise http.fail("forbidden", f"{EST_AREA} 승인 권한 없음 — BOM 을 확정할 수 없다 (G-24)")
     row = conn.q1("select BOM_ID, CYCLE_CHECK_RESULT from EST_BOM_HEADERS where BOM_ID = %s", (bom_id,))
@@ -359,9 +393,50 @@ async def ml_analysis(request: Request):
         notices=[], readiness=ml_registry.readiness(),
         actions={"학습 실행": "이번 회전 범위 밖 — 학습이 있는 회전은 단독 기동 (§10-2)",
                  "성능 비교": "학습 이력 0건 — 비교할 것이 없다",
-                 "배포": "검증된 모델이 없다",
+                 "배포": "아래 '배포·롤백' 카드에서 한다 (G-25)",
                  "엑셀": "다운로드는 권한 통제 대상 (9.2 ①)"},
+        models=ml_registry.models(), deploy_note=_deploy_note(),
+        can_approve=rbac.can_approve(role, EST_AREA),
     )
+
+
+def _deploy_note() -> str:
+    """배포·롤백 카드의 상태 문구. **0건이면 0건이라고 말한다** (G-11)."""
+    rows = ml_registry.models()
+    if not rows:
+        return (http.not_collected("D-04") +
+                " — 학습을 실행하지 않아 EST_ML_MODELS 가 0건이다. 배포·롤백 경로는 있지만 "
+                "되돌릴 버전이 없다(422).")
+    names = sorted({r["model_name"] for r in rows})
+    out = []
+    for name in names:
+        cur = ml_registry.deployed_model(name)
+        prev = ml_registry.previous_version(name)
+        out.append(f"{name}: 배포 {cur['model_version'] if cur else '없음'} · "
+                   f"직전 {prev['model_version'] if prev else '없음'}")
+    return " / ".join(out)
+
+
+@router.post("/est/014/deploy")
+async def deploy_model(request: Request):
+    """모델 **배포 · 직전 버전 롤백** (G-25 MLOps).
+
+    승인 권한이 없으면 **403**. 되돌릴 버전이 없으면 **422** — 없는데 성공한 척하지 않는다.
+    """
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
+    screen, _td3, role = _guard(request, "MES-TD3-014")
+    if not rbac.can_approve(role, EST_AREA):
+        raise http.fail("forbidden", f"{EST_AREA} 승인 권한 없음 — 모델을 배포·롤백할 수 없다 (G-24)")
+    action = _form_str(form, "action", required=True)
+    if action == "롤백":
+        out = ml_registry.rollback(_form_str(form, "model_name", required=True))
+    elif action == "배포":
+        out = ml_registry.deploy(_form_int(form, "model_id"))
+    else:
+        raise http.fail("validation", "action 은 배포 또는 롤백이다")
+    audit(request, screen.id, f"모델{action}:{out.get('model_version')}", log_type="변경")
+    return RedirectResponse("/est/014", status_code=303)
 
 
 # ── 015 영향요인분석 ──────────────────────────────────────────────────────

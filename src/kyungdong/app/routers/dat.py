@@ -96,6 +96,26 @@ async def integration(request: Request):
                  g["result_code"], val(g["error_msg"], "D-06")]
                 for i, g in enumerate(logs, 1)]
 
+    # ── 인터페이스 연계 상태 (MES-TD4-046~049) ──────────────────────────
+    # 프로그램 49 중 **화면이 없는 4건**이다. `contracts/api-contract.md` §3 이
+    # "연계 상태 조회는 /dat/033" 이라고 공표했는데 화면에 없었다 — G-05 FAIL 사유(DEF-QA1-001).
+    # 매핑은 `DAT_SOURCES.INTERFACE_CODE` 가 정본이다. 여기서 새로 짓지 않는다.
+    ifaces = conn.q(
+        "select s.INTERFACE_CODE as code, "
+        "       string_agg(distinct s.SOURCE_NAME, ' · ') as sources, "
+        "       string_agg(distinct s.IF_METHOD, ' · ') as methods, "
+        "       count(distinct j.JOB_ID) as jobs, max(g.START_DT) as last_dt, "
+        "       (array_agg(g.RESULT_CODE order by g.START_DT desc nulls last))[1] as last_result "
+        "from DAT_SOURCES s "
+        "left join DAT_INTEGRATION_JOBS j on j.SOURCE_ID = s.SOURCE_ID "
+        "left join DAT_JOB_LOGS g on g.JOB_ID = j.JOB_ID "
+        "where s.INTERFACE_CODE is not null "
+        "group by s.INTERFACE_CODE order by s.INTERFACE_CODE")
+    iface_rows = [[str(i), r["code"], (design.program(r["code"]) or {}).get("name", "")
+                   or undetermined("D-01"), r["sources"], r["methods"], str(r["jobs"]),
+                   dt(r["last_dt"], "D-06"), val(r["last_result"], "D-06")]
+                  for i, r in enumerate(ifaces, 1)]
+
     checks = conn.q(
         "select CHECK_AXIS, TARGET_DESC, TOTAL_CNT, VALID_CNT, ACHIEVE_RATE, JUDGE_RESULT "
         "from DAT_QUALITY_CHECKS order by CHECKED_DT desc limit 10")
@@ -126,6 +146,14 @@ async def integration(request: Request):
                   "text": "ERP 연계 대상·실사용 범위가 사업계획서 안에서 상충한다 (D-07) — "
                           "Excel 적재(/inv/007)가 정식 입력 경로다"}],
         panels=[
+            {"title": "인터페이스 연계 상태 (MES-TD4-046~049 · 화면 없는 프로그램 4건)",
+             "columns": ["No", "인터페이스 ID", "인터페이스명", "수집원", "연계 방식",
+                         "통합작업", "최근 실행", "최근 결과"],
+             "rows": iface_rows,
+             "empty_notice": http.not_collected("D-07") +
+             " — DAT_SOURCES.INTERFACE_CODE 가 비어 있다. `uv run python db/seed_dev1.py`.",
+             "note": "매핑 정본은 DAT_SOURCES.INTERFACE_CODE 다 (api-contract §3 · G-05). "
+                     "ERP(046) 실사용 범위는 사업계획서 안에서 상충한다 (D-07)."},
             {"title": "실행 로그 (DAT_JOB_LOGS)",
              "columns": ["No", "작업명", "시작", "종료", "처리 건수", "실패 건수", "결과", "오류 메시지"],
              "rows": log_rows,

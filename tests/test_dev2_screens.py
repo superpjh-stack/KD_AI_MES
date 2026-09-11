@@ -263,11 +263,12 @@ def test_G12_수집중단_배지가_운영시각에서_뜬다():
     DEF-QA2-001: 전에는 `anchor() - last_dt` 라 실시각 수집이면 경과가 항상 음수여서
     배지가 **구조적으로** 못 떴다(QA2 실측 −108,426초). 이제 기준은 실시각이다.
     """
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     import conn
     from kyungdong.app.routers import dsh
     from kyungdong.app.settings import settings
+    from kyungdong.app.util import clock
 
     stale_sec = settings().h("INGEST_STALE_SEC").as_int()
     marks = _ingest_marks()
@@ -279,19 +280,21 @@ def test_G12_수집중단_배지가_운영시각에서_뜬다():
             assert any("미수집" in t for t in texts), texts
             assert not any("수집 중단" in t for t in texts), texts
 
-        # ② N건 · 신선 — 방금 들어온 수집은 중단이 아니다 (실시각 기준)
-        _ingest_at(datetime.now() - timedelta(seconds=1))
-        fresh = [b["text"] for b in dsh.collection_badges()]
-        laser = [t for t in fresh if "레이저커팅기" in t]
-        assert not any("수집 중단" in t for t in laser), fresh
-
-        # ③ N건 · 중단 — **운영 시각**으로 임계를 넘기면 배지가 뜬다
-        old = datetime.now() - timedelta(seconds=stale_sec * 5)
+        # ② N건 · 중단 — **운영 시각**으로 임계를 넘기면 배지가 뜬다
+        #    중단(오래된 것) → 신선(방금) 순서로 잰다. 판정은 `max(COLLECT_DT)` 이라
+        #    신선한 배치를 먼저 넣으면 뒤에 넣은 오래된 배치를 덮어 가린다(회전 7 실측).
+        old = clock.real_now() - timedelta(seconds=stale_sec * 5)
         _ingest_at(old)
         stopped = [b["text"] for b in dsh.collection_badges()]
         hit = [t for t in stopped if "수집 중단" in t]
         assert hit, f"실시각 {stale_sec * 5}초 전이 마지막 수집인데 배지가 없다: {stopped}"
         assert old.strftime("%H:%M:%S") in " ".join(hit), hit
+
+        # ③ N건 · 신선 — 방금 들어온 수집은 중단이 아니다 (실시각 기준)
+        _ingest_at(clock.real_now() - timedelta(seconds=1))
+        fresh = [b["text"] for b in dsh.collection_badges()]
+        laser = [t for t in fresh if "레이저커팅기" in t]
+        assert not any("수집 중단" in t for t in laser), fresh
     finally:
         _ingest_rollback(marks)
 
@@ -344,7 +347,8 @@ def test_G26_쓰기_폼에_CSRF_필드가_있다():
         body = (TEMPLATE_DIR / rel).read_text()
         forms = body.count('method="post"')
         assert forms and body.count("{{ csrf_field() }}") == forms, rel
-        assert '{% from "_macros.html" import csrf_field %}' in body, rel
+        # `with context` 가 없으면 매크로가 `csrf_token` 을 못 봐 `value=""` 가 렌더된다(회전 7 실측)
+        assert '{% from "_macros.html" import csrf_field with context %}' in body, rel
 
 
 def test_G26_핸들러_첫_줄이_토큰을_검증한다():
@@ -359,7 +363,6 @@ def test_G26_토큰이_없으면_403_있으면_통과한다():
     import os
 
     from kyungdong.app.settings import settings
-    from kyungdong.app.util import csrf
 
     body = {"work_order_id": 1, "process_code": "P50",
             "start_dt": "2026-08-18 08:30", "good_qty": 1, "defect_qty": 0}
@@ -372,8 +375,12 @@ def test_G26_토큰이_없으면_403_있으면_통과한다():
         c = _client("PRODUCTION")
         for path in CSRF_POSTS:
             assert c.post(path, data=body).status_code == 403, f"{path}: 토큰 없이 통과했다"
-        token = csrf.issue(type("R", (), {"state": type("S", (), {})(), "cookies": {}})())
-        r = c.post("/prc/021", data={**body, "_csrf": token})
+        # 유효 토큰은 **화면이 발급한 것**이다 — 토큰을 밖에서 지어내면 바인딩이 달라 어차피 막힌다.
+        # (그게 CSRF 의 목적이다. 여기서는 브라우저가 하는 그대로 폼에서 꺼내 쓴다.)
+        page = c.get("/prc/021")
+        token = re.search(r'name="_csrf" value="([^"]+)"', page.text)
+        assert token, "화면 폼에 CSRF 토큰이 렌더되지 않았다"
+        r = c.post("/prc/021", data={**body, "_csrf": token.group(1)})
         assert r.status_code != 403, f"유효 토큰인데 403 이다: {r.text[:300]}"
     finally:
         os.environ["KYUNGDONG_CSRF_ENFORCE"] = "0"

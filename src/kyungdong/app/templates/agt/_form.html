@@ -2,6 +2,7 @@
    폐쇄형이다. 외부 검색 0. 근거 0건이면 LLM 을 부르지 않는다.
    AI 산출값은 신뢰도와 근거를 함께 표시한다(TD3 layout_rules 'AI 결과 표기'). #}
 {% extends "base.html" %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -18,7 +19,7 @@
 
 <div class="card">
   <h2>질의</h2>
-  <form method="post" action="{{ screen.path }}">
+  <form method="post" action="{{ screen.path }}">{{ csrf_field() }}
     <div class="tablewrap">
       <table>
         <thead><tr>{% for f in mockup.search_fields %}<th>{{ f }}</th>{% endfor %}</tr></thead>

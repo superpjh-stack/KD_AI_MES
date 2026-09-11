@@ -32,7 +32,7 @@ import conn                                              # noqa: E402
 from . import design                                     # noqa: E402
 from .settings import settings                           # noqa: E402
 from .templating import render                           # noqa: E402
-from .util import csrf, http, ratelimit, session         # noqa: E402
+from .util import clock, csrf, http, ratelimit, session  # noqa: E402
 from .util.audit import RESULT_ERR, RESULT_OK, audit     # noqa: E402
 
 router = APIRouter()
@@ -97,8 +97,7 @@ def password_age_notice(pwd_changed_dt: Any) -> str:
     cycle = settings().h("PASSWORD_CHANGE_CYCLE_DAYS")
     if pwd_changed_dt is None:
         return f"비밀번호 최종 변경일이 없다 — 변경을 권고한다 (주기 {cycle.value}일 {cycle.badge})"
-    from datetime import datetime
-    days = (datetime.now() - pwd_changed_dt).days
+    days = (clock.real_now() - pwd_changed_dt).days
     if days >= cycle.as_int():
         return (f"비밀번호를 바꾼 지 {days}일 지났다 — 변경 주기 {cycle.value}일 초과 "
                 f"{cycle.badge}")

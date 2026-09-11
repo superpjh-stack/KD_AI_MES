@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from ...agent import prompts, retrieval, service, tools
@@ -22,8 +22,8 @@ from ...ingest import collector
 from .. import design, nav, rbac
 from ..settings import settings
 from ..templating import render
-from ..util import http
-from ..util.audit import audit
+from ..util import csrf, http
+from ..util.audit import RESULT_ERR, audit
 
 import conn  # noqa: E402
 
@@ -135,8 +135,26 @@ def _role(request: Request) -> str:
 
 def _ask(request: Request, sid: str, filters: dict[str, str]) -> service.Answer:
     agent_type, qi = AGENTS[sid]
-    return service.ask(filters.get(f"q{qi}", ""), agent_type=agent_type,
-                       user_id=_user_id(request), role_code=_role(request))
+    return ask_audited(request, sid, filters.get(f"q{qi}", ""), agent_type)
+
+
+def ask_audited(request: Request, screen_id: str | None, question: str,
+                agent_type: str) -> service.Answer:
+    """질의 1건 = `SYS_ACCESS_LOGS` 'API' 1행. **성공·실패 갈래를 모두** 남긴다.
+
+    전에는 `audit()` 이 호출 **뒤**에 있어 LLM 미구성 501 갈래가 기록을 건너뛰었다 —
+    감사가 성공한 질의만 보게 된다(G-29 실측 '기록 0 행'). 감사는 여기 한 곳에서 한다.
+    """
+    try:
+        answer = service.ask(question, agent_type=agent_type,
+                             user_id=_user_id(request), role_code=_role(request))
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+        audit(request, screen_id, "AI질의", log_type="API", result=RESULT_ERR,
+              error=f"{e.status_code} {detail.get('message', '')}")
+        raise
+    audit(request, screen_id, "AI질의", log_type="API")
+    return answer
 
 
 # ── 009 입고 AI Agent · 020 출하 AI Agent · 038 통합 AI질의 ────────────────
@@ -150,11 +168,12 @@ async def inbound_agent(request: Request):
 
 @router.post("/inv/009")
 async def inbound_agent_ask(request: Request):
+    raw = await request.form()
+    csrf.require(request, csrf.token_of(request, raw))    # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3, _ = _guard(request, "MES-TD3-009")
-    form = dict(await request.form())
+    form = dict(raw)
     f = _filters(request, td3["mockup"]["search_fields"], form)
     answer = _ask(request, "MES-TD3-009", f)
-    audit(request, screen.id, "AI질의", log_type="API")
     return _render_agent(request, "MES-TD3-009", answer, f)
 
 
@@ -168,11 +187,12 @@ async def outbound_agent(request: Request):
 
 @router.post("/shp/020")
 async def outbound_agent_ask(request: Request):
+    raw = await request.form()
+    csrf.require(request, csrf.token_of(request, raw))    # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3, _ = _guard(request, "MES-TD3-020")
-    form = dict(await request.form())
+    form = dict(raw)
     f = _filters(request, td3["mockup"]["search_fields"], form)
     answer = _ask(request, "MES-TD3-020", f)
-    audit(request, screen.id, "AI질의", log_type="API")
     return _render_agent(request, "MES-TD3-020", answer, f)
 
 
@@ -186,11 +206,12 @@ async def unified_agent(request: Request):
 
 @router.post("/agt/038")
 async def unified_agent_ask(request: Request):
+    raw = await request.form()
+    csrf.require(request, csrf.token_of(request, raw))    # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3, _ = _guard(request, "MES-TD3-038")
-    form = dict(await request.form())
+    form = dict(raw)
     f = _filters(request, td3["mockup"]["search_fields"], form)
     answer = _ask(request, "MES-TD3-038", f)
-    audit(request, screen.id, "AI질의", log_type="API")
     return _render_agent(request, "MES-TD3-038", answer, f)
 
 
@@ -333,13 +354,18 @@ async def query_history(request: Request):
 
 # ── Agent API (contracts/api-contract.md §5) ──────────────────────────────
 @router.post("/api/agent/query")
-async def api_query(request: Request, question: str = Form(...),
-                    agent_type: str = Form("통합")):
+async def api_query(request: Request):
+    """Agent 질의 API. 폼 본문이므로 `_csrf` 필드로, 헤더 클라이언트는 `X-CSRF-Token` 으로 싣는다."""
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
+    question = str(form.get("question") or "").strip()
+    agent_type = str(form.get("agent_type") or "통합").strip()
+    if not question:
+        raise http.fail("validation", "필수값 누락: question")
     role = getattr(request.state, "role_code", "") or ""
     if not rbac.can_read(role, AGENT_AREA):
         raise http.fail("forbidden", f"{AGENT_AREA} 조회 권한 없음")
-    a = service.ask(question, agent_type=agent_type,
-                    user_id=_user_id(request), role_code=role)
+    a = ask_audited(request, None, question, agent_type)
     return {
         "agent_type": a.agent_type, "grounded": a.grounded, "mode": a.mode,
         "confidence": a.confidence, "threshold": a.threshold, "response_ms": a.response_ms,
@@ -358,11 +384,14 @@ async def api_history(request: Request, agent_type: str | None = None, limit: in
 
 
 @router.post("/api/agent/recommend/{reco_id}/adopt")
-async def api_adopt(request: Request, reco_id: int, decision: str = Form("승인")):
+async def api_adopt(request: Request, reco_id: int):
     """추천 채택 — **승인 권한이 없으면 403** (G-24).
 
     TD5 에 `ADOPT_YN`·`ADOPT_BY` 컬럼이 없다. `REVIEW_STATUS`·`REVIEWER_ID` 로 기록한다(D-302).
     """
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
+    decision = str(form.get("decision") or "승인").strip()
     role = getattr(request.state, "role_code", "") or ""
     if not rbac.can_approve(role, AGENT_AREA):
         raise http.fail("forbidden", f"{AGENT_AREA} 승인 권한 없음 — 추천을 반영할 수 없다 (G-24)")

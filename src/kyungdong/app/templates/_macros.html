@@ -1,5 +1,9 @@
 {# 공용 매크로 — 아키텍트 소유. 개발 3명이 같은 방식을 쓴다. #}
 
 {# CSRF 토큰 필드 (D-60 · D-92). **쓰기 폼 전부에 넣는다.**
-   핸들러 첫 줄에서 `csrf.require(request, form.get("_csrf"))` 로 받는다. #}
+   핸들러 첫 줄에서 `csrf.require(request, form.get("_csrf"))` 로 받는다.
+
+   **`with context` 로 import 해야 한다.** Jinja 매크로는 기본적으로 부르는 쪽 컨텍스트를 못 본다 —
+   `{% from "_macros.html" import csrf_field %}` 만 쓰면 `csrf_token` 이 정의되지 않아
+   `value=""` 가 렌더된다(회전 7 실측). 토큰이 빈 채로 ENFORCE 를 켜면 쓰기 전부가 403 이다. #}
 {% macro csrf_field() %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endmacro %}

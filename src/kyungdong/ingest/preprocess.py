@@ -36,7 +36,7 @@ from typing import Any, Sequence
 
 import conn
 
-from ..app.util import http
+from ..app.util import clock, http
 from . import tags
 
 # ── 판정 상수 ────────────────────────────────────────────────────────────
@@ -229,9 +229,9 @@ def impute_missing(*, equip_code: str | None = None, tag_name: str | None = None
     `QUALITY_FLAG='결측'` 은 그대로 둔다 — 원천이 결측이었다는 사실이고 지우면 추적이 끊긴다(D-314).
     같은 행을 두 번 보정하지 않는다(`MEASURE_VALUE is null` 조건이 곧 멱등 조건이다).
     """
-    res = PreprocessResult(started=datetime.now())
+    res = PreprocessResult(started=clock.real_now())
     if not rule_on(RULE_IMPUTE):
-        res.ended = datetime.now()
+        res.ended = clock.real_now()
         return res
     where, params = ["QUALITY_FLAG = '결측'", "MEASURE_VALUE is null"], []
     if equip_code:
@@ -257,7 +257,7 @@ def impute_missing(*, equip_code: str | None = None, tag_name: str | None = None
             cur.execute("update DAT_TIMESERIES set MEASURE_VALUE = %s where TS_ID = %s",
                         (round(value, 4), row["ts_id"]))
             res.imputed += 1
-    res.ended = datetime.now()
+    res.ended = clock.real_now()
     return res
 
 

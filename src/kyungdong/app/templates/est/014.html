@@ -1,4 +1,5 @@
 {% extends "est/_screen.html" %}
+{% from "_macros.html" import csrf_field with context %}
 {% block extra %}
 <div class="card">
   <h2>학습 준비 상태 — {{ readiness.status }}</h2>
@@ -31,5 +32,37 @@
     </table>
   </div>
   <p class="meta">Train / Validation / Test 분리 기준은 <code>DAT_DATASET_SPLITS</code> 가 정본이다(2.7.4 ⓸).</p>
+</div>
+
+<div class="card">
+  <h2>배포 · 롤백 (MLOps) — <span class="badge notice">직전 버전 복귀 경로</span></h2>
+  <p class="meta">{{ deploy_note }}</p>
+  <form method="post" action="/est/014/deploy">{{ csrf_field() }}
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>모델명</th><th>버전</th><th>배포 상태</th><th>배포 일시</th><th>선택</th></tr></thead>
+        <tbody>
+          {% for m in models %}
+          <tr>
+            <td>{{ m.model_name }}</td><td>{{ m.model_version }}</td>
+            <td>{{ m.deploy_status }}</td><td>{{ m.deployed_dt or '—' }}</td>
+            <td><input type="radio" name="model_id" value="{{ m.model_id }}"
+                       aria-label="{{ m.model_name }} {{ m.model_version }}"></td>
+          </tr>
+          {% else %}
+          <tr><td class="empty" colspan="5">미수집 (D-04) — 학습을 실행하지 않았다</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <label for="ml-name">롤백할 모델명</label>
+      <input id="ml-name" name="model_name" value="" aria-label="롤백할 모델명">
+      <button type="submit" name="action" value="배포" {% if not can_approve %}disabled{% endif %}>배포</button>
+      <button type="submit" name="action" value="롤백" {% if not can_approve %}disabled{% endif %}>롤백</button>
+    </p>
+    <p class="meta">롤백은 지금 배포본을 `검증` 으로 내리고 직전 버전을 `배포` 로 올린다 —
+      되돌릴 버전이 없으면 422 다. 승인 권한이 없으면 403 이다 (G-24 · G-25).</p>
+  </form>
 </div>
 {% endblock %}

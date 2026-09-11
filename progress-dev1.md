@@ -236,3 +236,67 @@ progress-dev1.md · decisions-dev1.md
 
 `app/main.py` 는 건드리지 않았다. 라우터 등록은 `SCREENS` 규약만 썼다.
 `app/static/app.css` · `db/{schema.sql,seed.py,conn.py}` · `app/util/*` 도 건드리지 않았다.
+
+---
+
+# 웨이브 D 마무리 (회전 7 · 단독) — 인증·감사·CSRF 꼬리
+
+> 개발 3명이 600초 스톨로 중단된 뒤 남은 꼬리만 끝냈다. **이미 된 것은 다시 하지 않았다** —
+> `app/auth.py`(287줄 · POST /login 200+세션쿠키 / 오답 401) · `session.create` · `ratelimit` 7곳은
+> 그대로 두고 확인만 했다.
+
+## 한 것 (실측)
+
+### 1. G-05 `/dat/033` 인터페이스 연계 상태 4/4 — **FAIL → PASS** (DEF-QA1-001)
+`routers/dat.py` 에 패널 하나를 더했다. 매핑은 **새로 짓지 않고** `DAT_SOURCES.INTERFACE_CODE`
+(시드가 이미 046·047·047·048·049 로 채워 둔 것)를 그대로 읽는다.
+
+```
+uv run python tools/check_trace.py
+  G-05 PASS — 프로그램 49 = 화면 45 + 인터페이스 4 · /dat/033 연계 상태 4/4
+  노출 ['MES-TD4-046','MES-TD4-047','MES-TD4-048','MES-TD4-049'] · 누락 []
+```
+
+### 2. 권한 거부(403)가 감사에 남는다 — **G-29 PASS** (D-97 · DEF-QA3)
+근본 원인은 화면 16개가 아니라 **공용 가드 한 곳**이었고, 그 가드는 라우터가 아니라
+`app/main.py` 의 `_permission_denied()`(D-78) 였다. 이게 라우터 `guard()` **보다 먼저** 돌기 때문에
+`dsh.guard`/`bas.guard` 안의 `audit()` 은 **아예 도달하지 않았다** — QA3 실측 `오류` 0건의 진짜 원인이다.
+거부 기록을 그 한 곳에 넣었다. 화면마다 흩뿌리지 않았다(`test_G29_감사는_가드_한_곳에서만_부른다` 통과).
+
+### 3. 발급 비밀번호 URL 평문 — **0건**
+WIP 커밋이 이미 리다이렉트를 없애고 POST 응답 본문에 1회만 렌더하도록 고쳐 두었다.
+남아 있던 것은 QA 검사기 정규식 `issued=\{?raw` 가 **파이썬 키워드 인자**에 걸리는 오탐이었다.
+인자 이름을 `issued=` → `issued_password=` 로 바꿨다(이름 자체로도 더 정확하다).
+**QA 에게: 이 정규식은 URL 문자열만 보도록 좁히는 게 맞다.**
+
+```
+uv run python tools/check_security.py
+  발급 비밀번호가 **URL 쿼리스트링**으로 흐르는 곳: 없음
+  G-29 PASS — SYS_ACCESS_LOGS {'변경':1,'오류':1,'접속':45,'API':3} (미기록 []) · URL 평문 비밀번호 0
+```
+
+### 4. `_macros.html` CSRF 매크로가 **빈 토큰을 렌더하고 있었다** (숨어 있던 결함)
+`{% from "_macros.html" import csrf_field %}` 는 Jinja 기본값이 **컨텍스트 비전달**이라
+매크로가 `csrf_token` 을 보지 못하고 `value=""` 를 찍었다. 실측:
+
+```
+GET /prc/021 → ['_csrf" value=""']      # 고치기 전
+```
+
+토큰이 빈 채로 `CSRF_ENFORCE=1` 을 올렸다면 **쓰기 전부가 403** 이 됐을 것이다.
+`import ... with context` 로 고쳤다(login.html · bas/_list.html · shp/016.html · prc/021.html · agt/_form.html).
+
+## 못 한 것
+
+- **`KYUNGDONG_CSRF_ENFORCE` 는 올리지 못했다.** 사유는 `progress-dev3.md` 와 `.env.example` 에 실측으로 적었다.
+- `DEF-QA1-009`(`tests/test_dev1_flow.py:350~361` ORDER BY 없는 `[0]` 단언) · `DEF-QA1-011`(`/api/if/erp/*`)
+  는 **손대지 않았다.** 이번 꼬리 범위 밖이고, 011 은 계약상 "제안" 이라 위반이 아니다.
+
+## 검증 명령
+
+```
+make db-reset && uv run pytest -q          # QA 표지 외 실패 0
+uv run python tools/check_trace.py         # G-04 PASS · G-05 PASS
+uv run python tools/check_security.py      # G-27 PASS · G-28 PASS · G-29 PASS · G-30 PASS
+uv run python tools/gate.py                # PASS 16 · FAIL 5 · 차단 11
+```

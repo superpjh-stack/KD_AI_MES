@@ -50,7 +50,7 @@ async def users(request: Request):
     return _users_page(request)
 
 
-def _users_page(request: Request, issued: str = "", issued_for: str = ""):
+def _users_page(request: Request, issued_password: str = "", issued_for: str = ""):
     """발급 비밀번호는 **POST 응답 본문**으로만 흐른다 — URL 쿼리스트링에 싣지 않는다(D-118).
     쿼리스트링은 접속로그·프록시·브라우저 이력에 남는다(9.2 ① · G-29)."""
     sid = "MES-TD3-026"
@@ -91,9 +91,9 @@ def _users_page(request: Request, issued: str = "", issued_for: str = ""):
     locked = int(conn.q1("select count(*) as n from SYS_USERS where LOCK_YN='Y'")["n"])
     notices = [{"kind": "notice",
                 "text": "사용자명·연락처·이메일은 마스킹해서 표시한다 (G-29 · TD5 개인정보)"}]
-    if issued:
+    if issued_password:
         notices.insert(0, {"kind": "bad",
-                           "text": f"'{issued_for}' 발급 비밀번호 {issued} — "
+                           "text": f"'{issued_for}' 발급 비밀번호 {issued_password} — "
                                    "이 화면에만 1회 표시된다. 다시 볼 수 없다 (G-29)"})
 
     return screen_page(
@@ -157,8 +157,9 @@ async def users_save(request: Request):
         (v["login_id"], auth.hash_password(raw), v["user_name"],
          (f.get("dept_name") or "").strip() or None, rep,
          (f.get("phone_no") or "").strip() or None, (f.get("email") or "").strip() or None))
-    # 리다이렉트하지 않는다 — 리다이렉트하면 원문이 URL 로 흐른다(D-118).
-    return _users_page(request, issued=raw, issued_for=v["login_id"])
+    # 리다이렉트하지 않는다 — 리다이렉트하면 원문이 **URL 쿼리스트링**으로 흘러 브라우저 이력·
+    # Referer·프록시 로그에 남는다(D-118 · DEF-QA3 High). POST 응답 본문에 1회만 렌더한다.
+    return _users_page(request, issued_password=raw, issued_for=v["login_id"])
 
 
 # ═════════════════════════════════════════════════════════════════════════

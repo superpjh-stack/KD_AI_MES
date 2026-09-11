@@ -10,6 +10,7 @@ from typing import Any
 
 import conn
 
+from ..app.util import http
 from . import TRAINING_DEFERRED
 
 # 사업계획서 2.6 AI 성능목표 5종 — **목표치이고 달성값이 아니다**(D-22).
@@ -116,3 +117,76 @@ def readiness() -> dict[str, Any]:
         ],
         "targets": TARGETS,
     }
+
+
+# ── MLOps 배포·롤백 (G-25) ────────────────────────────────────────────────
+# TD5 `EST_ML_MODELS.DEPLOY_STATUS` 어휘 그대로. 어휘 밖 값을 쓰지 않는다.
+DEPLOY_STATUSES: tuple[str, ...] = ("학습중", "검증", "배포", "폐기")
+DEPLOYED, VALIDATED, RETIRED = "배포", "검증", "폐기"
+
+
+def deployed_model(model_name: str) -> dict[str, Any] | None:
+    """지금 배포 중인 버전. 모델명당 **하나만** 배포 상태다."""
+    return conn.q1(
+        "select MODEL_ID, MODEL_NAME, MODEL_VERSION, DEPLOY_STATUS, DEPLOYED_DT "
+        "from EST_ML_MODELS where MODEL_NAME = %s and DEPLOY_STATUS = %s "
+        "order by DEPLOYED_DT desc nulls last, MODEL_ID desc limit 1",
+        (model_name, DEPLOYED))
+
+
+def previous_version(model_name: str) -> dict[str, Any] | None:
+    """직전에 배포됐던 버전 — **롤백 대상**.
+
+    지금 배포 중인 것보다 `DEPLOYED_DT`(없으면 MODEL_ID)가 앞서고, 폐기되지 않은 것 중
+    가장 최근 것이다. 없으면 `None` — 되돌릴 곳이 없다는 사실을 그대로 돌려준다.
+    """
+    cur = deployed_model(model_name)
+    if cur is None:
+        return None
+    return conn.q1(
+        "select MODEL_ID, MODEL_NAME, MODEL_VERSION, DEPLOY_STATUS, DEPLOYED_DT, METRIC_JSON "
+        "from EST_ML_MODELS "
+        "where MODEL_NAME = %s and MODEL_ID <> %s and DEPLOY_STATUS <> %s "
+        "  and (DEPLOYED_DT is not null or DEPLOY_STATUS = %s) "
+        "order by DEPLOYED_DT desc nulls last, MODEL_ID desc limit 1",
+        (model_name, cur["model_id"], RETIRED, VALIDATED))
+
+
+def deploy(model_id: int) -> dict[str, Any]:
+    """한 버전을 배포한다. 같은 모델명의 다른 배포본은 **검증**으로 내린다 (동시 배포 금지)."""
+    row = conn.q1("select MODEL_ID, MODEL_NAME, MODEL_VERSION, DEPLOY_STATUS "
+                  "from EST_ML_MODELS where MODEL_ID = %s", (model_id,))
+    if row is None:
+        raise http.fail("validation", f"모델 {model_id} 가 없다")
+    with conn.tx() as cur:
+        cur.execute(
+            "update EST_ML_MODELS set DEPLOY_STATUS = %s, UPDATED_DT = now() "
+            "where MODEL_NAME = %s and MODEL_ID <> %s and DEPLOY_STATUS = %s",
+            (VALIDATED, row["model_name"], model_id, DEPLOYED))
+        demoted = cur.rowcount
+        cur.execute(
+            "update EST_ML_MODELS set DEPLOY_STATUS = %s, DEPLOYED_DT = now(), UPDATED_DT = now() "
+            "where MODEL_ID = %s", (DEPLOYED, model_id))
+    return {"model_id": model_id, "model_name": row["model_name"],
+            "model_version": row["model_version"], "deploy_status": DEPLOYED,
+            "demoted": demoted}
+
+
+def rollback(model_name: str) -> dict[str, Any]:
+    """**직전 버전으로 되돌린다** (G-25 MLOps 롤백 경로).
+
+    지금 배포본은 `검증` 으로 내리고 직전 버전을 `배포` 로 올린다. 이력을 지우지 않는다 —
+    어느 버전이 언제 배포됐는지가 `DEPLOY_STATUS` · `DEPLOYED_DT` 에 남아야 되돌린 사실도 남는다.
+    되돌릴 버전이 없으면 **422** 다. 없는데 성공한 척하지 않는다(§2.5).
+    """
+    cur_model = deployed_model(model_name)
+    if cur_model is None:
+        raise http.fail("validation", f"'{model_name}' 은 지금 배포 중인 버전이 없다 — 되돌릴 것이 없다")
+    prev = previous_version(model_name)
+    if prev is None:
+        raise http.fail("validation",
+                        f"'{model_name}' 의 직전 버전이 없다 — 되돌릴 곳이 없다 "
+                        f"(현재 {cur_model['model_version']} 하나뿐)")
+    out = deploy(int(prev["model_id"]))
+    return {**out, "rolled_back_from": cur_model["model_version"],
+            "rolled_back_to": prev["model_version"]}

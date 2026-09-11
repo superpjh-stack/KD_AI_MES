@@ -195,3 +195,135 @@ HTTP: `POST /api/agent/query` · `GET /api/agent/history` · `POST /api/agent/re
    두 시드 실행 사이에 다른 개발자 테스트가 `SYS_USERS` 를 만들어서다 — 개발3 테스트만 돌리면
    재현되지 않는다(아키텍트+개발3 244 passed). **동시 기동 중 관측**이라 §10-17 "판정 불가" 로 적는다.
    마감 시점 실측은 **546 passed** 다.
+
+---
+
+# 웨이브 D 마무리 (회전 7 · 단독) — 개발3 잔여 + CSRF 전 라우트 연결
+
+## 1. 프로젝트번호 링크 (DEF-QA1-004 · G-08 클릭 규약)
+
+`routers/est.py:131·241·303` 이 **프로젝트번호** 열을 `/prc/024?lot=` 로 걸고 있었다 → `?project=`.
+`/prc/024` 는 `lot` 과 `project` 를 다른 축으로 읽는다(개발2 `dsh.project_cell` 과 같은 규약).
+
+## 2. 수집 API 파싱 실패 500 → **422** (DEF-QA1-006 · 계약 §4.0)
+
+`/api/ingest/plc` 가 `await request.json()` 을 맨몸으로 불러 깨진 본문에 **500** 을 냈다.
+`json.JSONDecodeError`·`UnicodeDecodeError` 를 잡아 `http.fail("validation", ...)` = **422** 로 바꿨다.
+`try/except` 로 결과를 지어내지 않는다 — 사유를 응답에 그대로 적는다.
+
+## 3. CAD 수집 처리 건수 → `DAT_JOB_LOGS` (DEF-QA2-006) — **실측 확인**
+
+WIP 커밋이 이미 `cad/pipeline.import_inventory()` 끝에 `preprocess.log_job(JOB_CAD, ...)` 를 넣어 뒀다.
+동작을 실측했다:
+
+```
+pipeline.import_inventory(limit=30)
+  scanned 30 · registered 28 · excluded 2 · job_log_id 1
+  DAT_JOB_LOGS → {'job_name':'CAD 도면함 수집','process_cnt':28,'fail_cnt':2,'result_code':'부분성공'}
+preprocess.run() → job_log_id 2
+```
+
+`FAIL_CNT` 는 **정제 제외 건수**다(TD5 에 '제외 건수' 컬럼이 없다). 오류가 아니라는 사실을 `ERROR_MSG` 에 적는다.
+
+## 4. CAD 테스트 `skip` 제거 (DEF-QA2-010 · D-62 · §10-4) — **skip 0건**
+
+`tests/test_dev3_cad.py` 의 `pytest.skip` 3곳을 **0건 경로 명시 단언**으로 바꿨다.
+
+| 테스트 | 0건 경로에서 단언하는 것 |
+|---|---|
+| 분석 실행 501 | 도면 0건이면 `analyze(1)` 이 **422**, `EST_CAD_OBJECTS` 증가 0 |
+| 확정 객체 0 → Feature 0 | `build_features()` 가 0 을 돌려주고 `EST_CAD_FEATURES` 증가 0 |
+| 수집 로그 단계별 | 파일 0건이면 **로그도 0건** (있으면 시드가 런타임 표를 채운 것 — G-11) |
+
+```
+uv run pytest -q tests/test_dev3_cad.py    → 13 passed · skip 0
+grep -c "pytest.skip" tests/test_dev3_cad.py → 0
+```
+
+## 5. MLOps 롤백 경로 (G-25 FAIL 사유) — **코드 0곳 → 있음**
+
+`ml/registry.py` 에 `deployed_model()` · `previous_version()` · `deploy()` · `rollback()`,
+화면 경로로 `POST /est/014/deploy`(배포·롤백) + `est/014.html` 배포 카드.
+어휘는 TD5 `DEPLOY_STATUS` (학습중/검증/배포/폐기) 그대로다. 롤백은 지금 배포본을 `검증` 으로 내리고
+직전 버전을 `배포` 로 올린다 — **이력을 지우지 않는다.** 되돌릴 버전이 없으면 **422**(없는데 성공한 척 안 한다),
+승인 권한 없으면 **403**.
+
+임시 2버전으로 실측(넣고 되돌리고 지웠다):
+```
+deploy v1.0   → demoted 1
+현재 v1.0 · 직전 v0.9
+rollback      → rolled_back_from v1.0 → rolled_back_to v0.9
+결과 [('v0.9','배포'), ('v1.0','검증')]
+```
+
+**G-25 는 여전히 FAIL 이다.** 미충족이 5/5 → **4/5** 로 줄었고 남은 4(모델·학습·예측·Train/Val/Test 분할)는
+전부 **학습 미실시로 분모 0** = 차단 성격이다. `tools/check_ai.py` 가 G-25 를 `FAIL` 로 **하드코딩**하고 있어
+검사기가 갱신돼야 판정이 움직인다. **학습을 돌려 수치를 만들지 않았다**(§10-2 · 이번 회전 범위 밖).
+
+## 6. URL 평문 비밀번호 (`routers/sys.py`) — 0건. 자세한 건 `progress-dev1.md`.
+
+## 7. CSRF — **POST 31개 전부 연결 (31/31)**
+
+스톨 시점 15/27. 남아 있던 12개(`agt` 5 · `est` 3 · `ingest` 4)를 연결했고, 이번에 추가한
+`POST /est/014/deploy` 까지 31개다. 패턴은 §2 그대로 — **핸들러 첫 줄**.
+
+```python
+form = await request.form()
+csrf.require(request, csrf.token_of(request, form))   # 위반 시 403
+```
+
+`Form(...)` 시그니처는 **전부 걷어냈다.** FastAPI 가 본문을 핸들러보다 먼저 파싱해서
+토큰 없는 요청이 403 이 아니라 422 를 받기 때문이다(실측 재현). 검사 순서는 **CSRF → 권한 → 입력값**(계약 §4.0).
+
+### JSON·기계 API 는 헤더로 받는다
+`csrf.token_of(request, form)` 이 **폼 필드 `_csrf` → 헤더 `X-CSRF-Token`** 순으로 본다.
+`/api/ingest/plc` 는 폼이 아니라 JSON 본문이라 **헤더만** 쓴다.
+
+```
+POST 라우트 31 · csrf.require 31 · 누락 []
+uv run python tools/check_security.py  →  **CSRF 31/31**
+```
+
+## 못 한 것 — **`KYUNGDONG_CSRF_ENFORCE` 를 1 로 올리지 못했다**
+
+올리기 전에 쓰기 경로를 먼저 쟀다. **켜면 85건이 깨진다**(실측, 끈 상태 14건 — 전부 QA 표지):
+
+```
+make db-reset && KYUNGDONG_CSRF_ENFORCE=1 uv run pytest -q
+  FAILED/ERROR 85 건
+    test_dev1_flow 37 · test_qa1_rbac 11 · test_qa3_security 10 · test_qa1_errors 9
+    test_qa3_ai 5 · test_qa1_ui 4 · test_qa2_ingest 3 · test_dev2_screens 3 · test_dev2_chain 3
+```
+
+사유 둘 — **구현 결함이 아니다.**
+
+1. **테스트 하네스가 토큰을 싣지 않는다.** 브라우저 경로는 통과한다 —
+   화면이 발급한 토큰으로 `ENFORCE=1` 왕복을 실측했다(`test_G26_토큰이_없으면_403_있으면_통과한다`).
+   85건 중 **42건이 QA 소유 파일**(`tests/test_qa*.py`)이라 개발이 고칠 수 없다.
+   켜면 QA 가 CSRF 와 **무관한** 것(RBAC·오류계약·AI)을 못 재게 된다.
+2. **기계 클라이언트에 토큰 발급 경로가 없다.** `/api/ingest/plc` · `/api/cad/files` ·
+   `/api/docs/import` · `/api/ingest/gateway/resend` 는 Gateway·배치가 부른다.
+   세션이 없는 기계는 `X-CSRF-Token` 을 **받을 방법이 없다** — 지금 켜면 **PLC 수집이 죽는다.**
+   기계 자격증명(API 키·mTLS) 경로는 정본에 없다 → **새 결정이 필요하다.**
+
+그래서 `.env.example` 은 **0 으로 두고** 화면 상단 `CSRF 미적용 (D-60)` 배지도 그대로 뒀다 —
+조용히 꺼진 보안 장치를 만들지 않는다(G-30). 배지는 `ENFORCE` 를 1 로 올리면 자동으로 사라진다
+(`templating.render()` → `csrf_enforced` → `base.html:16`). 실측 근거는 `.env.example` 주석에 적었다.
+**G-26 은 이 이유로 FAIL 로 남는다.**
+
+## 건드리지 않은 것 (그대로가 정직하다)
+
+- **ML 학습** — G-14~G-19 `차단` 유지. 합성 라벨·합성 예측 **0건**.
+- **Feature 6종** — `cad/pipeline.py:38 BLOCKED_FEATURES` 5종 D-05 그대로. **G-13 은 `차단`이 정직한 끝**이고
+  `tools/check_ingest.py` 는 아직 `FAIL` 로 낸다(남은 결함이 이 1건뿐이다 — QA 갱신 대기).
+- **RAG 임계값 0.70** (DEF-QA3-008) · **G-08·09·10 분모 0** (D-56).
+
+## 검증 명령
+
+```
+make db-reset && uv run pytest -q                 # QA 표지 외 실패 0 (14 failed 전부 tests/test_qa*.py)
+uv run pytest -q tests/test_dev3_cad.py           # 13 passed · skip 0
+uv run python tools/check_ai.py                   # G-25 미충족 4/5 (롤백 경로 있음)
+uv run python tools/check_security.py             # CSRF 31/31 · G-29 PASS
+uv run python tools/gate.py                       # PASS 16 · FAIL 5 · 차단 11 · 미구현 0
+```

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -13,7 +14,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from ...agent import docs as agent_docs
 from ...ingest import collector
 from .. import rbac
-from ..util import http
+from ..util import csrf, http
 from ..util.audit import audit
 
 import conn  # noqa: E402
@@ -43,8 +44,14 @@ async def ingest_plc(request: Request) -> dict[str, Any]:
 
     body: `{"device_id": 1, "equip_code": "EQ10", "samples": [{"tag","value","collect_dt"}...]}`
     """
+    # 폼이 아니라 **JSON 본문**이다 — 토큰은 헤더 `X-CSRF-Token` 으로 받는다(§5 · G-26).
+    csrf.require(request, csrf.token_of(request))         # 핸들러 첫 줄 (contracts §5)
     _need_write(request, INGEST_AREA)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        # 본문 파싱 실패는 **422** 다 — 계약 §4.0. 500 을 내면 서버 결함처럼 보인다(DEF-QA1-006).
+        raise http.fail("validation", f"수집 payload 를 JSON 으로 읽지 못했다: {e}") from e
     if not isinstance(body, dict):
         raise http.fail("validation", "수집 payload 는 객체여야 한다")
     samples = collector.parse_samples(body.get("samples") or [])
@@ -66,9 +73,15 @@ async def ingest_status(request: Request) -> dict[str, Any]:
 
 
 @router.post("/api/ingest/gateway/resend")
-async def ingest_resend(request: Request, device_id: int | None = Form(None)) -> dict[str, Any]:
+async def ingest_resend(request: Request) -> dict[str, Any]:
     """Gateway 버퍼 재전송 — 최초 저장 순서대로, 유실 0."""
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
     _need_write(request, INGEST_AREA)
+    raw_device = str(form.get("device_id") or "").strip()
+    if raw_device and not raw_device.lstrip("-").isdigit():
+        raise http.fail("validation", f"device_id 는 정수여야 한다: {raw_device!r}")
+    device_id = int(raw_device) if raw_device else None
     out = collector.resend(device_id)
     audit(request, None, "Gateway재전송", log_type="API")
     return out
@@ -85,6 +98,8 @@ async def cad_upload(request: Request, file: UploadFile = File(...),
     """
     from ...cad import inventory as cad_inv
 
+    # multipart 업로드다 — 토큰은 폼 필드(`_csrf`) 또는 헤더로 받는다(§5 · G-26).
+    csrf.require(request, csrf.token_of(request, await request.form()))
     _need_write(request, CAD_AREA)
     raw = await file.read()
     name = file.filename or ""
@@ -135,6 +150,7 @@ async def docs_import(request: Request, doc_name: str = Form(...), doc_type: str
                       source_path: str = Form(...), text: str = Form(...),
                       access_role: str = Form("")) -> dict[str, Any]:
     """텍스트 → 청크 → `AGT_VECTOR_DOCS`. 임베딩 미구성이면 벡터 없이 본문만 적재한다(D-08)."""
+    csrf.require(request, csrf.token_of(request, await request.form()))
     _need_write(request, INGEST_AREA)
     ext_id = agent_docs.register_document(doc_name=doc_name, doc_type=doc_type,
                                           source_path=source_path)

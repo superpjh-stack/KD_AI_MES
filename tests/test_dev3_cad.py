@@ -88,10 +88,18 @@ def test_미구성_공급자는_빈_리스트를_돌려주지_않는다():
 
 
 def test_분석_실행은_501_이고_객체를_만들지_않는다():
+    """0건 경로도 **명시적으로 단언한다** — `skip` 하면 게이트에서 영원히 검증되지 않는다
+    (§10-4 · DEF-QA2-010 · D-62)."""
     row = conn.q1("select DRAWING_ID from EST_CAD_DRAWINGS order by DRAWING_ID limit 1")
-    if row is None:
-        pytest.skip("도면이 없다 — `make cad-ingest`")
     before = conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]
+    if row is None:
+        # 도면 0건 경로 — 없는 도면 분석은 **422** 이고, 그래도 객체는 안 생긴다.
+        assert conn.q1("select count(*) as n from EST_CAD_DRAWINGS")["n"] == 0
+        with pytest.raises(http.HTTPException) as e:
+            pipeline.analyze(1)
+        assert e.value.status_code == 422, "없는 도면인데 422 가 아니다"
+        assert conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"] == before
+        return
     with pytest.raises(http.HTTPException) as e:
         pipeline.analyze(int(row["drawing_id"]))
     assert e.value.status_code == 501
@@ -107,17 +115,28 @@ def test_집계_불가_Feature_는_차단으로_남는다():
 
 
 def test_확정_객체가_없으면_Feature_도_0건이다():
+    """도면이 0건이어도 **0건 경로를 단언한다** (§10-4 · DEF-QA2-010)."""
     row = conn.q1("select DRAWING_ID from EST_CAD_DRAWINGS order by DRAWING_ID limit 1")
-    if row is None:
-        pytest.skip("도면이 없다")
-    out = pipeline.build_features(int(row["drawing_id"]))
+    before = conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"]
+    drawing_id = int(row["drawing_id"]) if row else 1
+    out = pipeline.build_features(drawing_id)
     assert out["confirmed_objects"] == 0
     assert out["created"] == 0, "확정 전에 Feature 를 만들면 HITL 이 무의미하다"
+    assert conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"] == before
+    if row is None:
+        # 없는 도면을 넣어도 Feature 를 지어내지 않는다 — 0건이 0건으로 남는다.
+        assert conn.q1("select count(*) as n from EST_CAD_DRAWINGS")["n"] == 0
+        assert before == 0
 
 
 def test_수집_로그가_단계별로_남는다():
-    if conn.q1("select count(*) as n from IF_CAD_FILES")["n"] == 0:
-        pytest.skip("수집 전")
+    """수집 전(0건) 경로도 단언한다 — 파일이 0건인데 로그가 있으면 시드가 런타임 표를 채운 것이다
+    (§10-4 · G-11 · DEF-QA2-010)."""
+    files_n = conn.q1("select count(*) as n from IF_CAD_FILES")["n"]
+    logs_n = conn.q1("select count(*) as n from IF_CAD_IMPORT_LOGS")["n"]
+    if files_n == 0:
+        assert logs_n == 0, "수집 0건인데 수집 로그가 있다 — 런타임 전용 표를 시드가 채웠다 (G-11)"
+        return
     steps = {r["step_name"] for r in conn.q("select distinct STEP_NAME from IF_CAD_IMPORT_LOGS")}
     assert steps <= set(pipeline.STEPS) and "수신" in steps and "중복제거" in steps
     reasons = {r["exclude_reason"] for r in conn.q(

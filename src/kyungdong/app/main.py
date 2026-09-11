@@ -19,6 +19,7 @@ from . import design, nav
 from .settings import settings
 from .templating import render
 from .util import csrf, http, security, session
+from .util.audit import RESULT_ERR, audit
 
 app = FastAPI(title="경동글로벌텍 제조AI 시스템", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -56,19 +57,29 @@ async def attach_role(request: Request, call_next):
             or request.headers.get("x-kyungdong-role")
             or "SYSADMIN"
         ).upper()
+    # 세션이 없으면 CSRF 토큰을 묶을 쿠키가 필요하다(util/csrf.py `_bind`).
+    # **토큰을 발급하기 전에** 값이 정해져야 한다 — 응답에서 처음 심으면 이 요청에서 렌더한
+    # 폼의 토큰이 다음 POST 에서 무효가 된다(D-60 실측).
+    new_csrf_cookie = ""
+    if sess is None and not request.cookies.get(csrf.COOKIE):
+        new_csrf_cookie = csrf.new_cookie_value()
+    request.state.csrf_cookie = new_csrf_cookie
+
     # ── 권한 가드 (D-78) — **폼 파싱보다 먼저** 본다 ──────────────────
     # FastAPI 의 `Form(...)` 은 핸들러 본문보다 앞서 파싱된다. 핸들러 안에서만 권한을 보면
     # 권한 없는 역할이 403 이 아니라 **422** 를 받는다(실측 재현). 계약 §4.0 검사 순서를 지킨다.
     denied = _permission_denied(request)
     if denied is not None:
+        if new_csrf_cookie:
+            denied.set_cookie(csrf.COOKIE, new_csrf_cookie, httponly=True, samesite="lax",
+                              secure=settings().is_prod)
         return denied
 
     response = await call_next(request)
     for k, v in security.headers().items():
         response.headers.setdefault(k, v)
-    # 세션이 없으면 CSRF 토큰을 묶을 쿠키가 필요하다(util/csrf.py `_bind`).
-    if sess is None and not request.cookies.get(csrf.COOKIE):
-        response.set_cookie(csrf.COOKIE, csrf.new_cookie_value(),
+    if new_csrf_cookie:
+        response.set_cookie(csrf.COOKIE, new_csrf_cookie,
                             httponly=True, samesite="lax", secure=settings().is_prod)
     return response
 
@@ -103,6 +114,14 @@ def _permission_denied(request: Request):
         allowed = rbac.can_read(role, screen.area)
     if allowed:
         return None
+    # **거부도 감사에 남긴다** (G-29 · D-97). 이 가드가 라우터 `guard()` 보다 **앞서** 돌기 때문에
+    # 여기서 안 남기면 403 거부는 `SYS_ACCESS_LOGS` 에 한 줄도 남지 않는다 — QA3 실측 `오류` 0건의
+    # 실제 원인이다. 화면마다 흩뿌리지 않고 **공용 가드 한 곳**에서 남긴다.
+    reason = f"{screen.area} {'쓰기' if mutating else '조회'} 권한 없음 (역할 {role or '없음'})"
+    sess = getattr(request.state, "session", None)
+    audit(request, screen.id, "쓰기거부" if mutating else "조회거부",
+          log_type="오류", result=RESULT_ERR, error=reason,
+          user_id=getattr(sess, "user_id", None))
     case = http.BY_KEY["forbidden"]
     return render(request, "_error.html", status_code=case.status, status=case.status,
                   message=case.message,
