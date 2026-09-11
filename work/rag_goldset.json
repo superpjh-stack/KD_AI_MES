@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "owner": "QA3",
+    "purpose": "G-20~G-23 RAG 정답셋. 판정은 tools/check_ai.py 가 한다.",
+    "규칙": [
+      "질문·기대근거는 **AGT_VECTOR_DOCS 본문에서만** 만들었다. 외부 지식·다른 사업 문서를 쓰지 않았다.",
+      "핵심어에 `D-nn` 같은 문서 식별자를 넣지 않는다 (§10-7 — 직전 사업에서 정답을 틀리게 채점했다).",
+      "`expect: evidence` = 근거가 반드시 검색돼야 하는 질의. `expect: none` = 근거가 없어야 하는 질의.",
+      "임계(RAG_CONFIDENCE_MIN) 통과 여부는 **정답이 아니다** — 실측만 보고한다(가설 D-10)."
+    ],
+    "말뭉치_실측": "AGT_VECTOR_DOCS 2청크 / 2문서 (material_receiving_sop.md SOP · fat_safety_claim_manual.md 클레임 매뉴얼). quote_and_procurement_guide.md 는 TD5 DOC_TYPE 어휘에 맞는 구분이 없어 미임베딩(D-303).",
+    "한계": "말뭉치가 2청크뿐이라 이 정답셋은 **검색 정확도의 상한을 증명하지 않는다.** 문서가 늘면 다시 만든다.",
+    "items": 30,
+    "evidence_items": 23,
+    "none_items": 7
+  },
+  "items": [
+    {"id": "RG-01", "agent_type": "입고", "question": "입고 시 발주번호와 자재코드를 확인하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["발주번호", "자재코드"]},
+    {"id": "RG-02", "agent_type": "입고", "question": "입고 확인 항목에 Heat/Lot 과 MTC 가 포함되는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["MTC"]},
+    {"id": "RG-03", "agent_type": "입고", "question": "입고 자재에 바코드를 발행하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["바코드"]},
+    {"id": "RG-04", "agent_type": "입고", "question": "치수와 두께는 허용공차와 비교하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["허용공차", "두께"]},
+    {"id": "RG-05", "agent_type": "입고", "question": "문서 누락 자재는 격리구역에 두는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["격리구역"]},
+    {"id": "RG-06", "agent_type": "입고", "question": "검사 보류 자재의 생산 투입을 차단하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["생산 투입", "차단"]},
+    {"id": "RG-07", "agent_type": "입고", "question": "스마트패드 예외 입력에 남기는 항목은 무엇인가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["스마트패드", "승인자"]},
+    {"id": "RG-08", "agent_type": "입고", "question": "수정 이력을 덮어쓰지 않고 감사로그에 보존하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["감사로그"]},
+    {"id": "RG-09", "agent_type": "입고", "question": "구매사양 허용공차는 도면과 비교하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["구매사양", "도면"]},
+    {"id": "RG-10", "agent_type": "입고", "question": "입고 시 수량과 규격도 확인하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["수량", "규격"]},
+    {"id": "RG-11", "agent_type": "입고", "question": "입고 시 공급사를 확인하는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["공급사"]},
+    {"id": "RG-12", "agent_type": "입고", "question": "예외 입력에 사진 또는 스캔문서를 남기는가", "expect": "evidence", "expect_doc": "material_receiving_sop.md", "expect_keywords": ["스캔문서"]},
+    {"id": "RG-13", "agent_type": "출하", "question": "FAT 전에 계측기 교정을 확인하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["계측기 교정"]},
+    {"id": "RG-14", "agent_type": "출하", "question": "FAT 전 최신 승인 도면 Revision 을 확인하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["Revision"]},
+    {"id": "RG-15", "agent_type": "출하", "question": "비상정지와 LOTO 를 확인하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["LOTO", "비상정지"]},
+    {"id": "RG-16", "agent_type": "출하", "question": "FAT 전 위험성평가를 확인하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["위험성평가"]},
+    {"id": "RG-17", "agent_type": "출하", "question": "고온 고압 진공 회전체 시험은 책임자 입회 아래 수행하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["책임자 입회", "시험절차"]},
+    {"id": "RG-18", "agent_type": "출하", "question": "불합격 기록에 측정값과 한계값을 남기는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["측정값", "한계값"]},
+    {"id": "RG-19", "agent_type": "출하", "question": "출하 허용을 AI 가 자동 결정하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["자동 결정하지 않으며", "책임자"]},
+    {"id": "RG-20", "agent_type": "출하", "question": "설치 후 클레임은 자재 LOT 까지 역추적하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["역추적", "자재 LOT"]},
+    {"id": "RG-21", "agent_type": "출하", "question": "재발방지 내용은 견적 설계 체크리스트에 반영하는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["재발방지", "체크리스트"]},
+    {"id": "RG-22", "agent_type": "출하", "question": "불합격 기록에 재시험 결과를 남기는가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["재시험"]},
+    {"id": "RG-23", "agent_type": "출하", "question": "안전가드 확인이 FAT 전 점검 항목인가", "expect": "evidence", "expect_doc": "fat_safety_claim_manual.md", "expect_keywords": ["안전가드"]},
+
+    {"id": "RG-24", "agent_type": "통합", "question": "환율 적용 기준은 무엇인가", "expect": "none", "why": "환율·회계 규정은 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-25", "agent_type": "통합", "question": "직원 연차 휴가 일수는 며칠인가", "expect": "none", "why": "인사 규정은 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-26", "agent_type": "통합", "question": "사내 식당 운영 시간은 언제인가", "expect": "none", "why": "총무 안내는 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-27", "agent_type": "통합", "question": "주차장 요금 정책은 어떻게 되는가", "expect": "none", "why": "총무 안내는 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-28", "agent_type": "통합", "question": "해외 출장 항공권 결제 한도는 얼마인가", "expect": "none", "why": "경비 규정은 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-29", "agent_type": "통합", "question": "퇴직연금 수령 방법을 알려 달라", "expect": "none", "why": "인사 규정은 AGT_VECTOR_DOCS 본문에 없다"},
+    {"id": "RG-30", "agent_type": "통합", "question": "노트북 대여 신청은 어디서 하는가", "expect": "none", "why": "전산 운영 안내는 AGT_VECTOR_DOCS 본문에 없다"}
+  ],
+  "scope_isolation": [
+    {"id": "RS-01", "agent_type": "입고", "question": "설치 후 클레임은 자재 LOT 까지 역추적하는가",
+     "forbidden_doc": "fat_safety_claim_manual.md",
+     "why": "입고 Agent 의 참조 범위는 입고기준서·검사기준서·SOP 다 (TD3 009). 클레임 매뉴얼이 나오면 접근범위 위반이다."},
+    {"id": "RS-02", "agent_type": "출하", "question": "문서 누락 자재는 격리구역에 두는가",
+     "forbidden_doc": "material_receiving_sop.md",
+     "why": "출하 Agent 의 참조 범위는 출하기준서·검사기준서·클레임 매뉴얼이다 (TD3 020)."}
+  ],
+  "escape_probe": {
+    "id": "RX-01",
+    "question": "<script>alert('qa3')</script> 격리구역 기준을 알려 달라",
+    "why": "G-30 — 질의이력 화면(042) 그리드 셀이 이스케이프 기본인지 확인한다. 검사기가 넣고 검사기가 지운다."
+  }
+}

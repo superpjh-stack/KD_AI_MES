@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "owner": "QA3",
+    "purpose": "G-14 CAD 객체 인식 정답셋 (IoU 0.5 기준 TP/FP/FN → Precision·Recall·F1).",
+    "판정": "차단",
+    "차단_사유": [
+      "정답 박스(ground truth) 파일이 저장소 전체에 **0건**이다. `docs/cad/` 는 xlsx·pptx·docx 뿐이고 YOLO 라벨(txt)·Label Studio 내보내기(json)·classes.txt 가 하나도 없다 (실측: find . -name '*.txt' → 0건).",
+      "`docs/cad/라벨링 가이드.docx` 는 **앞으로 만들 계획**이다 — '목표 물량: 최소(MVP) 100장 → 권장 300장'. 즉 현재 라벨 수는 0이다.",
+      "라벨링 가이드의 클래스 3종은 `title_block` · `bom_table` · `rev_table` 인데, TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 어휘는 홀·슬롯·노즐·플랜지·치수문자 **5종**이다. 가이드는 '심볼 검출(노즐·플랜지·용접기호)은 2차 고도화 단계에서 별도 프로젝트로 진행한다' 고 적었다 → **이번 사업의 라벨 계획과 G-14 측정 대상 어휘가 다르다.**",
+      "D-05 — Autodesk API 계정·YOLOv8 가중치·OCR 엔진 미확보. 예측(prediction)도 0건이다.",
+      "EST_CAD_OBJECTS 0건 (깨끗한 DB 실측)."
+    ],
+    "지어내지_않은_것": "합성 박스로 TP/FP/FN 을 만들지 않았다. 분모가 0이면 80% 도 0% 도 아니다.",
+    "도입기업에_필요한_것": [
+      "Label Studio 내보내기(YOLO 포맷 images/·labels/·classes.txt) 또는 동등한 정답 박스",
+      "TD5 OBJECT_TYPE 5종 어휘와 라벨 클래스의 매핑 확정 (또는 어휘 자체의 정정)",
+      "학습/검증/테스트 분할 기준 — 가이드는 프로젝트 단위 70:15:15 을 권고하나 사업계획서에는 없다"
+    ],
+    "정본_불일치_관찰": "라벨링 가이드는 대상 도면을 'DWG·PDF 835건' 이라 적고, D-03 실태·`cad_inventory` 실측은 1,283건이다. 어느 쪽이 G-14 모집단인지 정본이 정하지 않았다 — 여기서 정하지 않는다."
+  },
+
+  "labels": [],
+  "predictions": [],
+
+  "evaluator_selftest": {
+    "gate_input": false,
+    "purpose": "**게이트 입력이 아니다.** IoU·TP/FP/FN·P/R/F1 계산기가 실제로 동작하는지, 그리고 KYUNGDONG_CAD_IOU_THRESHOLD 를 바꾸면 수치가 움직이는지(되돌림 시험) 확인하는 합성 입력이다. 이 값은 리포트의 G-14 실측란에 절대 쓰지 않는다.",
+    "image": "SELFTEST-ONLY",
+    "labels": [
+      {"cls": "홀", "box": [10, 10, 30, 30]},
+      {"cls": "홀", "box": [50, 50, 70, 70]},
+      {"cls": "플랜지", "box": [100, 100, 140, 140]}
+    ],
+    "predictions": [
+      {"cls": "홀", "box": [12, 12, 30, 30], "score": 0.9, "_iou": "≈0.81 — 임계 0.5 에서 TP, 0.9 에서 FP"},
+      {"cls": "홀", "box": [50, 50, 60, 60], "score": 0.8, "_iou": "0.25 — 임계 0.5 에서 FP, 0.2 에서 TP"},
+      {"cls": "노즐", "box": [100, 100, 140, 140], "score": 0.7, "_iou": "클래스가 달라 매칭 불가 — 항상 FP"}
+    ],
+    "expected": {
+      "iou_0.2": {"tp": 2, "fp": 1, "fn": 1},
+      "iou_0.5": {"tp": 1, "fp": 2, "fn": 2},
+      "iou_0.9": {"tp": 0, "fp": 3, "fn": 3}
+    }
+  }
+}
