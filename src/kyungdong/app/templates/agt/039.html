@@ -1,0 +1,16 @@
+{% extends "agt/_list.html" %}
+{% block extra %}
+<div class="card">
+  <h2>검토·승인 — AI 결과를 즉시 반영하지 않는다 (2.5 방법론 ⑤ · G-24)</h2>
+  <p class="meta">
+    추천은 <code>AGT_RECOMMENDATIONS.REVIEW_STATUS</code> 가 <b>미검토 / 승인 / 수정 / 반려</b> 중
+    하나이고, <b>승인된 것만 운영에 반영</b>한다. 승인 권한이 없으면 403 이다.
+    현재 역할({{ role.name if role else '-' }})의 승인 권한: <b>{{ '있음' if can_approve else '없음' }}</b>.
+  </p>
+  <p class="meta">
+    분석 원천은 <code>PRC_PERFORMANCES</code> · <code>SHP_INSPECTIONS</code> ·
+    <code>PRC_CONDITION_DEVIATIONS</code> 다. 이 표들이 비어 있으면 분석 결과도 0건이다 —
+    없는 실적으로 분석 문장을 만들지 않는다.
+  </p>
+</div>
+{% endblock %}

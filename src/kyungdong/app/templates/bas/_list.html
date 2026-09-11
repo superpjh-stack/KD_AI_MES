@@ -1,0 +1,219 @@
+{# 개발1 공통 목록 레이아웃 — TD3 layout_rules 그대로.
+   헤더(base.html) · 좌측메뉴(base.html) · 조회조건 상단(최대 6) · 그리드 중앙(최대 7열) ·
+   버튼 하단 · 설명 패널 우측.  모든 칸은 `design.screen(sid)['mockup']` 에서 온다 — 지어내지 않는다.
+   inv·bas·sys·dat 15화면이 이 한 파일을 쓴다(개발1 소유).
+   **미디어쿼리를 쓰지 않는다**(§10-13) — 반응형은 app/static/app.css 단일 파일이 한다. #}
+{% extends "base.html" %}
+{% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
+
+{% macro cell(c) %}
+  {%- if c is mapping -%}
+    {%- if c.href -%}<a href="{{ c.href }}" title="{{ c.title|default('') }}">{{ c.text }}</a>
+    {%- elif c.notice -%}<span class="badge undetermined">{{ c.text }}</span>
+    {%- else -%}{{ c.text }}{%- endif -%}
+  {%- else -%}{{ c }}{%- endif -%}
+{% endmacro %}
+
+{% macro grid(cols, data, notice) %}
+<div class="tablewrap">
+  <table>
+    <thead><tr>{% for c in cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in data %}
+      <tr>{% for c in r %}<td>{{ cell(c) }}</td>{% endfor %}</tr>
+    {% else %}
+      <tr><td class="empty" colspan="{{ cols|length }}">{{ notice }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+<style>
+  .d1-wrap{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .d1-main{flex:1 1 560px;min-width:0}
+  .d1-side{flex:1 1 260px;min-width:0;max-width:340px}
+  .d1-cond{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .d1-cond label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+  .d1-cond input,.d1-cond select{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:#fff;min-width:120px}
+  .d1-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .d1-btns button{font:inherit;padding:7px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+  .d1-btns button[type=submit]{border-color:#c2d8ef;background:#eef4fb;color:var(--acc);font-weight:600}
+  .d1-btns button:disabled{color:var(--mut);background:#f3f5f7;cursor:not-allowed}
+  .d1-cards{display:flex;flex-wrap:wrap;gap:8px}
+  .d1-card{flex:1 1 130px;border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:#fbfcfd}
+  .d1-card .k{font-size:12px;color:var(--mut)}
+  .d1-card .v{font-size:17px;font-weight:600}
+  .d1-form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .d1-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+  .d1-form input,.d1-form select,.d1-form textarea{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:#fff;min-width:150px}
+  .d1-form .req::after{content:" *";color:var(--bad)}
+  .d1-note{font-size:12px;color:var(--mut);margin:6px 0 0}
+  .d1-bar{height:9px;border-radius:5px;background:#e7ebf0;overflow:hidden}
+  .d1-bar > i{display:block;height:100%;background:var(--acc)}
+  .d1-chart{display:flex;align-items:flex-end;gap:10px;height:130px;padding-top:6px}
+  .d1-chart > div{flex:1 1 0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .d1-chart b{display:block;width:100%;background:var(--acc);border-radius:4px 4px 0 0}
+  .d1-chart span{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+</style>
+
+<div class="card">
+  <h1>{{ screen.no }} {{ screen.name }}</h1>
+  <div class="meta">
+    {{ screen.area }} · {{ screen.path }} ·
+    {{ screen.requirement_id }} ↔ {{ screen.id }} ↔ {{ screen.program_id }}
+    {% if role %} · 권한 {{ role.name }}{% endif %}
+    {% if anchor_dt %} · 기준일시 {{ anchor_dt }}{% endif %}
+  </div>
+  {% if notices %}
+  <p style="margin:8px 0 0">
+    {% for n in notices %}<span class="badge {{ n.kind|default('notice') }}">{{ n.text }}</span> {% endfor %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="d1-wrap">
+<div class="d1-main">
+
+  {% if cards %}
+  <div class="card">
+    <div class="d1-cards">
+      {% for c in cards %}
+      <div class="d1-card"><div class="k">{{ c.label }}</div><div class="v">{{ c.value }}</div></div>
+      {% endfor %}
+    </div>
+    {# 건수 카드의 `0 건` 은 정답이다 — 여기에는 '미수집' 을 붙이지 않는다 (§10-14) #}
+  </div>
+  {% endif %}
+
+  {% if search %}
+  <div class="card">
+    <h2>조회 조건</h2>
+    <form method="get" action="{{ screen.path }}">
+      <div class="d1-cond">
+        {% for f in search %}
+        <label>{{ f.label }}
+          {% if f.options is defined %}
+          <select name="{{ f.name }}">
+            <option value="">전체</option>
+            {% for o in f.options %}
+            <option value="{{ o.value }}" {% if o.value == f.value %}selected{% endif %}>{{ o.label }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <input type="{{ f.type|default('text') }}" name="{{ f.name }}" value="{{ f.value|default('') }}">
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="d1-btns">
+        <button type="submit">조회</button>
+        {% for b in buttons if b != '조회' %}
+        <button type="button" disabled title="{{ disabled_note|default('') }}">{{ b }}</button>
+        {% endfor %}
+      </div>
+    </form>
+    {% if extra_actions %}
+    <div class="d1-btns">
+      {% for a in extra_actions %}
+      <form method="post" action="{{ a.action }}" style="display:inline">
+        <input type="hidden" name="{{ a.name }}" value="{{ a.value }}">
+        <button type="submit" {% if not can_write %}disabled{% endif %}>{{ a.label }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if disabled_note %}<p class="d1-note">{{ disabled_note }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if columns %}
+  <div class="card">
+    <h2>{{ grid_title|default('목록') }} — {{ total|default(rows|length) }} 건</h2>
+    {{ grid(columns, rows, empty_notice) }}
+    {% if pager and pager.pages > 1 %}
+    <p class="d1-note">
+      {% for p in range(1, pager.pages + 1) %}
+        {% if p == pager.page %}<b>{{ p }}</b>{% else %}<a href="{{ pager.base }}page={{ p }}">{{ p }}</a>{% endif %}
+      {% endfor %}
+      · {{ pager.page }}/{{ pager.pages }} 쪽 (쪽당 {{ pager.size }}건)
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if form %}
+  <div class="card">
+    <h2>{{ form.title }}</h2>
+    <form method="post" action="{{ form.action }}"
+          {% if form.upload %}enctype="multipart/form-data"{% endif %}>
+      {% if form.upload %}<input type="hidden" name="action" value="upload">{% endif %}
+      <div class="d1-form">
+        {% for f in form.fields %}
+        <label>
+          <span {% if f.required %}class="req"{% endif %}>{{ f.label }}</span>
+          {% if f.options is defined %}
+          <select name="{{ f.name }}" {% if f.required %}required{% endif %}>
+            <option value="">선택</option>
+            {% for o in f.options %}<option value="{{ o.value }}">{{ o.label }}</option>{% endfor %}
+          </select>
+          {% else %}
+          <input type="{{ f.type|default('text') }}" name="{{ f.name }}"
+                 {% if f.step %}step="{{ f.step }}"{% endif %}
+                 {% if f.required %}required{% endif %}
+                 placeholder="{{ f.placeholder|default('') }}">
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="d1-btns">
+        <button type="submit" {% if not can_write %}disabled{% endif %}>{{ form.submit }}</button>
+      </div>
+      {% if not can_write %}
+      <p class="d1-note">등록·수정 권한이 없다 — 조회만 가능하다 (G-28).</p>
+      {% endif %}
+      {% if form.note %}<p class="d1-note">{{ form.note }}</p>{% endif %}
+    </form>
+  </div>
+  {% endif %}
+
+  {% for p in panels %}
+  <div class="card">
+    <h2>{{ p.title }}{% if p.columns %} — {{ p.rows|length }} 건{% endif %}</h2>
+    {% if p.columns %}{{ grid(p.columns, p.rows, p.empty_notice) }}{% endif %}
+    {% if p.bars %}
+      {% for b in p.bars %}
+      <p class="d1-note" style="margin-top:8px">{{ b.label }} — {{ b.text }}</p>
+      <div class="d1-bar"><i style="width:{{ b.percent }}%"></i></div>
+      {% endfor %}
+    {% endif %}
+    {% if p.chart %}
+      <div class="d1-chart">
+        {% for c in p.chart %}
+        <div><b style="height:{{ c.percent }}%" title="{{ c.value }}"></b><span>{{ c.label }}</span></div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if p.note %}<p class="d1-note">{{ p.note }}</p>{% endif %}
+  </div>
+  {% endfor %}
+
+</div>
+
+<aside class="d1-side">
+  {% for d in description %}
+  <div class="card">
+    <h2 style="margin-top:0">{{ d.title }}</h2>
+    {% for line in d.lines %}<p class="d1-note" style="color:var(--fg)">{{ line }}</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <div class="card">
+    <h2 style="margin-top:0">사용 테이블 (SF-TD5)</h2>
+    {% for t in tables %}
+    <p class="d1-note">{{ t.id }} — {{ t.name }}{% if t.count is not none %} · {{ t.count }} 건{% endif %}</p>
+    {% endfor %}
+  </div>
+</aside>
+</div>
+{% endblock %}

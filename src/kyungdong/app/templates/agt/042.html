@@ -1,0 +1,21 @@
+{% extends "agt/_list.html" %}
+{% block extra %}
+<div class="card">
+  <h2>질의이력 실측 — 목표치는 정본에 없다 (D-09)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>실측</th></tr></thead>
+      <tbody>
+        <tr><td>질의 건수</td><td>{{ stats.n or 0 }}</td></tr>
+        <tr><td>평균 / 최대 응답시간</td><td>{{ stats.avg_ms if stats.avg_ms is not none else empty_note }} / {{ stats.max_ms if stats.max_ms is not none else empty_note }} ms</td></tr>
+        <tr><td>근거가 있는 응답</td><td>{{ stats.grounded or 0 }}</td></tr>
+        <tr><td>평균 사용자 평가</td><td>{{ stats.avg_score if stats.avg_score is not none else empty_note }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    RAG 응답시간·인용 정확도 <b>목표치가 사업계획서에 없다(D-09)</b> — 실측만 보고한다.
+    질의 로그에는 도면·견적·원가 정보가 포함될 수 있어 <b>접근 권한을 통제하고 외부 반출을 금지</b>한다.
+  </p>
+</div>
+{% endblock %}

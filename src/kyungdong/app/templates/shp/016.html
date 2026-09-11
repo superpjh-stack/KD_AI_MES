@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {'등록': {'type': 'submit', 'form': 'ship-form', 'primary': true},
+                                    '출하승인': {'type': 'submit', 'form': 'approve-form', 'primary': true}}) }}
+      <p class="d2-note">조회 {{ rows|length }} 건 · 프로젝트번호를 누르면 024 공정이력조회로 간다.</p>
+    </div>
+
+    <div class="card">
+      <h2>출하 등록 — 검사 합격 LOT 만 선택할 수 있다</h2>
+      <form id="ship-form" class="d2-filters" method="post" action="{{ current.path }}">
+        <div class="d2-f">
+          <label for="s-lot">출하 대상 제품 LOT</label>
+          <select id="s-lot" name="lot_trace_id" required>
+            {% for c in candidates %}
+            <option value="{{ c.lot_trace_id }}">{{ c.product_lot_no }} · {{ c.project_no }} {{ c.project_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="s-plan">출하 예정일</label>
+          <input id="s-plan" name="plan_dt" placeholder="YYYY-MM-DD">
+        </div>
+        <button class="d2-btn pri" type="submit">등록</button>
+      </form>
+      {% if not candidates %}
+      <p class="d2-note">출하 대상 LOT 이 <b>0 건</b>이다 — 검사 합격 판정을 받은 미출하 LOT 만 여기에 나온다(G-24).</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>출하 확정(승인) — 승인 권한이 필요하다</h2>
+      <form id="approve-form" class="d2-filters" method="post" action="{{ current.path }}/approve">
+        <div class="d2-f">
+          <label for="s-ship">승인 대기 출하</label>
+          <select id="s-ship" name="shipment_id" required>
+            {% for w in waiting %}
+            <option value="{{ w.shipment_id }}">{{ w.shipment_no }} · {{ w.project_no }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button class="d2-btn pri" type="submit">출하 확정</button>
+      </form>
+      <p class="d2-note">
+        {% if can_approve %}현재 역할은 <b>승인 권한이 있다</b>.{% else %}현재 역할은 <b>승인 권한이 없다</b> — 확정을 누르면 <b>403</b> 이다 (G-24 · G-28).{% endif %}
+        확정 시각(SHIP_DT)과 승인자(APPROVER_ID)를 기록해야 수주출하 리드타임(LEADTIME_O2D)이 산출된다.
+      </p>
+    </div>
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
+{% endblock %}

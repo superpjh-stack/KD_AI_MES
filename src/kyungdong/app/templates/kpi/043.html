@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% import "kpi/_official.html" as off %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ off.official_table(official) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    {{ kit.bars(chart_title, chart, '', empty_note) }}
+    {{ kit.progress(list_title, progress, empty_note) }}
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
+{% endblock %}

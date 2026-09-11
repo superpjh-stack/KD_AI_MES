@@ -1,0 +1,259 @@
+{# 개발2 공용 매크로 — 대시보드·공정·출하·KPI 16화면이 전부 이 파일을 쓴다.
+   · 차트는 **인라인 CSS/SVG** 다. 외부 CDN·차트 라이브러리 0건 (CSP default-src 'self' — D-50).
+   · **미디어쿼리를 쓰지 않는다.** 반응형은 app/static/app.css 단일 파일이다 (§10-13).
+     여기서는 flex-wrap 과 % 폭만 써서 폰 폭까지 깨지지 않게 한다.
+   · 그리드 셀은 autoescape 기본이다 — `|safe` 를 쓰지 않는다 (§10-8).
+   · 빈 **그리드**에만 '미수집' 문구를 붙인다. 건수 카드의 `0 건` 은 정답이다 (G-11 · §10-14). #}
+
+{% macro styles() %}
+<style>
+.d2-wrap{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.d2-main{flex:1 1 560px;min-width:0}
+.d2-side{flex:0 1 280px;min-width:0}
+.d2-cards{display:flex;flex-wrap:wrap;gap:10px}
+.d2-card{flex:1 1 150px;min-width:0;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fff}
+.d2-card .k{font-size:12px;color:var(--mut);display:block}
+.d2-card .v{font-size:22px;font-weight:650;letter-spacing:-.01em;display:block;margin-top:2px;word-break:break-all}
+.d2-card .s{font-size:11px;color:var(--mut);display:block;margin-top:3px}
+.d2-card.off{background:#fbfbfc}
+.d2-card.off .v{color:var(--mut);font-weight:500}
+.d2-chart{width:100%;height:auto;display:block}
+.d2-bar{fill:#1f5fa8}
+.d2-bar.alt{fill:#7ba7d7}
+.d2-axis{stroke:var(--line);stroke-width:1}
+.d2-tick{font-size:9px;fill:#5b6470}
+.d2-val{font-size:9px;fill:#1c2024}
+.d2-prog{list-style:none;margin:0;padding:0}
+.d2-prog li{margin:0 0 8px}
+.d2-prog .lab{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:3px}
+.d2-prog .trk{height:9px;border-radius:5px;background:#eef2f7;overflow:hidden}
+.d2-prog .fil{height:100%;background:#1f5fa8;border-radius:5px}
+.d2-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.d2-f{display:flex;flex-direction:column;gap:3px;flex:0 1 160px;min-width:0}
+.d2-f label{font-size:11px;color:var(--mut)}
+.d2-f input,.d2-f select{font:13px/1.4 inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--fg);min-width:0}
+.d2-f input:disabled,.d2-f select:disabled{background:#f3f5f7;color:#98a1ad}
+.d2-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.d2-btn{font:13px/1.4 inherit;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--fg);cursor:pointer;min-height:36px}
+.d2-btn.pri{background:#1f5fa8;border-color:#1f5fa8;color:#fff;font-weight:600}
+.d2-btn:disabled{color:#98a1ad;background:#f3f5f7;cursor:not-allowed}
+.d2-tabs{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--mut);margin-bottom:6px}
+.d2-tabs span::after{content:" ›";color:#c3c9d2}
+.d2-tabs span:last-child::after{content:""}
+.d2-tabs span:last-child{color:var(--fg);font-weight:600}
+.d2-note{font-size:12px;color:var(--mut);margin:8px 0 0}
+.d2-side h3{font-size:12px;margin:12px 0 4px;color:var(--mut)}
+.d2-side p{font-size:12px;margin:0 0 4px;line-height:1.6}
+.d2-legend{font-size:11px;color:var(--mut);margin-top:4px}
+td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+{% endmacro %}
+
+
+{# ── 화면 머리 — 헤더·경로·연계 ID (TD3 layout_rules 헤더) ───────────────── #}
+{% macro head(current, td3, extra_badges=[]) %}
+<div class="card">
+  <div class="d2-tabs">
+    {% for t in (td3.mockup.tabs if td3.mockup and td3.mockup.tabs else [current.shortcut, current.name]) %}
+    <span>{{ t }}</span>
+    {% endfor %}
+  </div>
+  <h1>{{ current.no }} {{ current.name }}</h1>
+  <div class="meta">
+    {{ current.area }} · {{ current.path }} ·
+    {{ current.requirement_id }} ↔ {{ current.id }} ↔ {{ current.program_id }}
+  </div>
+  <div class="meta">채널 {{ current.channels }}</div>
+  {% for b in extra_badges %}<span class="badge {{ b.cls }}">{{ b.text }}</span> {% endfor %}
+</div>
+{% endmacro %}
+
+
+{# ── 조회 조건 (TD3 layout_rules: 상단 배치·최대 6개) ─────────────────────
+   TD3 목업 search_fields 를 **전부** 그린다. 이번 회전에서 실제로 거르는 항목만
+   입력이 열리고, 나머지는 disabled 로 두어 **미지원임을 숨기지 않는다**. #}
+{% macro filters(fields, wired, action) %}
+<div class="card">
+  <form class="d2-filters" method="get" action="{{ action }}">
+    {% for f in fields %}
+    {% set w = wired.get(f) %}
+    <div class="d2-f">
+      <label for="f-{{ loop.index }}">{{ f }}</label>
+      {% if w %}
+      <input id="f-{{ loop.index }}" name="{{ w.name }}" value="{{ w.value or '' }}"
+             placeholder="{{ w.hint or '' }}">
+      {% else %}
+      <input id="f-{{ loop.index }}" disabled placeholder="미지원">
+      {% endif %}
+    </div>
+    {% endfor %}
+    <button class="d2-btn pri" type="submit">조회</button>
+  </form>
+  {% if fields|length > (wired|length) %}
+  <p class="d2-note">조회 조건 {{ wired|length }}/{{ fields|length }} 항목이 동작한다. 나머지는 비활성으로 두어 미지원을 드러낸다.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ── 카드 — 건수 카드의 `0 건` 은 정답이다. '미수집' 을 붙이지 않는다 (§10-14) ── #}
+{% macro cards(items) %}
+<div class="d2-cards">
+  {% for c in items %}
+  <div class="d2-card {{ 'off' if c.off else '' }}">
+    <span class="k">{{ c.label }}</span>
+    <span class="v">{{ c.value }}</span>
+    {% if c.sub %}<span class="s">{{ c.sub }}</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+
+{# ── 세로 막대 차트 — 인라인 SVG (외부 라이브러리 0 · D-50) ─────────────── #}
+{% macro bars(title, items, uom='', empty_note='') %}
+<div class="card">
+  <h2>{{ title }}</h2>
+  {% if items %}
+  {% set maxv = items|map(attribute='value')|map('float')|max %}
+  {% set span = maxv if maxv > 0 else 1 %}
+  {% set w = 100.0 / items|length %}
+  <svg class="d2-chart" viewBox="0 0 100 46" preserveAspectRatio="none" role="img"
+       aria-label="{{ title }}">
+    <line class="d2-axis" x1="0" y1="36" x2="100" y2="36"></line>
+    {% for it in items %}
+    {% set h = (it.value|float / span) * 30.0 %}
+    <rect class="d2-bar {{ 'alt' if it.alt else '' }}"
+          x="{{ (loop.index0 * w) + (w * 0.22) }}" y="{{ 36 - h }}"
+          width="{{ w * 0.56 }}" height="{{ h if h > 0.4 else 0.4 }}"></rect>
+    {% endfor %}
+  </svg>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>{% for it in items %}<th>{{ it.label }}</th>{% endfor %}</tr></thead>
+      <tbody><tr>{% for it in items %}<td class="d2-num">{{ it.text or it.value }}{{ ' ' ~ uom if uom }}</td>{% endfor %}</tr></tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="meta">{{ empty_note }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ── 가로 진행 막대 ──────────────────────────────────────────────────── #}
+{% macro progress(title, items, empty_note='') %}
+<div class="card">
+  <h2>{{ title }}</h2>
+  {% if items %}
+  <ul class="d2-prog">
+    {% for it in items %}
+    <li>
+      <div class="lab"><span>{{ it.label }}</span><span>{{ it.text or (it.percent ~ ' %') }}</span></div>
+      <div class="trk"><div class="fil" style="width:{{ it.percent if it.percent <= 100 else 100 }}%"></div></div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">{{ empty_note }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ── 그리드 — 열 최대 7 (layout_rules). 빈 그리드에만 '미수집' 을 쓴다 ────
+   cell = {t: 표시값, href: 있으면 링크(LOT·프로젝트번호 → /prc/024), num: 우측정렬} #}
+{% macro grid(columns, rows, empty_note) %}
+<div class="tablewrap">
+  <table>
+    <thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% if rows %}
+        {% for r in rows %}
+        <tr>
+          {% for cell in r %}
+          <td class="{{ 'd2-num' if cell.num }}">
+            {% if cell.href %}<a href="{{ cell.href }}" title="공정이력조회로 이동">{{ cell.t }}</a>
+            {% else %}{{ cell.t }}{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      {% else %}
+      <tr><td class="empty" colspan="{{ columns|length }}">{{ empty_note }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+
+{# ── 하단 버튼 — TD3 목업 buttons 를 전부 그리되 동작하는 것만 활성 ──────── #}
+{% macro actions(buttons, enabled={}) %}
+<div class="d2-acts">
+  {% for b in buttons %}
+  {% set e = enabled.get(b) %}
+  {% if e %}
+  <button class="d2-btn {{ 'pri' if e.primary }}" type="{{ e.type or 'submit' }}"
+          {% if e.form %}form="{{ e.form }}"{% endif %}
+          {% if e.formaction %}formaction="{{ e.formaction }}"{% endif %}>{{ b }}</button>
+  {% else %}
+  <button class="d2-btn" type="button" disabled title="미구현 — 조용히 통과시키지 않는다">{{ b }}</button>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+
+{# ── 우측 설명 패널 (layout_rules: 화면 목적·처리 절차·연계 ID·체크) ────── #}
+{% macro side(td3, notes=[]) %}
+<aside class="card d2-side">
+  {% if td3.mockup and td3.mockup.description %}
+    {% for block in td3.mockup.description %}
+    <h3>{{ block.title }}</h3>
+    {% for line in block.lines %}<p>{{ line }}</p>{% endfor %}
+    {% endfor %}
+  {% else %}
+    <h3>화면 목적</h3><p>{{ td3.items }}</p>
+    <h3>체크</h3><p>{{ td3.checks }}</p>
+  {% endif %}
+  {% for n in notes %}
+  <h3>{{ n.title }}</h3><p>{{ n.body }}</p>
+  {% endfor %}
+</aside>
+{% endmacro %}
+
+
+{# ── 대시보드 본문 — 001~004 · 043 · 044 가 같은 뼈대를 쓴다 ──────────────
+   카드 → 차트 → 진행률 → 우측 설명 패널. 조회 조건은 두지 않는다(현황판과 같은 레이아웃). #}
+{% macro dashboard(current, td3, cards_items, chart_title, chart, list_title, progress_items,
+                   badges=[], empty_note='', notes=[]) %}
+{{ head(current, td3, badges) }}
+{{ cards(cards_items) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    {{ bars(chart_title, chart, '', empty_note) }}
+    {{ progress(list_title, progress_items, empty_note) }}
+  </div>
+  {{ side(td3, notes) }}
+</div>
+{% endmacro %}
+
+
+{# ── 목록 화면 본문 — 021~025 · 016~019 · 045 가 같은 뼈대를 쓴다 ────────── #}
+{% macro listing(current, td3, wired, action, columns, rows, empty_note,
+                 buttons_enabled={}, badges=[], notes=[], cards_items=[]) %}
+{{ head(current, td3, badges) }}
+{% if cards_items %}{{ cards(cards_items) }}{% endif %}
+{{ filters(td3.mockup.search_fields if td3.mockup and td3.mockup.search_fields else [], wired, action) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ grid(columns, rows, empty_note) }}
+      {{ actions(td3.mockup.buttons if td3.mockup and td3.mockup.buttons else [], buttons_enabled) }}
+      <p class="d2-note">조회 {{ rows|length }} 건 · 열 {{ columns|length }} (TD3 layout_rules 최대 7)</p>
+    </div>
+  </div>
+  {{ side(td3, notes) }}
+</div>
+{% endmacro %}

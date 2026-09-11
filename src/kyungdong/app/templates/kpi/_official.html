@@ -1,0 +1,43 @@
+{# 공식 성과지표 2종 표 — 043·044·045·현황판이 **같은 표**를 쓴다 (app/kpi.py 단일 산식). #}
+{% macro official_table(rows, achieve_formula='') %}
+<div class="card">
+  <h2>공식 성과지표 2종 (사업계획서 1.5 · D-21)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>코드</th><th>지표</th><th>기존</th><th>목표</th><th>개선율(%)</th>
+        <th>가중치</th><th>실측</th><th>달성률</th><th>표본</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.code }}</td><td>{{ r.name }}</td>
+        <td class="d2-num">{{ '{:,.0f}'.format(r.base) }} {{ r.uom }}</td>
+        <td class="d2-num">{{ '{:,.0f}'.format(r.target) }} {{ r.uom }}</td>
+        <td class="d2-num">−{{ r.improve }}</td>
+        <td class="d2-num">{{ r.weight }}</td>
+        <td class="d2-num">{{ r.measured_text }}</td>
+        <td class="d2-num">{{ r.achieve_text }}</td>
+        <td class="d2-num">{{ '{:,}'.format(r.sample) }} 건</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="d2-note">
+    감소율 = (기존 − 목표) ÷ 기존 × 100 — <b>app/kpi.py</b> 가 계산한다.
+    {% if achieve_formula %}{{ achieve_formula }} (가설 D-202).{% endif %}
+    표본 0건이면 실측은 값이 <b>없는 것</b>이고 0 으로 메우지 않는다 (G-11).
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>코드</th><th>산식</th><th>산출 근거 구간</th><th>측정 근거</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr><td>{{ r.code }}</td><td>{{ r.formula }}</td><td>{{ r.source }}</td><td>{{ r.basis }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endmacro %}

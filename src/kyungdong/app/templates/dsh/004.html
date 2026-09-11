@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.dashboard(current, td3, cards, chart_title, chart, list_title, progress, badges, empty_note, notes|default([])) }}
+{% endblock %}

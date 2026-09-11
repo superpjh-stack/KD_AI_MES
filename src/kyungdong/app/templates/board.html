@@ -1,12 +1,100 @@
 {% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% import "kpi/_official.html" as off %}
+{#
+  현황판 — 65" 2대 (TD3 common_screens dashboard · layout_rules '현황판 표출').
+  · **조회 조건이 없다.** 자동 갱신 주기는 `.env` 가설값이다 (D-09).
+  · 카드·차트 수치는 043~045 와 **동일 산식**이다 — 전부 `app/kpi.py` 한 곳에서 온다.
+  · **품질 KPI 는 공식 성과지표가 아니다** — 구분 표기한다.
+  · 외부 CDN·스크립트 0건. 자동 갱신은 meta refresh 로 한다 (CSP script-src 'self' — D-50).
+#}
 {% block title %}현황판 — {{ system_name }}{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>{{ common.name }} — 현황판 65" 2대</h1>
-  <div class="meta">{{ common.path }} · 자동 갱신 {{ refresh.value }}초 <span class="badge undetermined">{{ refresh.badge }}</span></div>
-  <pre class="src">{{ common.items }}</pre>
-  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
-  <p><span class="badge undetermined">미구현</span> 카드·차트는 개발2 담당이며 KPI 화면 043~045 와 <b>동일 산식</b>을 쓴다.
-     품질 KPI 는 공식 성과지표가 아니므로 구분 표기한다.</p>
+<meta http-equiv="refresh" content="{{ refresh.value }}">
+{{ kit.styles() }}
+<style>
+.bd-h{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.bd-h h1{font-size:24px;margin:0}
+.bd .d2-card .v{font-size:30px}
+.bd .d2-card .k{font-size:13px}
+.bd table{font-size:14px}
+</style>
+
+<div class="card bd">
+  <div class="bd-h">
+    <h1>{{ common.name }} — 현황판 65" 2대</h1>
+    <span class="meta">{{ common.path }} · 기준 {{ anchor_text }} ·
+      자동 갱신 {{ refresh.value }}초 <span class="badge undetermined">{{ refresh.badge }}</span></span>
+  </div>
+  <p class="d2-note">{{ common.items }}</p>
+</div>
+
+<div class="bd">{{ kit.cards(cards) }}</div>
+
+{{ off.official_table(official) }}
+
+<div class="d2-wrap">
+  <div class="d2-main">
+    {{ kit.progress('프로젝트 진행률', progress, empty_note) }}
+
+    <div class="card">
+      <h2>납기 리스크</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>프로젝트(수주)번호</th><th>프로젝트명</th><th>납기일</th><th>잔여</th><th>상태</th></tr></thead>
+          <tbody>
+          {% if risk %}
+            {% for r in risk %}
+            <tr>
+              <td><a href="/prc/024?project={{ r.no }}">{{ r.no }}</a></td>
+              <td>{{ r.name }}</td><td>{{ r.due }}</td>
+              <td class="d2-num">{% if r.left is not none %}D{{ '%+d'|format(r.left) }}{% else %}—{% endif %}</td>
+              <td>{{ r.status }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td class="empty" colspan="5">{{ empty_note }}</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <p class="d2-note">프로젝트(수주)번호를 누르면 024 공정이력조회로 간다 (G-08).</p>
+    </div>
+  </div>
+
+  <aside class="card d2-side">
+    <h3>품질 지표 <span class="badge bad">공식 성과지표 아님</span></h3>
+    <p>{{ not_official }}</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>지표</th><th>값</th></tr></thead>
+        <tbody>
+          <tr><td>출하 합격률</td><td class="d2-num">{% if quality.pass_rate is not none %}{{ '%.1f'|format(quality.pass_rate) }} %{% else %}미수집 (D-06){% endif %}</td></tr>
+          <tr><td>공정 불량률</td><td class="d2-num">{% if quality.defect_rate is not none %}{{ '%.1f'|format(quality.defect_rate) }} %{% else %}미수집 (D-06){% endif %}</td></tr>
+          <tr><td>클레임 발생률</td><td class="d2-num">{% if quality.claim_rate is not none %}{{ '%.1f'|format(quality.claim_rate) }} %{% else %}미수집 (D-204){% endif %}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>AI 분석 결과</h3>
+    {% if reco %}
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>구분</th><th>요약</th><th>검토 상태</th></tr></thead>
+        <tbody>
+        {% for r in reco %}
+        <tr><td>{{ r.reco_type }}</td><td>{{ r.summary_text }}</td><td>{{ r.review_status }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p>AI 산출값은 승인 전에는 확정 상태로 표기하지 않는다 (TD3 standard_note 4).</p>
+    {% else %}
+    <p>{{ reco_note }} — 추천 결과가 없다. AI 분석은 개발3 영역이고 여기서는 읽기만 한다.</p>
+    {% endif %}
+
+    <h3>검토 사항 (정본)</h3>
+    <p>{{ common.checks }}</p>
+  </aside>
 </div>
 {% endblock %}

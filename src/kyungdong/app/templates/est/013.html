@@ -1,0 +1,25 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>BOM 자동생성 전제</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>전제</th><th>실측</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>품목 코드 그룹 (BAS_COMMON_CODES)</td><td>{{ counts.item_codes }} 건</td>
+            <td>{% if counts.item_codes == 0 %}<span class="badge bad">차단 (D-47)</span>{% else %}보유{% endif %}</td></tr>
+        <tr><td>재질 코드 그룹</td><td>{{ counts.materials }} 건</td>
+            <td>{% if counts.materials == 0 %}<span class="badge bad">차단 (D-47)</span>{% else %}보유{% endif %}</td></tr>
+        <tr><td>확정 객체 (BOM 생성 근거)</td><td>{{ counts.confirmed }} 건</td>
+            <td>{% if counts.confirmed == 0 %}<span class="badge bad">차단 (D-05)</span>{% else %}보유{% endif %}</td></tr>
+        <tr><td>BOM 헤더</td><td>{{ counts.boms }} 건</td><td>확정 여부는 승인 대상 (G-24)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    목표는 <b>항목 단위 F1 85% 이상</b>(2.6-3)이지만 <b>기준 BOM 이 없다(D-04)</b> — 정확도 측정 차단.
+    순환 참조는 허용하지 않는다(TD5 `CYCLE_CHECK_RESULT`).
+    외주 발주번호·외주처 컬럼이 TD5 에 없어 작업지시번호·공급처로 <b>대체 표기 (D-41)</b> 한다.
+  </p>
+</div>
+{% endblock %}

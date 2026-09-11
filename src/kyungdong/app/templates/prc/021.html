@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {'등록': {'type': 'submit', 'form': 'perf-form', 'primary': true}}) }}
+      <p class="d2-note">조회 {{ rows|length }} 건 · 열 {{ mock.grid_columns|length }} (TD3 layout_rules 최대 7)</p>
+    </div>
+
+    <div class="card">
+      <h2>실적 등록 — 현장POP·스마트패드 수동 입력</h2>
+      <form id="perf-form" class="d2-filters" method="post" action="{{ current.path }}">
+        <div class="d2-f">
+          <label for="p-wo">작업지시</label>
+          <select id="p-wo" name="work_order_id" required>
+            {% for o in open_orders %}
+            <option value="{{ o.work_order_id }}">{{ o.work_order_no }} · {{ o.project_no }} · {{ o.process_code }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="p-proc">공정</label>
+          <select id="p-proc" name="process_code" required>
+            {% for code, name in processes %}<option value="{{ code }}">{{ name }} ({{ code }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="p-start">작업 시작일시</label>
+          <input id="p-start" name="start_dt" placeholder="YYYY-MM-DD HH:MM" required>
+        </div>
+        <div class="d2-f">
+          <label for="p-good">실적 수량</label>
+          <input id="p-good" name="good_qty" value="0" required>
+        </div>
+        <div class="d2-f">
+          <label for="p-bad">불량 수량</label>
+          <input id="p-bad" name="defect_qty" value="0">
+        </div>
+        <div class="d2-f">
+          <label for="p-method">수집 방식</label>
+          <select id="p-method" name="collect_method">
+            <option value="{{ method_manual }}">{{ method_manual }}</option>
+            <option value="{{ method_auto }}">{{ method_auto }} — {{ auto_process }} 전용</option>
+          </select>
+        </div>
+        <button class="d2-btn pri" type="submit">등록</button>
+      </form>
+      <p class="d2-note">
+        불량 유형은 입력란을 두지 않았다 — <b>'불량유형' 코드 그룹이 비어 있다</b>(D-47).
+        코드가 등록되면 열린다. 자동(PLC)을 {{ auto_process }} 외 공정에 붙이면 <b>422</b> 다 (D-06).
+        외주 2공정(소재가공·버핑)은 실적이 아니라 발주·반출·반입 상태다 (D-41).
+      </p>
+    </div>
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>인식 공급자 구성 상태 (D-05)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>구분</th><th>상태</th><th>설정 키</th><th>사유</th></tr></thead>
+      <tbody>
+        {% for c in config %}
+        <tr><td>{{ c.label }}</td><td>{{ c.state }}</td><td>{{ c.key }}</td><td>{{ c.note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    `.dwg` 는 바이너리다. 파서·가중치가 없으면 <b>분석 실행은 501 CAD Parsing 미구성 (D-05)</b> 이다 —
+    합성 Feature 를 만들어 정상인 것처럼 보이게 하지 않는다.
+  </p>
+</div>
+
+<div class="card">
+  <h2>파이프라인 5단계 — 실측</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>단계</th><th>이름</th><th>테이블</th><th>건수</th><th>상태</th><th>비고</th></tr></thead>
+      <tbody>
+        {% for s in stages %}
+        <tr>
+          <td>{{ s.no }}</td><td>{{ s.name }}</td><td>{{ s.table }}</td><td>{{ s.count }}</td>
+          <td>{% if s.blocked %}<span class="badge bad">차단</span>{% else %}진행{% endif %}</td>
+          <td>{{ s.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>수집 실태 — 도면 아카이브 (D-03)</h2>
+  {% if inventory %}
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>실측</th></tr></thead>
+      <tbody>
+        <tr><td>원본 도면</td><td>{{ inventory.total }} 건 / 제품 {{ inventory.products }} 종</td></tr>
+        <tr><td>파일명 완전일치 중복</td><td>{{ inventory.file_name_dup }} 건</td></tr>
+        <tr><td>0KB 손상</td><td>{{ inventory.zero_byte }} 건</td></tr>
+        <tr><td>제품당 도면 수</td><td>최대 {{ inventory.max_per_product }} · 최소 {{ inventory.min_per_product }} · 중앙값 {{ inventory.median_per_product }}</td></tr>
+        <tr><td>도면 1건뿐인 제품</td><td>{{ inventory.single_drawing_products }} 종</td></tr>
+        <tr><td>정제 후 등록 대상</td><td>{{ inventory.kept }} 건 (제외 {{ inventory.excluded }} — {{ inventory.excluded_by_reason }})</td></tr>
+        <tr><td>고객사 메타데이터</td><td>{{ inventory.customer_meta }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    발행일·개정일 메타데이터가 없어 <b>최종수정일(mtime)</b> 로 대체한다(TD5 `FILE_MTIME` 비고).
+    수집 실행은 <code>make cad-ingest</code> 다.
+  </p>
+  {% else %}
+  <p class="meta">{{ inventory_error }}</p>
+  {% endif %}
+</div>
+{% endblock %}

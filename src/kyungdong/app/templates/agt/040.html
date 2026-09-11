@@ -1,0 +1,21 @@
+{% extends "agt/_list.html" %}
+{% block extra %}
+<div class="card">
+  <h2>설비를 직접 제어하지 않는다 (2.5 방법론 개요 · D-01)</h2>
+  <p class="meta">
+    추천 값은 <b>사람이 검토·수정·승인</b>한 뒤에야 운영계획에 반영된다. 시스템이 설비에 값을 쓰는
+    경로는 없다. 추천 반영률과 예측오차는 <code>AGT_RECOMMENDATIONS</code> ·
+    <code>EST_ML_PREDICTIONS</code> 실측으로만 본다.
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>실측</th></tr></thead>
+      <tbody>
+        <tr><td>추천 전체 / 승인</td><td>{{ counts.total }} / {{ counts.adopted }}</td></tr>
+        <tr><td>반영률</td><td>{{ counts.adopt_rate if counts.adopt_rate is not none else empty_note }}</td></tr>
+        <tr><td>예측 결과</td><td>{{ counts.predictions }} 건</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

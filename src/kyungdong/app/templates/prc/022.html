@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.listing(current, td3, wired, current.path, mock.grid_columns, rows, empty_note,
+               {}, badges|default([]), notes|default([]), cards|default([])) }}
+{% endblock %}

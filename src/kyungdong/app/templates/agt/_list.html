@@ -1,0 +1,77 @@
+{% set page = (request.query_params.get('page') or '1')|int %}
+{% set size = (request.query_params.get('size') or '20')|int %}
+{# AI Agent 통합관리 목록 화면 골격 (039·040·041·042) — TD3 mockup 'list'.
+   AI 산출값은 신뢰도·근거·검토 상태를 함께 표시한다(layout_rules 'AI 결과 표기'). #}
+{% extends "base.html" %}
+{% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ screen.no }} {{ screen.name }}</h1>
+  <div class="meta">
+    {% for t in mockup.tabs %}{{ t }}{% if not loop.last %} &gt; {% endif %}{% endfor %} ·
+    {{ screen.requirement_id }} ↔ {{ screen.id }} ↔ {{ screen.program_id }}
+  </div>
+  <p>{% for b in badges %}<span class="badge {{ b.kind }}">{{ b.text }}</span> {% endfor %}</p>
+  {% if notices %}<ul class="meta">{% for n in notices %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+</div>
+
+<div class="card">
+  <h2>조회 조건</h2>
+  <form method="get" action="{{ screen.path }}">
+    <div class="tablewrap">
+      <table>
+        <thead><tr>{% for f in mockup.search_fields %}<th>{{ f }}</th>{% endfor %}</tr></thead>
+        <tbody><tr>
+          {% for f in mockup.search_fields %}
+          <td><input name="q{{ loop.index0 }}" value="{{ filters.get('q' ~ loop.index0, '') }}" aria-label="{{ f }}"></td>
+          {% endfor %}
+        </tr></tbody>
+      </table>
+    </div>
+    <p>
+      {% for b in mockup.buttons %}
+        {% if loop.first %}<button type="submit">{{ b }}</button>
+        {% else %}<button type="button" disabled title="{{ actions.get(b, '') }}">{{ b }}</button>{% endif %}
+      {% endfor %}
+    </p>
+    {% for b in mockup.buttons %}{% if not loop.first and actions.get(b) %}
+    <div class="meta">{{ b }} — {{ actions[b] }}</div>
+    {% endif %}{% endfor %}
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ mockup.tabs[-1] if mockup.tabs else screen.name }} — {{ rows|length }} 건</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>{% for c in mockup.grid_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>{% for cell in r.cells %}
+          <td>{% if r.link and loop.index0 == r.link_index %}<a href="{{ r.link }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
+        {% endfor %}</tr>
+        {% else %}
+        <tr><td class="empty" colspan="{{ mockup.grid_columns|length }}">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    페이지 {{ page }} · 쪽당 {{ size }}
+    {% if page > 1 %}<a href="?page={{ page - 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">이전</a>{% endif %}
+    {% if rows|length == size %}<a href="?page={{ page + 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">다음</a>{% endif %}
+  </p>
+</div>
+
+{% block extra %}{% endblock %}
+
+<div class="card">
+  <h2>설명 패널</h2>
+  {% for d in mockup.description %}
+  <h2>{{ d.title }}</h2>
+  {% for line in d.lines %}<pre class="src">{{ line }}</pre>{% endfor %}
+  {% endfor %}
+  <h2>사용 테이블 (SF-TD5)</h2>
+  <pre class="src">{{ td3.tables }}</pre>
+</div>
+{% endblock %}

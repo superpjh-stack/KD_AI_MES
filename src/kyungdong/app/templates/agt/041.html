@@ -1,0 +1,42 @@
+{% extends "agt/_list.html" %}
+{% block extra %}
+<div class="card">
+  <h2>알림 대상 데이터 범위 — 수집 지점 2개소 (D-06)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>수집 지점</th><th>구분</th><th>프로토콜</th><th>마지막 수집</th><th>상태</th></tr></thead>
+      <tbody>
+        {% for d in ingest.devices %}
+        <tr><td>{{ d.device_name }}</td><td>{{ d.device_type }}</td><td>{{ d.protocol }}</td>
+            <td>{{ d.last_collect_dt or '-' }}</td>
+            <td>{% if d.notice %}<span class="badge bad">{{ d.notice }}</span>{% else %}수집 중{% endif %}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="5">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    알림은 이 두 지점과 시스템 입력값에 한정된다. 그 밖의 공정은 <b>수동 입력</b>이라
+    실시간 알림 대상이 아니다 — 전 공정 실시간 감시를 있는 것처럼 표시하지 않는다.
+    알림 기준·수신 대상은 <code>SYS_CONFIGS</code>(알림기준) 가 정본이고 <a href="/sys/028">028 알림 설정</a>에서 관리한다.
+  </p>
+</div>
+
+<div class="card">
+  <h2>등록된 알림 기준 (SYS_CONFIGS)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>설정 키</th><th>알림 조건</th><th>수신 역할</th><th>채널</th></tr></thead>
+      <tbody>
+        {% for r in rules %}
+        <tr><td>{{ r.config_key }}</td><td>{{ r.alert_condition }}</td>
+            <td>{{ r.target_role_code }}</td><td>{{ r.alert_channel }}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="4">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -88,14 +88,35 @@ NOTICE_EMBEDDING / NOTICE_RAG_NO_EVIDENCE / NOTICE_INGEST_STALE
 `key` 목록: `validation`(422) · `unauthenticated`(401) · `forbidden`(403) · `db_down`(503) ·
 `llm_unconfigured`(501) · `cad_unconfigured`(501) · `internal`(500).
 
-**아직 없고 필요한 것 — 아키텍트가 만든다 (개발자는 시그니처를 믿고 쓴다)**
+**공용 4종 — 구현 완료**
 
 ```python
-validate_code(group: str, value: str) -> bool          # D-32 코드성 FK 검증. False → fail("validation")
-mask(value: str | None, kind: str) -> str              # G-29 개인정보 마스킹 (name·phone·email)
-anchor() -> datetime                                   # SYS_CONFIGS 시간 앵커 (§10-3, date.today() 금지)
-audit(request, screen_id: str, action: str) -> None    # SYS_ACCESS_LOGS 기록 (G-29)
+codes.validate_code(group, value) -> bool              # D-32 코드성 FK 검증
+codes.require_code(table, column, value) -> None       # 저장 전 호출. 위반 시 422
+pii.mask(value, kind) -> str                           # G-29 (name·phone·email·generic)
+clock.anchor() -> datetime                             # 시간 앵커 (§10-3, date.today() 금지). 없으면 예외
+audit.audit(request, screen_id, action, ...) -> None   # SYS_ACCESS_LOGS (G-29)
 ```
+
+**CSRF — `kyungdong.app.util.csrf` (D-105, 개발1 이 부재를 발견해 추가)**
+
+```python
+csrf.issue(request) -> str                # 렌더 시 발급. 세션(없으면 CSRF 쿠키)에 묶인다
+csrf.require(request, token) -> None      # 쓰기 처리 **첫 줄**. 위반 시 403
+csrf.valid(request, token) -> bool
+csrf.enforced() -> bool                   # KYUNGDONG_CSRF_ENFORCE
+FORM_FIELD = "_csrf" · HEADER = "X-CSRF-Token" · COOKIE = "kyungdong_csrf"
+```
+
+쓰기 폼이 있는 화면은 **전부** 아래 두 줄을 넣는다.
+```html
+<input type="hidden" name="_csrf" value="{{ csrf_token }}">
+```
+```python
+csrf.require(request, form.get("_csrf"))   # POST 처리 첫 줄
+```
+**강제 적용 시점**: 개발 3명이 전부 끝난 **조용한 창**에서 미들웨어로 켠다 —
+돌고 있는 동안 켜면 진행 중인 POST 가 403 으로 깨진다.
 
 ## 6. 설정 — `kyungdong.app.settings`
 

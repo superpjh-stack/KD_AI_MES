@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+
+<div class="d2-wrap">
+  <div class="d2-main">
+    {% if thread %}
+    <div class="card">
+      <h2>디지털 스레드 — {{ thread.project_no }} {{ thread.project_name }}
+        {% if thread.lot_no %}· {{ thread.lot_no }}{% endif %}</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>단계</th><th>테이블</th><th>키</th><th>값</th><th>연결</th></tr></thead>
+          <tbody>
+          {% for s in thread.steps %}
+          <tr>
+            <td class="d2-num">{{ s.n }}</td><td>{{ s.table }}</td><td>{{ s.key }}</td>
+            <td>{{ s.value }}</td>
+            <td>{% if s.ok %}<span class="badge notice">연결</span>
+                {% else %}<span class="badge undetermined">단절</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="d2-note">G-08 사슬 9단계. 끊긴 단계는 채우지 않고 <b>단절</b>로 그대로 보여 준다.</p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {}) }}
+      <p class="d2-note">조회 {{ rows|length }} 건 · 제품 LOT 열을 누르면 그 LOT 로 다시 조회한다.</p>
+    </div>
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
+{% endblock %}

@@ -4,4 +4,4 @@ from .audit import audit                                   # noqa: F401
 from .codes import (code_group_for, require_code,          # noqa: F401
                     unmapped_columns, validate_code)
 from .pii import mask                                      # noqa: F401
-from . import ratelimit, security, session                  # noqa: F401
+from . import csrf, ratelimit, security, session            # noqa: F401  (모듈로 노출 — 함수 재노출은 모듈을 가린다, D-106)

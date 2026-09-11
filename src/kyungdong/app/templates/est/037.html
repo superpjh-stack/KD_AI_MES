@@ -1,0 +1,57 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>전처리 규칙 (DAT_PREPROCESS_RULES)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>순서</th><th>규칙명</th><th>단계</th><th>적용 대상</th><th>규칙 내용</th><th>사용</th></tr></thead>
+      <tbody>
+        {% for r in rules %}
+        <tr><td>{{ r.apply_order }}</td><td>{{ r.rule_name }}</td><td>{{ r.rule_stage }}</td>
+            <td>{{ r.target_desc }}</td><td>{{ r.rule_expr }}</td><td>{{ r.use_yn }}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="6">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Train / Validation / Test 분할 (DAT_DATASET_SPLITS)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>데이터셋</th><th>구분</th><th>비율(%)</th><th>건수</th><th>분할 기준</th></tr></thead>
+      <tbody>
+        {% for s in splits %}
+        <tr><td>{{ s.dataset_name }}</td><td>{{ s.split_type }}</td><td>{{ s.split_ratio }}</td>
+            <td>{{ s.split_cnt }}</td><td>{{ s.split_rule }}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="5">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Label 확보 현황 — D-04</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>데이터셋</th><th>항목</th><th>Label</th><th>판정</th></tr></thead>
+      <tbody>
+        {% for c in coverage %}
+        <tr><td>{{ c.name }}</td><td>{{ c.total }}</td><td>{{ c.labeled }}</td>
+            <td>{% if c.labeled == 0 %}<span class="badge bad">{{ c.verdict }}</span>{% else %}{{ c.verdict }}{% endif %}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="4">{{ empty_note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    2.7.4 는 "실제 제조원가 기준 Label 정제" 를 요구하지만 <b>보유 규모가 확인되지 않았다(D-04)</b>.
+    Label 이 0 이면 견적·BOM·납기 정확도는 <b>측정 불가</b>이고, 합성 Label 로 대체하지 않는다.
+  </p>
+</div>
+{% endblock %}

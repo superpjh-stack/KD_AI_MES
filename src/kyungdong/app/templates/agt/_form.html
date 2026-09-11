@@ -1,0 +1,125 @@
+{# AI Agent 질의 화면 골격 (009 입고 · 020 출하 · 038 통합) — TD3 mockup 'form'.
+   폐쇄형이다. 외부 검색 0. 근거 0건이면 LLM 을 부르지 않는다.
+   AI 산출값은 신뢰도와 근거를 함께 표시한다(TD3 layout_rules 'AI 결과 표기'). #}
+{% extends "base.html" %}
+{% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ screen.no }} {{ screen.name }}</h1>
+  <div class="meta">
+    {{ screen.area }} · {{ screen.requirement_id }} ↔ {{ screen.id }} ↔ {{ screen.program_id }} ·
+    Agent 구분 {{ agent_type }}
+  </div>
+  <p>
+    {% for b in badges %}<span class="badge {{ b.kind }}">{{ b.text }}</span> {% endfor %}
+  </p>
+  <p class="meta">{{ closed_note }}</p>
+</div>
+
+<div class="card">
+  <h2>질의</h2>
+  <form method="post" action="{{ screen.path }}">
+    <div class="tablewrap">
+      <table>
+        <thead><tr>{% for f in mockup.search_fields %}<th>{{ f }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          <tr>
+            {% for f in mockup.search_fields %}
+            <td><input name="q{{ loop.index0 }}" value="{{ filters.get('q' ~ loop.index0, '') }}"
+                       aria-label="{{ f }}"></td>
+            {% endfor %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      {% for b in mockup.buttons %}
+        {% if loop.first %}
+      <button type="submit">{{ b }}</button>
+        {% elif b == '이력보기' %}
+      <a href="/agt/042">{{ b }}</a>
+        {% else %}
+      <button type="button" disabled title="{{ actions.get(b, '') }}">{{ b }}</button>
+        {% endif %}
+      {% endfor %}
+    </p>
+    <div class="meta">질의 내용은 {{ question_field }} 칸에 넣는다. 질의·응답·근거·응답시간은 AGT_QUERY_LOGS 에 100% 기록된다.</div>
+  </form>
+</div>
+
+{% if answer %}
+<div class="card">
+  <h2>응답</h2>
+  <p>
+    <span class="badge {{ 'notice' if answer.grounded else 'undetermined' }}">
+      {{ '근거 있음' if answer.grounded else answer.text }}</span>
+    <span class="badge notice">검색 모드 {{ answer.mode }}</span>
+    <span class="badge">신뢰도 {{ '%.4f'|format(answer.confidence) }} / 임계 {{ answer.threshold }}</span>
+    <span class="badge undetermined">{{ threshold_badge }}</span>
+    <span class="badge">응답 {{ answer.response_ms }} ms</span>
+  </p>
+  {% if answer.grounded %}<pre class="src">{{ answer.text }}</pre>{% endif %}
+  {% if answer.notice %}<p class="meta">{{ answer.notice }}</p>{% endif %}
+  {% if answer.handover %}<p class="meta">{{ answer.handover }}</p>{% endif %}
+  <h2>근거 ({{ answer.evidence|length }} 건)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>문서</th><th>구분</th><th>청크</th><th>점수</th><th>본문</th></tr></thead>
+      <tbody>
+        {% for e in answer.evidence %}
+        <tr><td>{{ e.doc_name }}</td><td>{{ e.doc_type }}</td><td>{{ e.chunk_seq }}</td>
+            <td>{{ '%.4f'|format(e.score) }}</td><td>{{ e.snippet }}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="5">근거 0건 — 검색되지 않은 문서명·조항을 지어내지 않는다</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">{{ answer.evidence_line }}</p>
+  <p class="meta">질의이력 기록: {% if answer.query_id %}AGT_QUERY_LOGS #{{ answer.query_id }}{% else %}
+    기록 실패 — 로그인 사용자를 확인할 수 없다(AGT_QUERY_LOGS.USER_ID 는 NOT NULL FK){% endif %}</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>이 Agent 가 쓰는 도구 (D-20 재배선)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>도구</th><th>TD5 테이블</th></tr></thead>
+      <tbody>
+        {% for name in toolset %}
+        <tr><td>{{ name }}</td><td>{{ rewiring[name] }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    허용목록 밖 도구 이름은 거부한다. 모든 조회는 읽기 전용이고 쓰기 동사를 쓰지 않는다.
+    견적 확정·발주·대체자재·검사 합격·출하는 <b>담당자 승인 대상</b>이다(G-24).
+  </p>
+</div>
+
+<div class="card">
+  <h2>참조 문서 범위</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>값</th></tr></thead>
+      <tbody>
+        <tr><td>문서 구분</td><td>{{ corpus.scope|join(' · ') }}</td></tr>
+        <tr><td>문서 / 청크</td><td>{{ corpus.docs }} / {{ corpus.chunks }}</td></tr>
+        <tr><td>임베딩된 청크</td><td>{{ corpus.embedded }} (벡터 차원 {{ vector_dim }} — D-31)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>설명 패널</h2>
+  {% for d in mockup.description %}
+  <h2>{{ d.title }}</h2>
+  {% for line in d.lines %}<pre class="src">{{ line }}</pre>{% endfor %}
+  {% endfor %}
+  <h2>사용 테이블 (SF-TD5)</h2>
+  <pre class="src">{{ td3.tables }}</pre>
+</div>
+{% endblock %}

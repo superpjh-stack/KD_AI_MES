@@ -1,0 +1,30 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>SHAP 영향요인 — 시드 여부 판정 (contracts/db-schema.md §7.1)</h2>
+  <p class="meta">
+    <b>판정: 런타임 전용 표다.</b> <code>EST_SHAP_FACTORS.PREDICT_ID</code> 는
+    <code>EST_ML_PREDICTIONS</code>(런타임 전용, G-11) 를 NOT NULL FK 로 본다 —
+    예측이 0건이면 SHAP 행은 <b>존재할 수 없다</b>. 그러므로 시드 대상이 아니고,
+    깨끗한 DB 에서 <b>0건이 정상</b>이며 화면은 `미수집` 문구를 낸다.
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>실측</th></tr></thead>
+      <tbody>
+        <tr><td>예측 결과 (EST_ML_PREDICTIONS)</td><td>{{ counts.predictions }} 건</td></tr>
+        <tr><td>SHAP 영향요인 (EST_SHAP_FACTORS)</td><td>{{ counts.shap }} 건</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>설명가능성 목표 ⑤</h2>
+  <p class="meta">
+    2.6-5 는 <b>SHAP Top-N 을 전문가 평가와 비교해 일치율 또는 Spearman ρ 로 검증</b>한다고 적었다.
+    그런데 <b>전문가 평가 변수 목록이 산출물에 없다(D-13)</b> — 일치율은 <span class="badge bad">차단</span> 이다.
+    전문가 변수 목록을 받은 뒤에 측정한다. 임의의 변수 집합을 만들어 비교하지 않는다.
+  </p>
+</div>
+{% endblock %}

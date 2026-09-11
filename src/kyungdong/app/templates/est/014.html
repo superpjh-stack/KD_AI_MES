@@ -1,0 +1,35 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>학습 준비 상태 — {{ readiness.status }}</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>실측</th></tr></thead>
+      <tbody>
+        <tr><td>학습 데이터셋 / 항목 / 분할</td><td>{{ readiness.datasets }} / {{ readiness.dataset_items }} / {{ readiness.splits }}</td></tr>
+        <tr><td>Label 이 있는 항목</td><td>{{ readiness.labeled_items }}</td></tr>
+        <tr><td>도면 / 확정 객체 / Feature</td><td>{{ readiness.drawings }} / {{ readiness.confirmed_objects }} / {{ readiness.features }}</td></tr>
+        <tr><td>단가 기준 / 모델 / 학습 실행</td><td>{{ readiness.cost_rates }} / {{ readiness.models }} / {{ readiness.runs }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>차단 사유</h2>
+  <ul class="meta">{% for b in readiness.blockers %}<li>{{ b }}</li>{% endfor %}</ul>
+</div>
+
+<div class="card">
+  <h2>AI 성능목표 5종 (사업계획서 2.6) — <span class="badge undetermined">목표치이고 달성값이 아니다</span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>#</th><th>항목</th><th>목표</th><th>산식·검증</th><th>현재 판정</th></tr></thead>
+      <tbody>
+        {% for t in readiness.targets %}
+        <tr><td>{{ t.no }}</td><td>{{ t.name }}</td><td>{{ t.target }}</td><td>{{ t.metric }}</td>
+            <td><span class="badge bad">차단</span> {{ t.blocked }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">Train / Validation / Test 분리 기준은 <code>DAT_DATASET_SPLITS</code> 가 정본이다(2.7.4 ⓸).</p>
+</div>
+{% endblock %}

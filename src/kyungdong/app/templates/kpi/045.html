@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "dsh/_kit.html" as kit %}
+{% import "kpi/_official.html" as off %}
+{% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+{{ kit.styles() }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {}) }}
+      <p class="d2-note">조회 {{ rows|length }} 건. 기존값·목표값·가중치는 사업계획서 1.5 확정값이고 개선율은 계산값이다.</p>
+    </div>
+    <div class="card">
+      <h2>KPI 측정 실적 (KPI_MEASURES)</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>코드</th><th>기간</th><th>표본</th><th>측정값</th><th>달성률</th><th>산출 근거</th><th>집계 일시</th></tr></thead>
+          <tbody>
+          {% if measures %}
+            {% for m in measures %}
+            <tr><td>{{ m.code }}</td><td>{{ m.period }}</td><td class="d2-num">{{ m.sample }}</td>
+                <td class="d2-num">{{ m.value }}</td><td class="d2-num">{{ m.achieve }}</td>
+                <td>{{ m.source }}</td><td>{{ m.at }}</td></tr>
+            {% endfor %}
+          {% else %}
+            <tr><td class="empty" colspan="7">미수집 (D-06) — 작업지시~포장완료 · 수주확정~출하 구간이 아직 없다. 0건은 정상이다 (G-11)</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
+{{ off.official_table(official, achieve_formula) }}
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>견적 산출 전제 — 지금 무엇이 막혀 있는가</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>전제</th><th>실측</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>원가 단가 기준 (EST_COST_RATES)</td><td>{{ counts.cost_rates }} 건</td>
+            <td>{% if counts.cost_rates == 0 %}<span class="badge bad">차단 (D-04)</span>{% else %}보유{% endif %}</td></tr>
+        <tr><td>견적 반영 가능한 Feature</td><td>{{ counts.features }} 건</td>
+            <td>{% if counts.features == 0 %}<span class="badge bad">차단 (D-05)</span>{% else %}보유{% endif %}</td></tr>
+        <tr><td>배포된 견적 모델</td><td>{{ counts.models }} 건</td>
+            <td><span class="badge undetermined">학습 미실시 — 다음 단독 회전</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    사업계획서 2.6-2 목표는 <b>±5% 이내(MAPE·MAE)</b> 다(D-11 판정). 그러나
+    <b>과거 견적금액·실제 제조원가 Label 확보 여부가 확인되지 않았다(D-04)</b> —
+    정확도를 <b>측정할 수 없다</b>. 수치를 만들어 적지 않는다.
+  </p>
+  <p class="meta">
+    승인 전 견적 확정은 <b>422</b> 다(§2.5). 승인 권한 없는 확정 시도는 <b>403</b> 이다(G-24).
+  </p>
+</div>
+{% endblock %}

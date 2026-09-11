@@ -1,0 +1,39 @@
+{% extends "est/_screen.html" %}
+{% block extra %}
+<div class="card">
+  <h2>Human-in-the-loop — 승인 전에는 확정이 아니다 (G-24 · TD3 011 체크)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>건수</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td>인식 객체</td><td>{{ counts.objects }}</td><td>Parsing↔Vision 정합성 검증 대상</td></tr>
+        <tr><td>확정(CONFIRM_YN='Y')</td><td>{{ counts.confirmed }}</td><td>검토자 승인을 거친 것만</td></tr>
+        <tr><td>검증 이력</td><td>{{ counts.reviews }}</td><td>수정 이력은 재학습 데이터로 축적</td></tr>
+        <tr><td>생성된 Feature</td><td>{{ counts.features }}</td><td>확정 객체만 집계</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    `CONFIRM_YN` 을 바꾸는 코드 경로는 <code>cad.pipeline.review_object()</code> 하나뿐이고,
+    <b>{{ area }} 승인 권한이 없으면 403</b> 이다. 현재 역할({{ role.name if role else '-' }})의 승인 권한:
+    <b>{{ '있음' if can_approve else '없음' }}</b>.
+  </p>
+</div>
+
+<div class="card">
+  <h2>집계 가능한 Feature 와 차단된 Feature (D-05)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Feature</th><th>상태</th><th>근거·사유</th></tr></thead>
+      <tbody>
+        {% for f, why in derivable.items() %}
+        <tr><td>{{ f }}</td><td>집계 가능</td><td>{{ why }}</td></tr>
+        {% endfor %}
+        {% for f, why in blocked.items() %}
+        <tr><td>{{ f }}</td><td><span class="badge bad">차단</span></td><td>{{ why }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
