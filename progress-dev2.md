@@ -1,0 +1,236 @@
+# progress-dev2.md — 개발2 (대시보드·공정·출하·KPI / 16화면 · 15표)
+
+경동글로벌텍 제조AI 플랫폼 (SF26179182 · 공급기업 주식회사 재일)
+회전 기준일: **시간 앵커 2026-09-10 09:00:00** (`SYS_CONFIGS.TIME_ANCHOR` · `date.today()` 미사용)
+
+---
+
+## 1. 채번 — 개발1 공표값을 그대로 쓴다
+
+개발1 이 `BAS_COMMON_CODES` 코드 그룹 **`LOT채번`** 에 공표했다. `db/seed_dev2.py` 는
+`numbering()` 으로 **DB 에서 읽는다** — 코드에 형식을 박아 두지 않는다(D-200).
+
+| 코드 | 형식 | 개발2 사용 |
+|---|---|---|
+| `WORK_ORDER_NO` | `WO-YYYY-NNNN` | `PRC_WORK_ORDERS.WORK_ORDER_NO` |
+| `PRODUCT_LOT_NO` | `PLOT-YYYY-NNN` | `SHP_LOT_TRACES.PRODUCT_LOT_NO` |
+| `SHIPMENT_NO` | `SH-YYYY-NNNN` | `SHP_SHIPMENTS.SHIPMENT_NO` · `/shp/016` 등록 |
+
+착수 시점에 `progress-dev1.md` 가 없어 TD3 목업 `grid_sample` 형식을 임시로 썼는데
+공표값과 **완전히 일치**했다. 코드가 없으면 목업 형식으로 되돌린다(fallback).
+
+---
+
+## 2. KPI — `app/kpi.py` 단일 소스 (가장 중요한 일)
+
+`src/kyungdong/app/kpi.py` **한 파일**에 산식이 있고 대시보드 001~004 · 현황판 `/board` ·
+KPI 043~045 · `db/seed_dev2.py` 가 **전부 같은 함수**를 부른다.
+
+| 코드 | 지표 | 기존 | 목표 | 감소율 | 가중치 | 구간 |
+|---|---|---|---|---|---|---|
+| `LEADTIME_MFG` | 제조 리드타임 | **1,320 h** | **1,080 h** | **−18.2 %** | 0.5 | `PRC_WORK_ORDERS.CONFIRM_DT` ~ `SHP_SHIPMENT_ITEMS.PACKING_DT` |
+| `LEADTIME_O2D` | 수주출하 리드타임 | **1,440 h** | **1,200 h** | **−16.7 %** | 0.5 | `EST_PROJECTS.ORDER_CONFIRM_DT` ~ `SHP_SHIPMENTS.SHIP_DT` |
+
+- **감소율은 계산값이다.** `improve_rate(base, target) = round((base−target)/base*100, 1)`.
+  18.2 / 16.7 을 상수로 박지 않았고 테스트가 독립 재계산으로 단언한다.
+- 측정근거 `MEASURE_BASIS` = 2025년 생산 일지(수주출하는 3개월분).
+- **표본 0건이면 `None`** 이고 화면은 `—` + `미수집` 을 렌더한다. 0.0 으로 메우지 않는다(G-11).
+- 달성률 산식은 정본에 없어 개발2가 정했다 — `(기존−측정)÷(기존−목표)×100`, **가설 D-202**.
+  화면에 산식을 함께 띄운다.
+- **`/kpi/044` 품질 KPI 는 공식 성과지표가 아니다.** `kpi.QualityKpi.official = False`,
+  화면 상단에 `공식 성과지표 아님` 배지 + 사유 문장을 띄운다(TD3 common_screens dashboard checks).
+
+---
+
+## 3. `contracts/db-schema.md` §7.1 "시드 여부 미정" 판정 — 개발2 몫 3건
+
+| 표 | 판정 | 근거 |
+|---|---|---|
+| `PRC_PROCESS_HISTORIES` | **시드 대상** — 공정실적 시드와 함께 채운다 | 024 공정이력조회가 LOT 축 중심 화면이고 G-08 사슬 6~7단계 사이를 잇는다. 외주 구간(소재가공·버핑)의 `OUTSOURCE_STEP` 반출/반입과 `HIST_STATUS` 단절도 여기서만 드러난다(D-41). `seed_dev2._seed_histories()` |
+| `PRC_CONDITION_DEVIATIONS` | **런타임 파생 — 시드 안 한다** (§7 로 이동 대상) | 표준 조건(`PRC_STD_CONDITIONS`)과 실측(`PRC_ACTUAL_CONDITIONS`)의 비교로만 나온다. 그런데 **표준 조건 초기값이 도입기업 미제공**이다(TD3 023 제약사항 → **D-203**). 표준이 없으면 편차도 없다. 023 화면은 `미확정 (D-203)` |
+| `SHP_CLAIM_CAUSES` | **런타임 전용 — 시드 안 한다** (§7 로 이동 대상) | 클레임 접수·원인분석 화면(019)에서 쌓인다. 초기 클레임 이력이 문서로만 존재한다(TD3 019 제약사항). `CLAIM_TYPE`·`CUSTOMER_CODE` 가 D-47 로 비워 둔 코드 그룹을 참조해 시드가 성립하지도 않는다 → **D-204** |
+
+덧붙여 `PRC_STD_CONDITIONS` · `PRC_ACTUAL_CONDITIONS` 도 같은 이유로 **시드하지 않는다**(D-203),
+`PRC_EQUIP_SIGNALS` 는 표 접두는 `PRC_` 지만 **수집 경로(개발3 ingest)가 채운다**(D-207).
+
+---
+
+## 4. 산출물 — 실측
+
+### 4.1 화면 16 + 현황판 = **17 경로 전부 200**
+
+| 경로 | 화면 | 특징 |
+|---|---|---|
+| `/dsh/001` | 생산현황 분석 | 카드 4(금일 실적수량·진행 작업지시·설비 가동률·지연 프로젝트) · 공정별 생산량 인라인 SVG · 프로젝트별 진행률 |
+| `/dsh/002` | 품질현황 분석 | 검사·불량 집계 · 기간별 불량 추이 · 공정별 불량 비중 |
+| `/dsh/003` | 설비상태 모니터링 | **수집 지점 `2 개소` 고정 카드** · 수집 중단 배지(G-12) · "설비 예지보전 AI는 본 사업 범위 밖" 명시 |
+| `/dsh/004` | 출하현황 분석 | 출하 예정/완료/지연 · 납기 준수율(OTD_YN) · 납기 임박 프로젝트 |
+| `/prc/021` | 공정실적관리 | 조회 5/6 + **실적 등록 POST** · 자동/수동 구분 |
+| `/prc/022` | 공정 데이터 모니터링 | `PRC_EQUIP_SIGNALS` 속도·압력·전류·온도 · 수집 범위 배지 |
+| `/prc/023` | 작업조건관리 | 표준조건 0건 → **`미확정 (D-203)`** |
+| `/prc/024` | 공정이력조회 | **디지털 스레드 도착지.** `?lot=` `?project=` 로 9단계 사슬 패널 표시 |
+| `/prc/025` | 공정데이터 분석 | 공정별 평균 체류시간·불량률·**병목 판정** |
+| `/shp/016` | 출하관리 | **출하 등록(422 통제) + 출하 확정(403 통제)** |
+| `/shp/017` | LOT추적관리 | **매핑 성공률** 카드 + 목표 85% 대비(D-23) |
+| `/shp/018` | 검사결과관리 | 수압·기밀·진공 · 출하 가능 LOT 카드 |
+| `/shp/019` | 클레임분석 | 0건 → **`미수집 (D-204)`** |
+| `/kpi/043` | 생산성 KPI 조회 | 확정값 4카드 + 실측/달성률 2카드 + 공식 지표 2종 표 |
+| `/kpi/044` | 품질 KPI 조회 | **`공식 성과지표 아님` 구분 표기** |
+| `/kpi/045` | KPI 관리 | `KPI_TARGETS` 그리드 + `KPI_MEASURES` 실적표 |
+| `/board` | 현황판 65" 2대 | 조회조건 없음 · `meta refresh` 자동 갱신 · 품질 지표는 비공식으로 분리 |
+
+- **차트는 전부 인라인 CSS/SVG** 다. 렌더 결과에 `http://`·`https://` **0건**(D-50) — 테스트가 단언.
+- 개발2 템플릿(19개)에 **미디어쿼리 0건**(§10-13) · `|safe` **0건**(§10-8) — 테스트가 단언.
+- TD3 목업의 `grid_columns` · `search_fields` · `buttons` 를 **전부** 렌더하고, 동작하지 않는
+  조회 조건·버튼은 `disabled` 로 두어 **미지원을 숨기지 않는다**.
+- 렌더 결과에 `(예시)` **0건** — 목업 예시 값을 화면에도 시드에도 넣지 않았다.
+
+### 4.2 디지털 스레드 (G-08)
+
+LOT·프로젝트번호 셀은 **전 화면에서** `/prc/024?lot=…` · `/prc/024?project=…` 로 간다
+(001 · 004 · 017 · 018 · 019 · 021 · 024 · 016 · `/board` 납기 리스크).
+024 는 9단계를 표로 보여 주고 **끊긴 단계는 `단절` 로 그대로 드러낸다** — 채워 넣지 않는다.
+
+### 4.3 출하 통제 (G-24) — 실측 확인
+
+| 상황 | 기대 | 실측 |
+|---|---|---|
+| 검사 **불합격** LOT 출하 등록 | 422 | 422 · "검사 합격 LOT 만 출하할 수 있다" |
+| 검사 **자체가 없는** LOT 출하 등록 | 422 | 422 · "출하검사 결과가 없다" |
+| 현장 작업자(OPERATOR)가 출하 확정 | 403 | 403 (출하물류관리 RW · A 없음) |
+| 시스템 관리자가 출하 확정 | 303 + 기록 | `SHIP_DT` = 시간 앵커 · `APPROVER_ID` 기록 · `SHIP_STATUS='완료'` · `OTD_YN` 산출 |
+| 확정된 출하를 다시 확정 | 422 | 422 |
+| 총괄PM(EXEC)이 공정실적 등록 | 403 | 403 (공정관리 R) |
+| 레이저커팅 외 공정에 `자동(PLC)` | 422 | 422 · "자동 수집은 레이저커팅 1공정(P40)뿐이다" |
+| 외주 2공정 실적 등록 | 422 | 422 · "발주·반출·반입 상태 관리다 (D-41)" |
+
+### 4.4 시드 — `db/seed_dev2.py`
+
+```
+시간 앵커        2026-09-10 09:00:00
+채번(개발1 공표)   WORK_ORDER_NO=WO-YYYY-NNNN · PRODUCT_LOT_NO=PLOT-YYYY-NNN · SHIPMENT_NO=SH-YYYY-NNNN
+KPI 목표         2 건   · KPI 실적 0 건
+```
+
+| 표 | 행 수(현재) | 비고 |
+|---|---|---|
+| `KPI_TARGETS` | **2** | 사업계획서 1.5 확정값. 두 번 돌려 **diff 0** |
+| `KPI_MEASURES` | 0 | 표본 0건 — 정상(G-11) |
+| `PRC_EQUIP_SIGNALS` | 6 | **개발3 수집 경로가 채웠다.** 개발2는 넣지 않는다(D-207) |
+| 나머지 12표 | 0 | **차단 — 아래 §5** |
+
+시드 출력 자체가 `차단·미시드` 절에 **사유를 전부 인쇄**한다. 조용히 건너뛰지 않는다.
+
+### 4.5 N건 경로 실측 (`tests/test_dev2_chain.py`)
+
+개발1·개발3 의 전제가 아직 0건이라 **테스트가 전제를 임시로 세우고 끝나면 되돌린다**
+(프로젝트 2건 · 품질기준 3건 · 고객사·품목 코드 2건 → 검증 후 전량 삭제, 삭제도 단언).
+이 상태에서 `seed_dev2.seed_chain()` 을 **그대로** 돌린 결과:
+
+| 표 | 행 수 |
+|---|---|
+| `PRC_WORK_ORDERS` | 14 (프로젝트 2 × 제조공정 7) |
+| `PRC_PERFORMANCES` | 10 (외주 2공정 제외 — 5공정 × 2) |
+| `PRC_PROCESS_HISTORIES` | 14 |
+| `SHP_LOT_TRACES` | 2 |
+| `SHP_INSPECTIONS` | 6 (LOT 당 수압·기밀·진공) |
+| `SHP_SHIPMENTS` / `SHP_SHIPMENT_ITEMS` | 2 / 2 |
+
+KPI 실측 (독립 재계산과 일치 — SQL 이 준 구간을 파이썬에서 다시 평균냈다):
+
+| 코드 | 표본 | 측정값 | 달성률 | 목표 대비 |
+|---|---|---|---|---|
+| `LEADTIME_MFG` | 2 | **1,175.0 h** | 60.4 % | 기존 1,320 → 목표 1,080 사이 |
+| `LEADTIME_O2D` | 2 | **1,285.0 h** | 64.6 % | 기존 1,440 → 목표 1,200 사이 |
+
+품질(비공식): 검사 6건 · 합격 6건 · 합격률 **100.0 %** · 공정 불량률 **0.0 %** · 클레임 발생률 **0.0 %**.
+**`/kpi/043` · `/kpi/045` · `/board` 가 같은 문자열(`1,175.0 h` · `1,285.0 h`)을 렌더**하는 것을
+테스트가 단언한다 — 산식이 한 곳에 있다는 증거다.
+
+`seed_chain()` 을 두 번 돌려 7개 표 행 수 **diff 0**(멱등 G-07).
+
+### 4.6 테스트
+
+| 파일 | 건수 | 무엇 |
+|---|---|---|
+| `tests/test_dev2_kpi.py` | 16 | 확정값 · 감소율 독립 재계산 · **0건 경로 `None`** · 화면 3곳 값 일치 |
+| `tests/test_dev2_screens.py` | 112 | 16화면+현황판 200 · RBAC 403 · 422 · **빈 그리드 문구 / 건수 카드 `0 건`** · CDN 0 · 미디어쿼리 0 · TD3 목업 항목 일치 |
+| `tests/test_dev2_chain.py` | 24 | **N건 경로** · 멱등 · 디지털 스레드 · KPI 독립 재계산 · 출하 통제 |
+| **합계** | **152** | 전건 통과 |
+
+0건 경로와 N건 경로를 **둘 다** 단언한다. `skip` 0건.
+
+---
+
+## 5. 차단 — 못 한 것은 못 했다고 적는다
+
+| # | 차단 | 누구 | 풀리면 |
+|---|---|---|---|
+| 1 | **`EST_PROJECTS` 0건** — 프로젝트(수주)번호가 G-08 최상위 키라 공정·LOT·검사·출하 시드 전부가 여기 걸린다 | 개발3 `db/seed_dev3.py` | `uv run python db/seed_dev2.py` 재실행만 하면 사슬 전체가 채워진다(§4.5 가 그 경로를 실증했다) |
+| 2 | **`BAS_QUALITY_STANDARDS` 0건** — `SHP_INSPECTIONS.QSTD_ID` 가 NOT NULL 이라 검사 결과를 만들 수 없고, 검사가 없으면 출하도 없다 | 개발1 | 위와 같다. 검사 항목명·단위는 **기준 데이터에서 읽는다**(지어내지 않는다) |
+| 3 | **`고객사`·`품목` 코드 그룹 0건**(D-47) — `SHP_SHIPMENTS.CUSTOMER_CODE` · `SHP_SHIPMENT_ITEMS.ITEM_CODE` 가 NOT NULL 코드성 FK다 (**D-206**) | 개발1/도입기업 | 프로젝트가 이미 그 코드를 쓰므로 개발3 시드 시점에 함께 풀린다 |
+| 4 | **표준 작업조건 미제공**(D-203) — 023·025 편차 분석이 성립하지 않는다 | 도입기업 | 표준 조건표 수령 후 023 에서 등록 |
+| 5 | **클레임 초기 이력 없음**(D-204) — 019 분석 신뢰도는 누적 후에 확보된다 | 도입기업 | 019 등록 화면은 다음 회전 |
+| 6 | ~~`tools/check_routes.py` G-03-③ FAIL 1건 (`app/util/security.py:3`)~~ → **해소됨.** 아키텍트가 고쳤고 재실측 `G-03-③ PASS — 렌더 0건 · 소스 0건` (D-208) | — | — |
+
+### 이번 회전에 만들지 않은 것 (의도적)
+
+- **019 클레임 등록·원인분석 POST** — 코드 그룹이 비어 있어 저장이 422 로만 끝난다(D-204). 조회만 만들었다.
+- **023 표준조건 등록 POST** — 표준값 정본이 없다(D-203). 조회만 만들었다.
+- **엑셀 다운로드·삭제·목표대비 비교 버튼** — 버튼은 TD3 목업대로 그리되 `disabled` + 사유 툴팁이다.
+  `DAT_DOWNLOAD_LOGS` 반출 통제(9.2 ①)는 개발1 `/dat/036` 소관이라 중복 구현하지 않았다.
+- **CSRF 토큰** — `settings().csrf_enforce` 는 있으나 `contracts/interfaces.md` 에 토큰 발급·검증
+  시그니처가 공표되지 않았다. 아키텍트가 공표하면 POST 3개(`/prc/021` · `/shp/016` · `/shp/016/approve`)에 붙인다.
+
+---
+
+## 6. 검증 — 보고 전에 직접 돌린 명령과 실측
+
+```
+$ uv run python db/seed_dev2.py          # 두 번 돌려 행 수 diff 0 · 출력 diff 0
+KPI_TARGETS 2 → 2 · KPI_MEASURES 0 → 0
+
+$ uv run pytest
+525 passed, 4 warnings in 13.9s          # 전체 (개발2 몫 152건)
+
+$ uv run pytest tests/test_dev2_kpi.py tests/test_dev2_screens.py tests/test_dev2_chain.py
+152 passed
+
+$ uv run python tools/check_routes.py
+G-06 메뉴 10영역 단일 소스: PASS
+G-03-① 전 화면 200 (50개): PASS
+G-03-② _placeholder 0건: PASS — 현재 0건
+G-03-③ 타 사업 용어 0건: PASS — 렌더 0건 · 소스 0건
+판정: PASS
+
+$ uv run python tools/gate.py
+G-01 테이블 68 PASS · G-02 컬럼 762 PASS · G-03 PASS · G-06 PASS · 정본 PASS · G-빌드 PASS(525)
+G-04·G-05·G-07~G-30 미구현 (QA1·QA2·QA3 검사기 미작성 — 개발2가 만들지 않는다)
+PASS 6 · FAIL 0 · 차단 0 · 미구현 6 / 12
+```
+
+---
+
+## 7. 소유 파일
+
+```
+src/kyungdong/app/kpi.py                        KPI 산식 단일 소스
+src/kyungdong/app/routers/dsh.py                001~004 + 개발2 공용 헬퍼 (D-209)
+src/kyungdong/app/routers/prc.py                021~025
+src/kyungdong/app/routers/shp.py                016~019  (020 은 개발3 — 건드리지 않았다)
+src/kyungdong/app/routers/kpi.py                043~045 + /board (D-205)
+src/kyungdong/app/templates/dsh/_kit.html       공용 매크로 · 인라인 SVG 차트
+src/kyungdong/app/templates/dsh/001~004.html
+src/kyungdong/app/templates/prc/021~025.html
+src/kyungdong/app/templates/shp/016~019.html
+src/kyungdong/app/templates/kpi/_official.html  공식 성과지표 2종 표 (043·044·045·board 공용)
+src/kyungdong/app/templates/kpi/043~045.html
+src/kyungdong/app/templates/board.html          현황판 65" 2대
+db/seed_dev2.py
+tests/test_dev2_{kpi,screens,chain}.py
+progress-dev2.md · decisions-dev2.md
+```
+
+**`app/main.py` 를 건드리지 않았다.** 라우터 4개에 `router` 와 `SCREENS` 만 두었다.
+`EST_*` · `AGT_*` · `BAS_*` · `INV_*` · `IF_*` 표는 **읽기만** 했다
+(예외: `tests/test_dev2_chain.py` 픽스처가 전제를 임시로 넣고 **되돌린다**).
