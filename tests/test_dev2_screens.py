@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
+from conftest import csrf_post                                   # noqa: E402
 from kyungdong.app import design, nav                            # noqa: E402
 
 DEV2_PATHS = [s.path for s in nav.owned_by("개발2")]
@@ -97,7 +98,7 @@ def test_권한_없는_역할은_403_이다():
 
 def test_등록_권한이_없으면_403():
     """총괄PM/경영자는 공정관리가 R 이다 — 실적 등록은 403."""
-    r = _client("EXEC").post("/prc/021", data={
+    r = csrf_post(_client("EXEC"), "/prc/021", {
         "work_order_id": 1, "process_code": "P50", "start_dt": "2026-08-18 08:30",
         "good_qty": 1, "defect_qty": 0})
     assert r.status_code == 403
@@ -108,13 +109,13 @@ def test_출하_확정은_승인_권한이_필요하다():
     from kyungdong.app import rbac
     assert rbac.can_write("OPERATOR", "출하물류관리")
     assert not rbac.can_approve("OPERATOR", "출하물류관리")
-    r = _client("OPERATOR").post("/shp/016/approve", data={"shipment_id": 1})
+    r = csrf_post(_client("OPERATOR"), "/shp/016/approve", {"shipment_id": 1})
     assert r.status_code == 403
 
 
 def test_자동_수집을_레이저커팅_밖으로_넓히면_422():
     """수집 지점은 2개소뿐이다 — 다른 공정에 자동(PLC)을 붙이면 계약 위반이다 (D-06)."""
-    r = _client("PRODUCTION").post("/prc/021", data={
+    r = csrf_post(_client("PRODUCTION"), "/prc/021", {
         "work_order_id": 1, "process_code": "P50", "start_dt": "2026-08-18 08:30",
         "good_qty": 1, "defect_qty": 0, "collect_method": "자동(PLC)"})
     assert r.status_code == 422
@@ -123,7 +124,7 @@ def test_자동_수집을_레이저커팅_밖으로_넓히면_422():
 
 def test_외주_공정_실적_등록은_422():
     """소재가공·버핑은 실적이 아니라 발주·반출·반입 상태다 (D-41)."""
-    r = _client("PRODUCTION").post("/prc/021", data={
+    r = csrf_post(_client("PRODUCTION"), "/prc/021", {
         "work_order_id": 1, "process_code": "P60", "start_dt": "2026-08-18 08:30",
         "good_qty": 1, "defect_qty": 0})
     assert r.status_code == 422
@@ -359,19 +360,29 @@ def test_G26_핸들러_첫_줄이_토큰을_검증한다():
 
 
 def test_G26_토큰이_없으면_403_있으면_통과한다():
-    """`CSRF_ENFORCE` 는 아직 0 이다(D-60) — 켠 상태와 끈 상태를 **둘 다** 단언한다."""
+    """켠 상태와 끈 상태를 **둘 다** 단언한다.
+
+    이 테스트는 두 상태를 직접 만들어 보므로, 끝나면 **원래 설정값으로 되돌린다** —
+    `0` 을 박아 넣으면 `KYUNGDONG_CSRF_ENFORCE=1` 로 돌릴 때 뒤따르는 테스트의 설정을 꺼 버린다.
+    """
     import os
 
     from kyungdong.app.settings import settings
 
     body = {"work_order_id": 1, "process_code": "P50",
             "start_dt": "2026-08-18 08:30", "good_qty": 1, "defect_qty": 0}
-    assert not settings().csrf_enforce      # 끈 상태: 토큰이 없어도 CSRF 로는 막지 않는다
-    assert _client("PRODUCTION").post("/prc/021", data=body).status_code != 403
-
-    os.environ["KYUNGDONG_CSRF_ENFORCE"] = "1"
-    settings.cache_clear()
+    was = os.environ.get("KYUNGDONG_CSRF_ENFORCE")
     try:
+        # ── 끈 상태: 토큰이 없어도 CSRF 로는 막지 않는다 ──
+        os.environ["KYUNGDONG_CSRF_ENFORCE"] = "0"
+        settings.cache_clear()
+        assert not settings().csrf_enforce
+        assert _client("PRODUCTION").post("/prc/021", data=body).status_code != 403
+
+        # ── 켠 상태: 토큰이 없으면 403, 화면이 발급한 토큰이면 통과 ──
+        os.environ["KYUNGDONG_CSRF_ENFORCE"] = "1"
+        settings.cache_clear()
+        assert settings().csrf_enforce
         c = _client("PRODUCTION")
         for path in CSRF_POSTS:
             assert c.post(path, data=body).status_code == 403, f"{path}: 토큰 없이 통과했다"
@@ -383,5 +394,8 @@ def test_G26_토큰이_없으면_403_있으면_통과한다():
         r = c.post("/prc/021", data={**body, "_csrf": token.group(1)})
         assert r.status_code != 403, f"유효 토큰인데 403 이다: {r.text[:300]}"
     finally:
-        os.environ["KYUNGDONG_CSRF_ENFORCE"] = "0"
+        if was is None:
+            os.environ.pop("KYUNGDONG_CSRF_ENFORCE", None)
+        else:
+            os.environ["KYUNGDONG_CSRF_ENFORCE"] = was
         settings.cache_clear()

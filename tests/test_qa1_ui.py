@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from conftest import csrf_post                                # noqa: E402
 from kyungdong.app import design, nav                        # noqa: E402
 from kyungdong.app.main import app                           # noqa: E402
 from kyungdong.app.settings import settings                  # noqa: E402
@@ -227,43 +228,61 @@ CSRF_POSTS = [(m, p, w) for m, p, w in route_decls() if m == "post"]
 
 
 def test_D60_CSRF_연결_실측을_남긴다():
-    """D-60 — 보고서에는 '27개 중 4곳' 이라고 적혀 있다. **직접 센다.**"""
-    wired = []
-    for p in ROUTERS:
-        src = p.read_text()
-        if re.search(r"csrf\.require\(", src):
-            wired.append(p.name)
+    """D-60 — **직접 센다.** DEF-QA1-002(0/27)는 해소됐다: 쓰기 라우터 전부가 `csrf.require()` 를 부른다.
+
+    **연결이 다시 풀리면 여기서 깨진다** — 이 단언을 되돌리지 말고 라우터를 고쳐라.
+    """
+    unwired = [p.name for p in ROUTERS
+               if re.search(r"@router\.(?:post|put|patch|delete)\(", p.read_text())
+               and not re.search(r"csrf\.require\(", p.read_text())]
+    calls = sum(len(re.findall(r"csrf\.require\(", p.read_text())) for p in ROUTERS)
     posts = len(CSRF_POSTS)
-    assert posts == 27, f"POST 라우트가 {posts}개다 — 실측을 갱신하라"
-    assert wired == [], (
-        f"csrf.require 가 연결된 라우터가 생겼다: {wired} — "
-        "outputs/qa1-기능계약.md 의 DEF-QA1-002 실측(0/27)을 갱신하라")
+    assert posts >= 27, f"POST 라우트가 {posts}개다 — 세는 방식이 바뀌었는지 확인하라"
+    assert unwired == [], f"쓰기 라우터인데 csrf.require 가 없다: {unwired}"
+    assert calls >= 28, f"csrf.require 호출이 {calls} 건으로 줄었다 — 연결이 풀렸는지 확인하라"
 
 
 def test_D60_꺼진_보안장치가_화면에_드러난다():
-    """G-30 — 조용히 꺼진 보안 장치를 만들지 않는다. 꺼졌으면 화면이 그 사실을 말해야 한다."""
-    assert settings().csrf_enforce is False, "CSRF_ENFORCE 가 켜졌다 — 실측을 다시 하라"
+    """G-30 — 조용히 꺼진 보안 장치를 만들지 않는다.
+
+    배지는 **설정을 따라야** 한다 — 꺼졌으면 뜨고, 켜졌으면 사라진다.
+    `KYUNGDONG_CSRF_ENFORCE` 양쪽 상태를 다 단언한다(한쪽만 박아 두면 켠 뒤 이 테스트가 거짓이 된다).
+    """
+    enforced = settings().csrf_enforce
     body = client.get("/", params={"as": "SYSADMIN"}).text
-    assert "CSRF 미적용 (D-60)" in body, "CSRF 가 꺼져 있는데 화면이 조용하다"
+    if enforced:
+        assert "CSRF 미적용 (D-60)" not in body, \
+            "CSRF 가 켜졌는데 화면이 아직 '미적용' 이라고 말한다"
+    else:
+        assert "CSRF 미적용 (D-60)" in body, "CSRF 가 꺼져 있는데 화면이 조용하다"
 
 
-def test_쓰기_폼에_CSRF_토큰_필드가_없다는_사실을_박아둔다():
-    """토큰 필드가 하나라도 생기면 이 테스트가 깨진다 — 그때 실측을 갱신한다."""
-    has_token = [p.relative_to(ROOT).as_posix() for p in TEMPLATES if "_csrf" in p.read_text()]
-    assert has_token == [], f"CSRF 토큰 필드가 생겼다: {has_token}"
+def test_쓰기_폼이_CSRF_토큰_필드를_싣는다():
+    """실측 갱신 — 토큰 필드가 생겼다. 이제 **없어지면** 깨지는 쪽으로 박아 둔다.
+
+    필드는 `_macros.html` 의 `csrf_field()` 한 곳에서 나온다(§10-16). 쓰기 폼이 있는 템플릿은
+    그 매크로를 부른다 — 화면이 토큰을 안 찍으면 브라우저가 쓰기를 할 수 없다.
+    """
+    field = [p.relative_to(ROOT).as_posix() for p in TEMPLATES
+             if 'name="_csrf"' in p.read_text()]
+    users = [p.relative_to(ROOT).as_posix() for p in TEMPLATES
+             if "csrf_field()" in p.read_text() and p.name != "_macros.html"]
+    assert field == ["src/kyungdong/app/templates/_macros.html"], \
+        f"토큰 필드가 매크로 밖에서도 찍힌다(정본 1곳이어야 한다): {field}"
+    assert len(users) >= 6, f"csrf_field() 를 부르는 템플릿이 {len(users)} 개다: {users}"
 
 
 @pytest.mark.xfail(strict=True, reason=(
     "DEF-QA1-003 — api-contract §5 는 `/api/agent/recommend/{id}/review` 인데 "
     "코드는 `/adopt` 다. 계약을 코드에 맞춰 다시 뽑아야 한다 (담당 아키텍트 gen_api_contract.py)"))
 def test_계약에_적힌_추천검토_경로가_실제로_있다():
-    r = client.post("/api/agent/recommend/999999/review", params={"as": "SYSADMIN"},
-                    data={"decision": "승인"})
+    r = csrf_post(client, "/api/agent/recommend/999999/review", {"decision": "승인"},
+                  page="/login", params={"as": "SYSADMIN"})
     assert r.status_code != 404, "계약에 적힌 경로가 404 다"
 
 
 def test_실제_추천검토_경로는_adopt다():
     """위 xfail 의 대조군 — 기능은 있고 **계약 문서의 경로만** 다르다."""
-    r = client.post("/api/agent/recommend/999999/adopt", params={"as": "SYSADMIN"},
-                    data={"decision": "승인"})
+    r = csrf_post(client, "/api/agent/recommend/999999/adopt", {"decision": "승인"},
+                  page="/login", params={"as": "SYSADMIN"})
     assert r.status_code == 422, f"/adopt 도 사라졌다 → {r.status_code}"

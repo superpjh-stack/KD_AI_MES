@@ -16,11 +16,17 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from conftest import csrf_post                             # noqa: E402
 from kyungdong.app import design, nav, rbac               # noqa: E402
 from kyungdong.app.main import app                        # noqa: E402
 from kyungdong.app.settings import settings               # noqa: E402
 
 client = TestClient(app, raise_server_exceptions=False)
+
+# 토큰을 꺼낼 화면. 브라우저는 **세션에 매인 토큰 하나**를 들고 다닌다(util/csrf.py `_bind` —
+# 토큰은 경로가 아니라 세션·쿠키에 묶인다). `/login` 은 6역할 전부가 열 수 있어,
+# 조회 권한이 없는 역할이 403 을 받는 이유가 **권한**임을 흐리지 않는다.
+TOKEN_PAGE = "/login"
 
 ROLES = tuple(rbac.roles())
 MATRIX = [(role, screen) for role in ROLES for screen in nav.all_screens()]
@@ -120,7 +126,7 @@ APPROVE_CASES = (
 @pytest.mark.parametrize("path,area,_kind,form", WRITE_CASES, ids=lambda v: str(v)[:24])
 def test_등록권한_없는_역할은_403이다(path, area, _kind, form):
     for role in ROLES:
-        r = client.post(path, params={"as": role}, data=form)
+        r = csrf_post(client, path, form, page=TOKEN_PAGE, params={"as": role})
         if rbac.can_write(role, area):
             assert r.status_code != 403, f"{role} 은 {area} 등록 권한이 있는데 {path} 가 403 이다"
         else:
@@ -132,7 +138,7 @@ def test_등록권한_없는_역할은_403이다(path, area, _kind, form):
 def test_승인권한_없는_역할은_403이다(path, area, form):
     """G-24 — 승인 없이 확정되면 결함이다. 승인 권한 없는 역할은 403."""
     for role in ROLES:
-        r = client.post(path, params={"as": role}, data=form)
+        r = csrf_post(client, path, form, page=TOKEN_PAGE, params={"as": role})
         if rbac.can_approve(role, area):
             assert r.status_code != 403, f"{role} 은 {area} 승인 권한이 있는데 {path} 가 403 이다"
         else:

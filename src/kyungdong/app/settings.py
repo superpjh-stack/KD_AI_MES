@@ -122,7 +122,7 @@ def settings() -> Settings:
         env=env,
         port=int(_env("PORT", "8020")),
         session_secret=secret,
-        csrf_enforce=_env("CSRF_ENFORCE", "0") not in ("0", "false", "False"),
+        csrf_enforce=_env("CSRF_ENFORCE", "1") not in ("0", "false", "False"),
         seed_password=_env("SEED_PASSWORD"),
         llm_provider=_env("LLM_PROVIDER"),
         llm_model=_env("LLM_MODEL"),

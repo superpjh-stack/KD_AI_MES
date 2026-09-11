@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
+from conftest import csrf_post, csrf_token                # noqa: E402
 from kyungdong.app.main import app                       # noqa: E402
 from kyungdong.app.util import clock                     # noqa: E402
 
@@ -49,11 +50,26 @@ TRACKED: tuple[tuple[str, str], ...] = (
 
 
 def post(path: str, data: dict, role: str = "SYSADMIN", **kw):
-    return client.post(path, data=data, headers={"x-kyungdong-role": role}, **kw)
+    # 실제 브라우저처럼 화면에서 받은 CSRF 토큰을 폼에 실어 보낸다 (D-102 · conftest)
+    return csrf_post(client, path, data, headers={"x-kyungdong-role": role}, **kw)
 
 
 def get(path: str, role: str = "SYSADMIN"):
     return client.get(path, headers={"x-kyungdong-role": role})
+
+
+def _upload(path: str, files: dict, role: str = "SYSADMIN", **form):
+    """파일 업로드 POST. 화면에서 받은 CSRF 토큰을 폼 필드로 함께 싣는다.
+
+    `csrf_post` 는 `**kw` 를 토큰을 꺼낼 GET 에도 넘기므로 `files=` 를 태울 수 없다 —
+    토큰만 `csrf_token` 으로 받아 직접 붙인다. **우회가 아니라 같은 경로다.**
+    """
+    headers = {"x-kyungdong-role": role}
+    data = {"action": "upload", **form}
+    token = csrf_token(client, path, headers=headers)
+    if token:
+        data["_csrf"] = token
+    return client.post(path, headers=headers, data=data, files=files)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -258,9 +274,7 @@ def test_헤더가_다른_엑셀은_422다():
     wb.active.append(["엉뚱한", "헤더"])
     buf = io.BytesIO()
     wb.save(buf)
-    r = client.post("/inv/007", headers={"x-kyungdong-role": "SYSADMIN"},
-                    data={"action": "upload"},
-                    files={"file": ("x.xlsx", buf.getvalue())})
+    r = _upload("/inv/007", {"file": ("x.xlsx", buf.getvalue())})
     assert r.status_code == 422
     assert "헤더" in r.text
 
@@ -273,8 +287,7 @@ def test_엑셀_적재가_성공행과_실패행을_모두_기록한다(codes_re
         ["ERP-T-002", "없는품목zzz", None, None, SUPPLIER_CODE, "테스트 공급처", 3, None,
          None, a, "불합격"],
     ])
-    r = client.post("/inv/007", headers={"x-kyungdong-role": "SYSADMIN"},
-                    data={"action": "upload"}, files={"file": ("in.xlsx", raw)})
+    r = _upload("/inv/007", {"file": ("in.xlsx", raw)})
     assert r.status_code == 200, r.text[:400]
 
     ok = conn.q1("select count(*) as n from IF_ERP_RECEIPTS "

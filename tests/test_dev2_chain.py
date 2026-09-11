@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                      # noqa: E402
 import seed_dev2                                                 # noqa: E402
+from conftest import csrf_post                                   # noqa: E402
 from kyungdong.app import kpi                                    # noqa: E402
 from kyungdong.app.util import clock                             # noqa: E402
 
@@ -285,7 +286,7 @@ def _client(role: str):
 
 
 def test_불합격_LOT_출하_등록은_422(ng_lot):
-    r = _client("PRODUCTION").post("/shp/016", data={"lot_trace_id": ng_lot})
+    r = csrf_post(_client("PRODUCTION"), "/shp/016", {"lot_trace_id": ng_lot})
     assert r.status_code == 422
     assert "검사 합격 LOT" in r.text
 
@@ -299,7 +300,7 @@ def test_검사가_아예_없는_LOT_도_출하_대상이_아니다(chain):
     ltid = int(conn.q1("select LOT_TRACE_ID from SHP_LOT_TRACES where PRODUCT_LOT_NO = %s",
                        (lot_no,))["lot_trace_id"])
     try:
-        r = _client("PRODUCTION").post("/shp/016", data={"lot_trace_id": ltid})
+        r = csrf_post(_client("PRODUCTION"), "/shp/016", {"lot_trace_id": ltid})
         assert r.status_code == 422
         assert "출하검사 결과가 없다" in r.text
     finally:
@@ -309,7 +310,7 @@ def test_검사가_아예_없는_LOT_도_출하_대상이_아니다(chain):
 def test_승인_권한이_없으면_출하_확정은_403(chain):
     sid = conn.q1("select SHIPMENT_ID from SHP_SHIPMENTS where PROJECT_ID = any(%s) limit 1",
                   (_project_ids(),))["shipment_id"]
-    r = _client("OPERATOR").post("/shp/016/approve", data={"shipment_id": int(sid)})
+    r = csrf_post(_client("OPERATOR"), "/shp/016/approve", {"shipment_id": int(sid)})
     assert r.status_code == 403
 
 
@@ -329,7 +330,7 @@ def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
            (ltid, qstd, chain["anchor"]))
     try:
         c = _client("SYSADMIN")
-        r = c.post("/shp/016", data={"lot_trace_id": ltid}, follow_redirects=False)
+        r = csrf_post(c, "/shp/016", {"lot_trace_id": ltid}, follow_redirects=False)
         assert r.status_code == 303, r.text[:400]
         sid = int(conn.q1(
             "select SHIPMENT_ID from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s",
@@ -338,7 +339,7 @@ def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
                           "where SHIPMENT_ID = %s", (sid,))
         assert pending["ship_dt"] is None and pending["ship_status"] == "승인대기"
 
-        r = c.post("/shp/016/approve", data={"shipment_id": sid}, follow_redirects=False)
+        r = csrf_post(c, "/shp/016/approve", {"shipment_id": sid}, follow_redirects=False)
         assert r.status_code == 303, r.text[:400]
         done = conn.q1("select SHIP_DT, APPROVER_ID, SHIP_STATUS, OTD_YN from SHP_SHIPMENTS "
                        "where SHIPMENT_ID = %s", (sid,))
@@ -348,7 +349,7 @@ def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
         assert done["otd_yn"] in ("Y", "N")
 
         # 두 번 확정하면 422
-        again = c.post("/shp/016/approve", data={"shipment_id": sid}, follow_redirects=False)
+        again = csrf_post(c, "/shp/016/approve", {"shipment_id": sid}, follow_redirects=False)
         assert again.status_code == 422
     finally:
         conn.x("delete from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s", (ltid,))

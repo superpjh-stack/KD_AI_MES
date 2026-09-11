@@ -101,6 +101,37 @@ def sources() -> dict[str, str]:
 # ══════════════════════════════════════════════════════════════════════════
 # G-26 전송·저장 보안
 # ══════════════════════════════════════════════════════════════════════════
+# ── CSRF (D-102 · G-26) ─────────────────────────────────────────────────
+# `KYUNGDONG_CSRF_ENFORCE=1` 이면 쓰기에 토큰이 필요하다. 검사기도 **실제 브라우저처럼**
+# 화면에서 받은 토큰을 폼에 실어 보낸다 — 검사를 우회하거나 면제 목록을 늘리지 않는다.
+_TOKEN_RE = re.compile(r'name="_csrf"\s+value="([^"]+)"')
+_TOKENS: dict[int, str] = {}
+
+
+def csrf_token_of(client: TestClient) -> str:
+    """이 클라이언트 세션의 CSRF 토큰. **한 번 받아 두고 재사용한다.**
+
+    토큰은 경로가 아니라 세션·쿠키에 매인다(util/csrf.py `_bind`) — 세션 하나에 토큰 하나다.
+    측정 창 안에서 화면을 다시 열면 `SYS_ACCESS_LOGS` 에 '접속' 행이 섞여 실측이 흐려지므로
+    **기준점을 잡기 전에** 받아 둔다(main 에서 미리 부른다).
+    """
+    got = _TOKENS.get(id(client))
+    if got is None:
+        m = _TOKEN_RE.search(client.get("/login").text)
+        got = _TOKENS[id(client)] = m.group(1) if m else ""
+    return got
+
+
+def cpost(client: TestClient, path: str, data: dict | None = None, **kw):
+    """토큰을 실어 POST 한다. 면제 경로(util/csrf.EXEMPT_PATHS)는 그대로 보낸다."""
+    payload = dict(data or {})
+    if csrf.exempt(path) is None:
+        tok = csrf_token_of(client)
+        if tok:
+            payload.setdefault(csrf.FORM_FIELD, tok)
+    return client.post(path, data=payload, **kw)
+
+
 def gate_26(client: TestClient) -> None:
     say("── G-26 HTTPS(TLS) · 외부 접속 최소화 · 비밀번호 해시 ──────────────")
     say("  ※ TLS 버전·저장 암호화 알고리즘은 **사업계획서에 없다(D-15)**. 여기서 정하지 않는다.")
@@ -438,18 +469,18 @@ def gate_29(client: TestClient) -> dict[str, int]:
     # 변경 · API · 오류
     # API — JSON 엔드포인트 / 화면 Agent(정상 갈래) / 화면 Agent(501 갈래) 를 나눠 잰다
     ma = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-    client.post("/api/agent/query", data={"question": "환율 적용 기준은 무엇인가",
-                                          "agent_type": "통합"},
-                headers={"x-kyungdong-role": "SYSADMIN"})
+    cpost(client, "/api/agent/query", {"question": "환율 적용 기준은 무엇인가",
+                                       "agent_type": "통합"},
+          headers={"x-kyungdong-role": "SYSADMIN"})
     api_json = n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (ma,))
     ma = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-    r_ok = client.post("/inv/009", data={"q1": "환율 적용 기준은 무엇인가"},
-                       headers={"x-kyungdong-role": "SYSADMIN"})
+    r_ok = cpost(client, "/inv/009", {"q1": "환율 적용 기준은 무엇인가"},
+                 headers={"x-kyungdong-role": "SYSADMIN"})
     api_screen = n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s "
                     "and LOG_TYPE = 'API'", (ma,))
     ma = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-    r_501 = client.post("/inv/009", data={"q1": "문서 누락 자재는 격리구역에 두는가"},
-                        headers={"x-kyungdong-role": "SYSADMIN"})
+    r_501 = cpost(client, "/inv/009", {"q1": "문서 누락 자재는 격리구역에 두는가"},
+                  headers={"x-kyungdong-role": "SYSADMIN"})
     api_err = n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (ma,))
     say(f"     API 감사 — JSON /api/agent/query → 기록 {api_json} 행 (기대 1) · "
         f"화면 /inv/009 정상({r_ok.status_code}) → API 기록 {api_screen} 행 (기대 1) · "
@@ -460,8 +491,8 @@ def gate_29(client: TestClient) -> dict[str, int]:
     if api_err == 0:
         bad.append("화면 Agent 질의가 501 로 끝나면 API 감사 기록이 남지 않는다 "
                    "(audit() 가 호출 뒤에 있어 예외 갈래를 지나친다)")
-    client.post("/bas/032", data={"code_group": "", "code_value": ""},
-                headers={"x-kyungdong-role": "SYSADMIN"})                        # 변경 시도
+    cpost(client, "/bas/032", {"code_group": "", "code_value": ""},
+          headers={"x-kyungdong-role": "SYSADMIN"})                              # 변경 시도
     client.get("/est/999", headers={"x-kyungdong-role": "SYSADMIN"})             # 없는 경로
     client.get("/est/010", headers={"x-kyungdong-role": "OPERATOR"})             # 403
     kinds = conn.q("select LOG_TYPE, count(*) as n from SYS_ACCESS_LOGS "
@@ -480,10 +511,10 @@ def gate_29(client: TestClient) -> dict[str, int]:
     say(f"     기록되지 않은 LOG_TYPE {missing_kind}")
 
     # ② 반출 이력 — 권한 있는 경로와 없는 경로를 둘 다 단언
-    r_ok = client.post("/sys/027", data={"action": "download"},
-                       headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
-    r_no = client.post("/sys/027", data={"action": "download"},
-                       headers={"x-kyungdong-role": "OPERATOR"}, follow_redirects=False)
+    r_ok = cpost(client, "/sys/027", {"action": "download"},
+                 headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
+    r_no = cpost(client, "/sys/027", {"action": "download"},
+                 headers={"x-kyungdong-role": "OPERATOR"}, follow_redirects=False)
     dl_added = count("DAT_DOWNLOAD_LOGS") - base_dl
     say(f"  ② 반출 — SYSADMIN {r_ok.status_code} · OPERATOR {r_no.status_code} (기대 403) "
         f"→ DAT_DOWNLOAD_LOGS +{dl_added} 행")
@@ -594,14 +625,14 @@ def gate_30(client: TestClient) -> dict[str, int]:
     from kyungdong.agent import retrieval as _ret
     hi_ev, _ = _ret.search(hi_q, agent_type="통합")
     hi_score = _ret.confidence(hi_ev)
-    r = client.post("/api/agent/query", data={"question": hi_q, "agent_type": "통합"},
+    r = cpost(client, "/api/agent/query", {"question": hi_q, "agent_type": "통합"},
                     headers={"x-kyungdong-role": "SYSADMIN"})
     say(f"  ② LLM 미구성 → POST /api/agent/query (신뢰도 {hi_score:.4f} ≥ 임계 "
         f"{settings().h('RAG_CONFIDENCE_MIN').value}) {r.status_code} (기대 501 LLM 미구성) "
         f"· 본문에 'LLM 미구성' {'있음' if 'LLM 미구성' in r.text else '없음'}")
     if r.status_code != 501:
         bad.append(f"LLM 미구성인데 {r.status_code} — 조용한 폴백 가능성")
-    r0 = client.post("/api/agent/query", data={"question": "환율 적용 기준", "agent_type": "통합"},
+    r0 = cpost(client, "/api/agent/query", {"question": "환율 적용 기준", "agent_type": "통합"},
                      headers={"x-kyungdong-role": "SYSADMIN"})
     say(f"     근거 0건 질의 → {r0.status_code} (기대 200 + '검토 필요 — 근거 부족') "
         f"· 문구 {'있음' if '근거 부족' in r0.text else '**없음**'}")
@@ -713,6 +744,7 @@ def main() -> int:
     say(f"DSN {settings().pg_dsn} · ENV {settings().env}")
     say()
     client = TestClient(app, raise_server_exceptions=False)
+    csrf_token_of(client)        # 기준점을 잡기 전에 토큰을 받아 둔다 (측정 창에 '접속' 행이 섞이지 않게)
     # 검사기가 만든 런타임 행만 지우려면 **시작 시점**을 기준으로 잡아야 한다.
     marks = {
         "maxa": n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS"),

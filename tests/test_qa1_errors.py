@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                   # noqa: E402
+from conftest import csrf_post                                 # noqa: E402
 from kyungdong.agent import llm, service as agent_service      # noqa: E402
 from kyungdong.app.main import app                             # noqa: E402
 from kyungdong.app.routers import bas as bas_router            # noqa: E402
@@ -36,6 +37,18 @@ from kyungdong.app.util import clock, http                     # noqa: E402
 from kyungdong.cad import pipeline as cad_pipeline, provider as cad_provider  # noqa: E402
 
 client = TestClient(app, raise_server_exceptions=False)
+
+# ── CSRF (D-102) ────────────────────────────────────────────────────────
+# 실제 브라우저는 화면에서 받은 토큰을 폼에 실어 보낸다. 테스트도 같아야 한다.
+# 아래 라우트는 **화면에 쓰기 폼이 아직 없다**(버튼이 disabled 다) — 토큰을 찍는 템플릿이
+# 없으므로 세션 토큰을 `/login` 에서 받는다. 토큰은 경로가 아니라 세션에 매인다(util/csrf.py `_bind`).
+FORMLESS = ("/est/011/review", "/est/012/confirm", "/est/013/confirm", "/api/agent/")
+
+
+def post(path: str, data: dict | None = None, **kw):
+    page = "/login" if path.startswith(FORMLESS) else None
+    return csrf_post(client, path, data, page=page, **kw)
+
 
 MSG = {c.status: c.message for c in http.CASES if c.status != 501}
 MSG_LLM = http.BY_KEY["llm_unconfigured"].message
@@ -73,21 +86,21 @@ def test_공통_팝업이_7종_문구를_전부_들고_있다():
                   "start_dt": "2026-09-01 08:00", "good_qty": "1"}),
 ])
 def test_422_0건경로_없는_대상은_422다(path, form):
-    r = client.post(path, params={"as": "SYSADMIN"}, data=form)
+    r = post(path, form, params={"as": "SYSADMIN"})
     assert r.status_code == 422, f"{path} → {r.status_code}"
     assert MSG[422] in r.text
 
 
 def test_422_필수값_누락은_422다():
-    r = client.post("/bas/030", params={"as": "SYSADMIN"}, data={"qstd_code": ""})
+    r = post("/bas/030", {"qstd_code": ""}, params={"as": "SYSADMIN"})
     assert r.status_code == 422 and MSG[422] in r.text
 
 
 def test_422_코드_위반은_422다():
     """D-32 — DB 가 막지 않는 코드성 FK 29건은 `util.codes` 가 막는다."""
-    r = client.post("/prc/021", params={"as": "PRODUCTION"},
-                    data={"work_order_id": "999999", "process_code": "QA1-없는공정",
-                          "start_dt": "2026-09-01 08:00", "good_qty": "1"})
+    r = post("/prc/021", {"work_order_id": "999999", "process_code": "QA1-없는공정",
+                          "start_dt": "2026-09-01 08:00", "good_qty": "1"},
+             params={"as": "PRODUCTION"})
     assert r.status_code == 422, f"없는 공정 코드로 실적이 들어갔다 → {r.status_code}"
     assert MSG[422] in r.text
 
@@ -95,10 +108,9 @@ def test_422_코드_위반은_422다():
 def test_422_외주공정_실적과_자동수집_사칭은_422다():
     """D-41 · D-06 — 없는 수집을 한 척하면 422."""
     base = {"work_order_id": "999999", "start_dt": "2026-09-01 08:00", "good_qty": "1"}
-    out = client.post("/prc/021", params={"as": "PRODUCTION"},
-                      data={**base, "process_code": "P20"})
-    auto = client.post("/prc/021", params={"as": "PRODUCTION"},
-                       data={**base, "process_code": "P30", "collect_method": "자동(PLC)"})
+    out = post("/prc/021", {**base, "process_code": "P20"}, params={"as": "PRODUCTION"})
+    auto = post("/prc/021", {**base, "process_code": "P30", "collect_method": "자동(PLC)"},
+                params={"as": "PRODUCTION"})
     assert (out.status_code, auto.status_code) == (422, 422)
 
 
@@ -172,8 +184,8 @@ def _cleanup() -> None:
 def test_422_N건경로_불합격_LOT_은_출하할_수_없다(failed_lot):
     """api-contract §6 — `SHP_SHIPMENTS` 는 **검사 합격 LOT 만**. 아니면 422."""
     before = int(conn.q1("select count(*) as n from SHP_SHIPMENTS")["n"])
-    r = client.post("/shp/016", params={"as": "PRODUCTION"},
-                    data={"lot_trace_id": str(failed_lot["lot_id"])})
+    r = post("/shp/016", {"lot_trace_id": str(failed_lot["lot_id"])},
+             params={"as": "PRODUCTION"})
     assert r.status_code == 422, f"불합격 LOT 이 출하됐다 → {r.status_code}"
     assert MSG[422] in r.text
     assert "검사 합격 LOT 만" in r.text, "422 는 났는데 사유가 검사 판정이 아니다"
@@ -195,8 +207,8 @@ def test_401_검토자를_확인할_수_없으면_401이다(monkeypatch):
     지금은 개발용 보조(D-40)가 역할로 사용자를 찾아 준다. 그 보조를 끄면 미인증 상태가 된다.
     """
     monkeypatch.setattr(agent_service, "resolve_user", lambda *_a, **_k: None)
-    r = client.post("/est/011/review", params={"as": "EXEC"},
-                    data={"object_id": "999999", "result": "승인"})
+    r = post("/est/011/review", {"object_id": "999999", "result": "승인"},
+             params={"as": "EXEC"})
     assert r.status_code == 401, f"미인증 검토 요청이 {r.status_code} 다"
     assert MSG[401] in r.text
 
@@ -214,13 +226,13 @@ def test_403_권한없는_화면은_403이다():
 
 def test_403_승인권한_없는_추천값_반영은_403이다():
     """G-24 — 승인 권한 없는 역할이 추천을 반영하려 하면 403."""
-    r = client.post("/api/agent/recommend/999999/adopt", params={"as": "OPERATOR"},
-                    data={"decision": "승인"})
+    r = post("/api/agent/recommend/999999/adopt", {"decision": "승인"},
+             params={"as": "OPERATOR"})
     assert r.status_code == 403
 
 
 def test_403_승인권한_없는_역할은_견적을_확정할_수_없다():
-    r = client.post("/est/012/confirm", params={"as": "QUALITY"}, data={"quote_id": "999999"})
+    r = post("/est/012/confirm", {"quote_id": "999999"}, params={"as": "QUALITY"})
     assert r.status_code == 403 and MSG[403] in r.text
 
 

@@ -35,6 +35,7 @@ from kyungdong.agent import citations, llm, retrieval, service   # noqa: E402
 from kyungdong.app import rbac                                   # noqa: E402
 from kyungdong.app.main import app                               # noqa: E402
 from kyungdong.app.settings import settings                      # noqa: E402
+from kyungdong.app.util import csrf                              # noqa: E402
 from kyungdong.cad import pipeline as cadpipe                    # noqa: E402
 from kyungdong.cad import provider as cadprov                    # noqa: E402
 from kyungdong.ml import datasets as mldata                      # noqa: E402
@@ -604,6 +605,32 @@ def _reversal_rag(items: list[dict]) -> dict[str, int]:
 # ══════════════════════════════════════════════════════════════════════════
 # G-24 HITL — 승인 없이 바뀌는 경로 0
 # ══════════════════════════════════════════════════════════════════════════
+# ── CSRF (D-102 · G-26) ─────────────────────────────────────────────────
+# `KYUNGDONG_CSRF_ENFORCE=1` 이면 쓰기에 토큰이 필요하다. 검사기도 **실제 브라우저처럼**
+# 화면에서 받은 토큰을 실어 보낸다 — 검사를 우회하거나 면제 목록을 늘리지 않는다.
+# 토큰은 경로가 아니라 세션·쿠키에 매인다(util/csrf.py `_bind`) — 세션 하나에 토큰 하나다.
+_TOKEN_RE = re.compile(r'name="_csrf"\s+value="([^"]+)"')
+_TOKENS: dict[int, str] = {}
+
+
+def csrf_token_of(client: TestClient) -> str:
+    got = _TOKENS.get(id(client))
+    if got is None:
+        m = _TOKEN_RE.search(client.get("/login").text)
+        got = _TOKENS[id(client)] = m.group(1) if m else ""
+    return got
+
+
+def cform(client: TestClient, path: str, form: dict) -> dict:
+    """폼에 토큰을 붙인다. 면제 경로(util/csrf.EXEMPT_PATHS)는 그대로 둔다."""
+    out = dict(form)
+    if csrf.exempt(path) is None:
+        tok = csrf_token_of(client)
+        if tok:
+            out.setdefault(csrf.FORM_FIELD, tok)
+    return out
+
+
 def gate_24(client: TestClient) -> None:
     say("── G-24 HITL — 승인 없이 확정되는 경로 0 ──────────────────────────")
     # ① 정적: 승인 필요 표를 바꾸는 코드 위치를 전부 센다
@@ -646,7 +673,7 @@ def gate_24(client: TestClient) -> None:
             writer = rbac.can_write(role, area)
             reader = rbac.can_read(role, area)
             allowed = approver if kind == "approve" else writer
-            r = client.request(method, path, data=form,
+            r = client.request(method, path, data=cform(client, path, form),
                                headers={"x-kyungdong-role": role}, follow_redirects=False)
             got = r.status_code
             if allowed:

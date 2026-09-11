@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import conn                                                    # noqa: E402
 import check_ai                                                # noqa: E402
+from conftest import csrf_post                                 # noqa: E402
 from kyungdong.agent import llm, retrieval, service            # noqa: E402
 from kyungdong.app import rbac                                 # noqa: E402
 from kyungdong.app.main import app                             # noqa: E402
@@ -248,8 +249,11 @@ def test_g24_confirm_requires_approval(client, path, form, area):
     """승인 권한 없는 역할은 **403**. 승인 권한 있는 역할은 403 이 아니다(D-84)."""
     denied = approved = 0
     for role in sorted(rbac.roles()):
-        r = client.request("POST", path, data=form,
-                           headers={"x-kyungdong-role": role}, follow_redirects=False)
+        # 실제 브라우저처럼 화면에서 받은 CSRF 토큰을 폼에 싣는다 (D-102).
+        # `/est/*/(review|confirm)` 은 화면 버튼이 아직 disabled 라 폼을 찍지 않는다 —
+        # 토큰은 경로가 아니라 세션에 매이므로(util/csrf.py `_bind`) `/login` 에서 받는다.
+        r = csrf_post(client, path, form, page="/login",
+                      headers={"x-kyungdong-role": role}, follow_redirects=False)
         if rbac.can_approve(role, area):
             approved += 1
             assert r.status_code != 403, \

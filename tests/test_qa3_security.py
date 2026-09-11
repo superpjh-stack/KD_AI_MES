@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                     # noqa: E402
+from conftest import csrf_post                                  # noqa: E402
 from kyungdong.app import nav, rbac                             # noqa: E402
 from kyungdong.app.main import app                              # noqa: E402
 from kyungdong.app.settings import settings                     # noqa: E402
@@ -62,27 +63,32 @@ def test_g26_password_hash_is_argon2_or_bcrypt():
             f"{r['login_id']}: bcrypt/Argon2 해시가 아니다 ({h[:12]!r})"
 
 
-def test_g26_csrf_is_not_wired_yet():
-    """**결함 표지 (DEF-QA3-001 / D-60·D-73)** — CSRF 가 POST 27개 중 0곳에 연결돼 있다.
+def test_g26_csrf_is_wired_on_every_post_route():
+    """**DEF-QA3-001 (D-60·D-73) 해소 실측** — POST 라우트 전부가 `csrf.require()` 를 부른다.
 
-    연결되면 이 테스트가 실패한다 → 그때 G-26 을 다시 재고 리포트를 갱신한다.
+    표지를 뒤집었다: 이제 **연결이 풀리면** 깨진다. 숫자를 낮춰 맞추지 말고 라우터를 고쳐라.
     """
     s = src_text()
     posts = sum(len(re.findall(r"@(?:router|app)\.post\(", t)) for t in s.values())
     calls = sum(len(re.findall(r"csrf\.require\(", t))
                 for f, t in s.items() if not f.endswith("util/csrf.py"))
-    tokens = [p.relative_to(ROOT).as_posix() for p in TEMPLATES if "_csrf" in p.read_text()]
+    tokens = [p.relative_to(ROOT).as_posix() for p in TEMPLATES if "csrf_field()" in p.read_text()]
     assert posts >= 27, f"POST 라우트가 {posts} 개다 — 세는 방식이 바뀌었는지 확인하라"
-    assert calls == 0 and tokens == [], (
-        f"CSRF 가 연결되기 시작했다 (호출 {calls}, 템플릿 {tokens}) — "
-        "DEF-QA3-001 해소 여부를 다시 재고 outputs/qa3-AI비기능보안.md 를 갱신하라")
+    assert calls >= posts, (
+        f"POST 라우트 {posts} 개에 csrf.require() 호출이 {calls} 건뿐이다 — 연결이 풀렸다")
+    assert tokens, "화면이 CSRF 토큰 필드를 하나도 찍지 않는다 — 브라우저가 쓰기를 할 수 없다"
 
 
 def test_g26_csrf_off_is_declared_on_screen(client):
-    """조용히 꺼진 보안 장치를 만들지 않는다(G-30). 꺼져 있으면 화면이 그렇게 말해야 한다."""
-    assert csrf.enforced() is False
+    """조용히 꺼진 보안 장치를 만들지 않는다(G-30).
+
+    배지는 설정을 **따라야** 한다 — 꺼져 있으면 뜨고, 켜져 있으면 사라진다. 양쪽을 다 단언한다.
+    """
     r = client.get("/", headers={"x-kyungdong-role": "SYSADMIN"})
-    assert "CSRF 미적용" in r.text, "CSRF 가 꺼져 있는데 화면이 그 사실을 말하지 않는다"
+    if csrf.enforced():
+        assert "CSRF 미적용" not in r.text, "CSRF 가 켜졌는데 화면이 아직 '미적용' 이라고 말한다"
+    else:
+        assert "CSRF 미적용" in r.text, "CSRF 가 꺼져 있는데 화면이 그 사실을 말하지 않는다"
 
 
 def test_g26_csrf_token_binds_to_session():
@@ -276,22 +282,24 @@ def test_g29_api_audit_has_two_holes(client):
     ma = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
     try:
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-        client.post("/api/agent/query",
-                    data={"question": "환율 적용 기준은 무엇인가", "agent_type": "통합"},
-                    headers={"x-kyungdong-role": "SYSADMIN"})
+        # `/api/agent/query` 는 화면이 없는 JSON API 다 — 토큰은 세션에 매이므로
+        # 브라우저가 그렇듯 `/login` 에서 받은 세션 토큰을 싣는다 (D-102).
+        csrf_post(client, "/api/agent/query",
+                  {"question": "환율 적용 기준은 무엇인가", "agent_type": "통합"},
+                  page="/login", headers={"x-kyungdong-role": "SYSADMIN"})
         assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (m,)) == 0, \
             "JSON Agent API 가 감사 기록을 남기기 시작했다 — 리포트를 갱신하라"
 
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-        r = client.post("/inv/009", data={"q1": "환율 적용 기준은 무엇인가"},
-                        headers={"x-kyungdong-role": "SYSADMIN"})
+        r = csrf_post(client, "/inv/009", {"q1": "환율 적용 기준은 무엇인가"},
+                      headers={"x-kyungdong-role": "SYSADMIN"})
         assert r.status_code == 200
         assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s "
                   "and LOG_TYPE = 'API'", (m,)) == 1, "정상 갈래의 API 감사까지 사라졌다"
 
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-        r = client.post("/inv/009", data={"q1": "문서 누락 자재는 격리구역에 두는가"},
-                        headers={"x-kyungdong-role": "SYSADMIN"})
+        r = csrf_post(client, "/inv/009", {"q1": "문서 누락 자재는 격리구역에 두는가"},
+                      headers={"x-kyungdong-role": "SYSADMIN"})
         assert r.status_code == 501
         assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (m,)) == 0, \
             "501 갈래에도 감사가 남기 시작했다 — 리포트를 갱신하라"
@@ -326,13 +334,15 @@ def test_g29_download_requires_permission_and_is_logged(client):
     """반출 — 권한 없음 403(0건 경로) · 권한 있음 기록(N건 경로). 넣은 행은 지운다."""
     mark = n1("select coalesce(max(DOWNLOAD_ID),0) as n from DAT_DOWNLOAD_LOGS")
     try:
-        r_no = client.post("/sys/027", data={"action": "download"},
-                           headers={"x-kyungdong-role": "OPERATOR"}, follow_redirects=False)
+        # 토큰은 6역할 전부가 열 수 있는 `/login` 에서 받는다 — 아래 403 이 **권한** 때문임을
+        # 흐리지 않기 위해서다(권한 없는 역할은 `/sys/027` 화면 자체를 열 수 없다).
+        r_no = csrf_post(client, "/sys/027", {"action": "download"}, page="/login",
+                         headers={"x-kyungdong-role": "OPERATOR"}, follow_redirects=False)
         assert r_no.status_code == 403
         assert n1("select count(*) as n from DAT_DOWNLOAD_LOGS where DOWNLOAD_ID > %s",
                   (mark,)) == 0, "권한 없는 반출 시도가 기록을 남겼다"
-        r_ok = client.post("/sys/027", data={"action": "download"},
-                           headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
+        r_ok = csrf_post(client, "/sys/027", {"action": "download"}, page="/login",
+                         headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
         assert r_ok.status_code in (200, 303)
         assert n1("select count(*) as n from DAT_DOWNLOAD_LOGS where DOWNLOAD_ID > %s",
                   (mark,)) == 1
@@ -364,8 +374,8 @@ def test_g30_llm_unconfigured_is_501_not_a_made_up_answer(client):
         "이 질의가 더 이상 임계를 넘지 못한다 — 501 경로를 재려면 다른 질의를 골라라"
     mark = n1("select coalesce(max(QUERY_ID),0) as n from AGT_QUERY_LOGS")
     try:
-        r = client.post("/api/agent/query", data={"question": q, "agent_type": "통합"},
-                        headers={"x-kyungdong-role": "SYSADMIN"})
+        r = csrf_post(client, "/api/agent/query", {"question": q, "agent_type": "통합"},
+                      page="/login", headers={"x-kyungdong-role": "SYSADMIN"})
         assert r.status_code == 501 and "LLM 미구성" in r.text
         assert n1("select count(*) as n from AGT_QUERY_LOGS where QUERY_ID > %s", (mark,)) == 1, \
             "501 로 끝난 질의도 AGT_QUERY_LOGS 에 남아야 한다 (100% 기록)"
