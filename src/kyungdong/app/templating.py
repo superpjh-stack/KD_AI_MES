@@ -46,6 +46,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         env=s.env,
         search_mode=s.search_mode,
         llm_configured=s.llm_configured,
+        csrf_enforced=s.csrf_enforce,
         cad_configured=s.cad_configured,
         **ctx,
     )

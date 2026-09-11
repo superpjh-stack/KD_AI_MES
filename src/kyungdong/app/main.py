@@ -96,11 +96,8 @@ async def popup_screen(request: Request):
                   common=design.common_screens()["popup"], cases=http.CASES)
 
 
-@app.get("/board")
-async def board_screen(request: Request):
-    return render(request, "board.html",
-                  common=design.common_screens()["dashboard"],
-                  refresh=settings().h("BOARD_REFRESH_SEC"))
+# `/board` 현황판은 **개발2 소유**다 — `routers/kpi.py` 가 등록한다(D-57).
+# 여기에 두면 한 경로에 핸들러가 둘이 된다. 아키텍트는 `board.html` 도 개발2 에게 넘겼다.
 
 
 @app.get("/error")

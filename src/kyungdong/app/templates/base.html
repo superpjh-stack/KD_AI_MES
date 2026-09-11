@@ -13,6 +13,7 @@
   {% if not llm_configured %}<span class="badge bad">LLM 미구성 (D-08)</span>{% endif %}
   {% if not cad_configured %}<span class="badge bad">CAD Parsing 미구성 (D-05)</span>{% endif %}
   <span class="badge notice">검색 모드 {{ search_mode }}</span>
+  {% if not csrf_enforced %}<span class="badge bad">CSRF 미적용 (D-60)</span>{% endif %}
   <span style="margin-left:auto" class="meta">{% if role %}{{ role.name }}{% endif %}</span>
 </header>
 <div class="layout">

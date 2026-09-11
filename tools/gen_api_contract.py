@@ -100,7 +100,9 @@ def main() -> int:
           "| 경로 | 메서드 | 설명 |", "|---|---|---|",
           "| `/api/agent/query` | POST | 통합 질의. **폐쇄형** — 외부 검색 0. 근거 0건이면 LLM 을 부르지 않고 `검토 필요` |",
           "| `/api/agent/history` | GET | `AGT_QUERY_LOGS` 조회 (화면 042) |",
-          "| `/api/agent/recommend/{id}/adopt` | POST | 추천 채택. **승인 권한 없으면 403**, `ADOPT_YN`·`ADOPT_BY` 기록 (G-24) |",
+          "| `/api/agent/recommend/{id}/review` | POST | 추천 검토·채택. **승인 권한 없으면 403**, "
+          "`AGT_RECOMMENDATIONS.REVIEW_STATUS`·`REVIEWER_ID` 기록 (G-24). "
+          "※ `ADOPT_YN`·`ADOPT_BY` 는 TD5 에 없다 — 직전 사업 컬럼명을 옮겨 적은 계약 오류였다(D-60) |",
           "",
           "질의·응답·근거·응답시간을 **100% `AGT_QUERY_LOGS` 에 기록**한다(G-20). "
           "LLM 미구성이면 **501**, 임베딩 미구성이면 200 + `tsvector_keyword` 라벨.",
@@ -112,7 +114,8 @@ def main() -> int:
           "| `SHP_INSPECTIONS` | 검사 합격 판정 | 품질 담당 |",
           "| `SHP_SHIPMENTS` | 출하 확정 — **검사 합격 LOT 만**(아니면 422) | 〃 |",
           "| `PRC_STD_CONDITIONS` | 표준 작업조건 변경 | 생산관리 |",
-          "| `EST_CAD_OBJECTS` | 객체인식 결과 확정 | HITL 검증자 — `EST_OBJECT_REVIEWS` 기록 |",
+          "| `EST_CAD_OBJECTS` | 객체인식 결과 확정 | HITL 검증자 — `EST_OBJECT_REVIEWS`"
+          "(`REVIEW_RESULT`·`REVIEWER_ID`·`BEFORE_VALUE`·`AFTER_VALUE`) 기록 |",
           "",
           "AI 는 **추천까지**다. 승인 전에는 **확정 상태로 표기하지 않는다**(TD3 standard_note 4).",
           ""]

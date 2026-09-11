@@ -19,9 +19,11 @@ db-schema: gen-schema           ## DB 초기화 + schema.sql 적용 → 테이�
 	@$(PSQL) -Atc "select '테이블 '||count(*) from information_schema.tables where table_schema='public'"
 	@$(PSQL) -Atc "select '컬럼 '||count(*) from information_schema.columns where table_schema='public'"
 
-db-seed:                        ## 멱등 시드 (시간 앵커 고정, 비밀번호 난수 1회 출력)
-	@test -f db/seed.py || (echo "db/seed.py 미작성 (아키텍트·개발1)"; exit 1)
+db-seed:                        ## 멱등 시드 — 공통 + 개발자 3종 (goal.md §9)
 	uv run python db/seed.py
+	@for s in db/seed_dev1.py db/seed_dev2.py db/seed_dev3.py; do \
+		if [ -f $$s ]; then echo "-- $$s"; uv run python $$s || exit 1; fi; \
+	done
 
 db-reset: db-schema db-seed     ## 종료 판정은 반드시 이것 뒤에 한다 (§10-4)
 
