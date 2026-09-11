@@ -76,3 +76,39 @@ D-01~D-27 은 `goal.md` §7 에서 착수 시 그대로 옮겨 적은 것이다.
 | **D-38** | 확정 | **업무영역과 구현 파일이 갈리는 화면 3건.** 009 입고 AI Agent · 020 출하 AI Agent → `routers/agt.py` · 037 AI학습 데이터관리 → `routers/est.py` (전부 개발3) | **URL·메뉴 위치는 산출물(SF-TD3) 그대로** 두고 구현 파일만 옮겨 "한 파일은 한 사람만" 을 지킨다. `nav.OWNER_OVERRIDE` · `contracts/screen-map.md` §1 ⚠ 행 |
 | **D-39** | 확정 | **역할 라벨에서 실명을 제거한다.** TD3 `role_matrix` 가 "총괄PM/경영자 (제미애 대표)" 처럼 실명을 포함한다 | UI·시드에는 직무명만 쓴다(G-29 개인정보). 산출물 원문은 `rbac.Role.source_label` 에 보관 |
 | **D-40** | 가설 | **인증 전까지 역할 전환 수단.** 인증은 개발1(웨이브 B) 몫이라, 그때까지 `?as=ROLE` 쿼리 또는 `X-Kyungdong-Role` 헤더로 역할을 바꿔 본다. 기본값 `SYSADMIN` | **개발 편의이며 prod 에서는 인증이 이 자리를 대체한다.** 개발1 이 인증을 넣을 때 이 미들웨어를 제거한다 — 남아 있으면 보안 결함 |
+
+## 회전 3에서 추가 (2026-09-11 · 웨이브 A 계약)
+
+### D-20 — Agent 시안 도구 11종 ↔ TD5 68표 재배선 (확정)
+
+`../08 AI Agent Making Agent/work-kyungdong-cockpit/kyungdong-globaltech-ai-agent/` 의 SQLite 12표를
+버리고 **도구 시그니처와 프롬프트 규칙만 이식**한다(goal.md §1.2). 아래가 재배선 정본이다.
+
+| 시안 도구 | TD5 테이블 | 비고 |
+|---|---|---|
+| `search_knowledge` | `AGT_VECTOR_DOCS` | 폐쇄형. 임베딩 미구성이면 `tsvector_keyword` 라벨(D-08) |
+| `get_rules` | `SYS_CONFIGS`(ALERT_CONDITION) + `BAS_QUALITY_STANDARDS` | **자동 실행 엔진이 아니다** — 조건·담당자·조치·근거만 조회 |
+| `get_db_records` | 허용목록 내 68표 | 읽기 전용. 쓰기 동사 금지 |
+| `get_project_summary` | `EST_PROJECTS` + `EST_CAD_DRAWINGS`(리비전) + `PRC_WORK_ORDERS` + `PRC_PERFORMANCES` | 시안 `projects`+`designs`+`operations` |
+| `get_material_status` | `INV_MATERIAL_LOTS` + `INV_STOCKS` + `INV_RECEIPTS`(MTC_NO) | 시안 `materials` |
+| `get_incoming_inspection_issues` | `INV_RECEIPTS` + `INV_SUPPLIER_QUALITY` | 시안 `incoming_inspections` |
+| `get_quote_analysis` | `EST_QUOTATIONS` + `EST_QUOTATION_ITEMS` + `EST_ML_PREDICTIONS` + `EST_SHAP_FACTORS` | 시안 `quote_predictions`. **데모 상수 예측값은 버린다** |
+| `get_procurement_risks` | `INV_SUPPLIERS`(SUPPLY_TYPE) + `INV_SUPPLIER_QUALITY`(OTD_RATE) + `EST_MATERIAL_REQS`(PO_NEED_YN) | 시안 `purchase_orders` — **발주 테이블이 없다(D-41)** |
+| `get_fat_quality` | `SHP_INSPECTIONS`(수압·기밀·진공) + `BAS_QUALITY_STANDARDS` | 시안 `fat_tests`. 프롬프트에서 FAT 는 **"출하 전 성능검사"** 로 풀어 쓴다 |
+| `get_lead_time_status` | `KPI_MEASURES` + `KPI_TARGETS` + `PRC_PERFORMANCES` + `EST_PROJECTS`(DUE_DT) + `SHP_SHIPMENTS` | `LEADTIME_MFG` · `LEADTIME_O2D`(D-35). **산식은 `app/kpi.py` 한 곳** |
+| `get_claim_trace` | `SHP_CLAIMS` + `SHP_CLAIM_CAUSES` + `SHP_LOT_TRACES` + `SHP_INSPECTIONS` | 시안 `claims` |
+| (시안 `equipment_readings`) | `PRC_EQUIP_SIGNALS` + `DAT_TIMESERIES` | 전용 도구 없음 — `get_db_records` 로 본다. **수집 지점 2개소뿐**(D-06) |
+
+**이식하는 규칙**: strict JSON schema · 허용목록 밖 도구 이름 거부 · 쓰기 동사 금지 ·
+프롬프트 7~10번(검색하지 않은 문서명·조항·페이지를 지어내지 않는다) · 5줄 형식 · `근거: …` 마지막 줄 ·
+승인 필요 명시(견적 확정·발주·대체자재·검사 합격·출하).
+**버리는 것**: SQLite 스키마 · `demo_data: true` · 데모 예측 상수 · OpenAI 고정 호출(공급자 추상화로 감싼다) ·
+Streamlit UI(FastAPI+Jinja2 로 대체, D-14) · `voice.py`(범위 밖).
+
+### 그 밖
+
+| ID | 상태 | 내용 | 처리 |
+|---|---|---|---|
+| **D-41** | 차단 | **외주 발주 관리 항목 부재.** TD1 `process_steps` 는 소재가공(외주)·버핑(외주) 데이터로 **"외주 발주번호, 자재 LOT, 반출·반입일, 외주처, 수량"** 을 적었으나, TD5 에 **외주 발주번호·외주처 컬럼이 없다.** 구매 발주(PO) 테이블도 없고 `EST_MATERIAL_REQS.PO_NEED_YN`(발주 필요 여부)뿐이다 | **컬럼을 추가하지 않는다**(G-02 762 고정). 있는 것으로 최대한 소화한다 — 반출·반입 이력은 `PRC_PROCESS_HISTORIES.OUTSOURCE_STEP` 과 `INV_MATERIAL_HISTORY.HIST_TYPE`(반출/반입), 외주처는 `INV_SUPPLIERS`(`SUPPLY_TYPE`='외주'), 외주 발주번호는 `PRC_WORK_ORDERS.WORK_ORDER_NO` 로 대체한다. 화면에 `대체 표기 (D-41)` 을 붙이고 **정규 컬럼 신설을 도입기업에 제안** |
+| **D-42** | 확정 | **`tools/check_trace.py` 는 QA1 이 만든다.** 아키텍트가 대신 만들지 않는다(§3.4 한 파일은 한 사람만) | 추적 1:1 자체는 `tests/test_arch_smoke.py::test_경로와_추적ID가_중복없이_1대1이다` 가 이미 단언한다. **게이트 G-04·G-05 는 QA1 이 올 때까지 `미구현`** 으로 남는다 — `미구현`은 PASS 가 아니다 |
+| **D-43** | 확정 | **계약 3종은 생성 파일이다.** `screen-map.md`(← `nav.py`) · `db-schema.md`(← TD5) · `api-contract.md`(← `nav.py`+TD4). `interfaces.md` 만 손으로 쓴다 | 손으로 고치면 어긋난다. `make contracts` 로 다시 뽑는다 |

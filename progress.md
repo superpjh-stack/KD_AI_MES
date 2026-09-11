@@ -159,3 +159,77 @@ PASS 5 · FAIL 1 · 차단 0 · 미구현 6  /  12
 - **담당 라우터가 placeholder 를 이긴다.** 개발자는 `app/routers/<module>.py` 에 `router` 와 `SCREENS = ("MES-TD3-0nn", …)` 를 두면 된다. main.py 는 건드리지 않는다.
 - `contracts/screen-map.md` 는 **생성 파일**이다. `nav.py` 를 고치고 `uv run python tools/gen_screen_map.py` 를 다시 돌린다.
 - 게이트 판정을 볼 때 **`미구현` 6건이 PASS 가 아니다.** 현재 진짜 측정된 것은 G-01·G-02·G-03·G-06·빌드뿐이다.
+
+---
+
+## 2026-09-11 회전 3 — 웨이브 A 완료 (아키텍트)
+
+### 게이트 실측 — `make gate`
+
+```
+G-01 68 PASS · G-02 762 PASS · G-06 PASS · 정본 PASS · G-빌드 PASS (70 passed)
+G-03 FAIL — ①200 PASS / ②placeholder 45 FAIL / ③용어 PASS
+G-04·G-05 · G-07~G-30  미구현 (QA 검사기 미작성)
+──────────────────────────────────────────
+PASS 5 · FAIL 1 · 차단 0 · 미구현 6  /  12   (회전 2와 동일 — 웨이브 A 는 게이트를 올리는 일이 아니라 개발 3명이 코드를 쓸 수 있게 하는 일이다)
+```
+
+### 만든 것
+
+| 파일 | 역할 | 실측 검증 |
+|---|---|---|
+| `db/conn.py` | `q`·`q1`·`x`·`tx`·`alive`. **DB 장애 → 503**(빈 배열 금지) · dict 행 · 파라미터 바인딩 강제 | DSN 을 죽였을 때 **HTTP 503 `db_down`** 확인. 0건은 `None`(정상) |
+| `contracts/screen-map.md` | 화면 45행 + 소유권 + 모듈별 + 공통 + RBAC 표 | 생성. G-06 PASS |
+| `contracts/db-schema.md` | 68표·762컬럼 · 물리 FK 98 · **코드성 29(D-32)** · 오표기 1(D-33) · 디지털 스레드 · 개인정보 6 · 런타임전용 11 + **미정 6** | 생성 |
+| `contracts/api-contract.md` | 45화면 라우트 + 공통 5 + EIF 4 + 오류 7종 + Agent API + **승인 필요 쓰기 6종** | 생성 |
+| `contracts/interfaces.md` | 공용 시그니처 9절. **아직 없는 것 4종**(`validate_code`·`mask`·`anchor`·`audit`)도 시그니처를 먼저 공표 | 손으로 작성 |
+| `tools/gen_{screen_map,db_contract,api_contract}.py` · `make contracts` | 계약 3종 생성기 | 재생성 무변화 테스트로 잠금 |
+| `tests/test_arch_contracts.py` | 계약 드리프트 · DB 503 · 0건 None · 바인딩 · D-32 전건 등재 · 런타임전용 미정 구분 | **70 passed** (회전 2 59 → +11) |
+
+### 실측으로 확인한 것
+
+| 항목 | 실측 |
+|---|---|
+| 물리 FK | **98** (TD5 FK 표기 128 − 코드성 29 − 오표기 1) |
+| **코드성 FK (D-32)** | **29건** — `VARCHAR` 컬럼이 `BAS_COMMON_CODES.CODE_ID BIGSERIAL` 을 가리킨다. **DB 가 막지 않으므로 애플리케이션 검증 필수.** 계약 §3 에 전건 등재(테스트로 잠금) |
+| 개인정보 (G-29) | **6컬럼** — 암호화 저장 + 화면 마스킹 |
+| 런타임 전용 (G-11) | **확실한 것 11표**만 계약에 넣었다 |
+| 시드 여부 **미정 6표** | `INV_MATERIAL_HISTORY` · `PRC_PROCESS_HISTORIES` · `PRC_CONDITION_DEVIATIONS` · `EST_SHAP_FACTORS` · `INV_SUPPLIER_QUALITY` · `SHP_CLAIM_CAUSES` — **담당 개발자가 판정한다** |
+
+### 이번에도 짐작을 계약에 넣을 뻔했다
+
+런타임 전용 표를 **이름 휴리스틱**(`_HISTORY`·`_DEVIATIONS`)으로 뽑았더니 `INV_MATERIAL_HISTORY`(원자재 이력)·
+`PRC_CONDITION_DEVIATIONS`(작업조건 편차)까지 "0건이 정상" 으로 분류됐다. **시드 대상 업무 데이터일 수 있다.**
+G-11 판정이 여기에 걸려 있으므로 **확실한 것(로그·버퍼)만 계약에 넣고 나머지 6표는 §7.1 '미정' 으로 넘겼다.**
+담당 개발자가 판정해 옮긴다.
+
+### 새 산출물 결함 — D-41
+
+**외주 발주 관리 항목이 없다.** TD1 `process_steps` 는 소재가공(외주)·버핑(외주)의 데이터로
+"외주 발주번호, 자재 LOT, 반출·반입일, 외주처, 수량" 을 적었는데 TD5 에 **외주 발주번호·외주처 컬럼이 없다.**
+구매 발주(PO) 테이블도 없고 `EST_MATERIAL_REQS.PO_NEED_YN` 뿐이다.
+→ **컬럼을 추가하지 않고**(G-02 762 고정) 있는 것으로 소화한다: 반출·반입은 `PRC_PROCESS_HISTORIES.OUTSOURCE_STEP` ·
+`INV_MATERIAL_HISTORY.HIST_TYPE`, 외주처는 `INV_SUPPLIERS(SUPPLY_TYPE='외주')`, 발주번호는 `PRC_WORK_ORDERS.WORK_ORDER_NO`.
+화면에 `대체 표기 (D-41)` 을 붙이고 정규 컬럼 신설을 제안한다.
+
+### D-20 Agent 도구 재배선 확정
+
+시안 11종을 TD5 68표에 전부 매핑했다(decisions.md D-20 표). 시안 `purchase_orders` 만 대응표가 없어 D-41 로 갔다.
+**프롬프트 7~10번(검색하지 않은 문서를 지어내지 않는다)·5줄 형식·`근거:` 줄·승인 명시**를 이식하고,
+SQLite 스키마·`demo_data`·데모 예측 상수·Streamlit·`voice.py` 는 버린다.
+
+### 지금 해야 할 것 (회전 4)
+
+**웨이브 A 는 끝났다. 다음은 웨이브 B(개발 3명 병렬)이고 여기서 토큰이 크게 는다 — 사용자 확인을 받는다.**
+
+확인을 기다리는 동안 아키텍트가 혼자 할 수 있는 잔여분을 한다(에이전트 0):
+
+1. `app/util/` 공용 4종 — `validate_code()`(D-32 코드성 FK 검증) · `mask()`(G-29) · `anchor()`(§10-3 시간 앵커) · `audit()`(G-29 `SYS_ACCESS_LOGS`)
+2. `db/seed.py` 뼈대 — 시간 앵커 발급 · 역할 6 · 계정 난수 1회 출력 · `BAS_COMMON_CODES` 10공정 + 제품군 5종
+3. `app/util/` 세션·속도제한·보안헤더·CSRF (§10-12)
+
+### 알아둘 것
+
+- **계약 3종은 생성 파일이다**(D-43). 손으로 고치면 `test_계약을_다시_뽑아도_같다` 가 잡는다. `make contracts` 로 갱신한다.
+- **`tools/check_trace.py` 는 QA1 몫이다**(D-42). 아키텍트가 대신 만들지 않는다 — G-04·G-05 는 QA1 이 올 때까지 `미구현` 이고 **`미구현`은 PASS 가 아니다**. 추적 1:1 자체는 스모크 테스트가 이미 단언한다.
+- 개발자는 `main.py` 를 건드리지 않는다. 자기 `app/routers/<module>.py` 에 `router` 와 `SCREENS = (...)` 만 두면 placeholder 에서 빠진다.

@@ -1,7 +1,7 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest test \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
-        gate gate-full
+        gate gate-full contracts
 
 DB   ?= kyungdong_db
 PORT ?= 8020
@@ -49,3 +49,8 @@ gate:                           ## 읽기 전용 판정표 — 루프가 매 회
 	uv run python tools/gate.py
 
 gate-full: db-reset gate        ## 회전 마감·종료 판정용 (조용한 창에서만 — §10-17)
+
+contracts:                      ## 계약 3종 재생성 (screen-map · db-schema · api-contract)
+	uv run python tools/gen_screen_map.py
+	uv run python tools/gen_db_contract.py
+	uv run python tools/gen_api_contract.py
