@@ -1,0 +1,423 @@
+# QA2 — 데이터 정합·수집 (경동글로벌텍 제조AI · SF26179182)
+
+측정 기준일: 시간 앵커 `2026-09-10 09:00:00` (`SYS_CONFIGS.TIME_ANCHOR`)
+측정 명령: `make db-reset` → `check_schema` → `check_data` → `check_ingest` → `pytest` → `gate.py`
+**연속 2회 판정 동일**(§4.4-3) — 아래 판정표는 두 번 돌려 같은 값이다.
+
+> **고치지 않았다. 게이트를 낮추지 않았다.** 못 맞춘 것은 `FAIL`, 전제가 막혀 못 잰 것은
+> `차단`/`판정 불가` 로 적었다. 없는 데이터를 만들어 통과시킨 항목은 없다.
+
+---
+
+## 0. 판정표 (게이트별 · §10-6)
+
+| 게이트 | 판정 | 실측 |
+|---|---|---|
+| **G-01** 테이블 68 | **PASS** | DB 68 / information_schema 68 / TD5 68 · 누락 0 · 초과 0 |
+| **G-02** 컬럼 762 | **PASS** | DB 762 / IS 762 / TD5 762 · **이름·타입 762건 전수 대조** · 이름누락 0 · 이름초과 0 · 타입불일치 0 · 미대조타입 0 |
+| **G-07** 시드 멱등 | **PASS** (조용한 창) / **판정 불가** (동시 측정) | `make db-seed` ×2 → 68표 행수 diff **0종** · 앵커 불변 · `date.today()`/미허용 `datetime.now()` **0건**. **뒤이은 재측정에서는 다른 에이전트가 같은 DB 에 쓰고 있어 `판정 불가`(§10-17)** — 아래 §7 |
+| **G-08** 디지털 스레드·LOT 매핑 ≥85% | **차단** | `SHP_LOT_TRACES` 0건 · 사슬 8단계 전부 분모 0 → **0%도 100%도 아니다**. 전제 `EST_PROJECTS` 0건(D-47·D-56) |
+| **G-09** 정확성·정합성·연계성 각 ≥85% | **차단** | 세 지표 모두 분모 0 → 판정 불가 |
+| **G-10** 시계열 | **차단** | `DAT_TIMESERIES` 0 · `PRC_EQUIP_SIGNALS` 0 (db-reset 직후 정상). 정렬·결측 표본 없음. **동기화율 목표는 사업계획서에 없다(D-09) → 실측만 보고** |
+| **G-11** 조용한 빈칸 | **PASS** | 빈 그리드 **35개 전부 문구 있음**(위반 0) · N건 그리드 **61개** · `0 건` 카드 **40개에 거짓 문구 0** · 분모 0 비율카드 13개에 `0 %` 메움 0 |
+| **G-12** 수집 | **FAIL** | 지점 2개소 ✔ · 적재 96/96 유실 0 ✔ · 순서 보존 ✔ · 버퍼 3배치 재전송 유실 0 ✔ · **화면 수집중단 표시 결함 2건** |
+| **G-13** 전처리 | **FAIL** | 단위 표준화 ✔ · 중복 제거 ✔ · **결측 보정 없음 · 이상치 처리 없음 · Feature 1/6종 · 처리 건수 미기록** |
+| **KPI 독립 재계산** | **PASS** | QA 자작 SQL = `app/kpi.py` = `KPI_TARGETS` = 화면 4종 문자열 **전부 일치** |
+
+`uv run python tools/gate.py` → `PASS 6 · FAIL 4 · 차단 0 · 미구현 2 / 12` · `G-빌드 1140 passed, 3 skipped, 3 xfailed`
+
+**빌드 수치는 참고값이다** — 측정 중 QA1 이 `tests/test_qa1_*.py` 5종과 `tools/check_trace.py` 를
+동시에 쓰고 있었다(§10-17). QA2 소유 게이트(G-01·02·07~13)는 검사기가 **정본·스키마 지문을
+측정 전후로 대조**하므로(§10-17) 이 동시 변경에 오염되지 않았다 —
+`design.json 9772b6cd5ea1 · DB 스키마 67f182cdd353` 측정 전후 동일.
+
+---
+
+## 1. 결함
+
+### DEF-QA2-001 — `/dsh/003`·`/prc/022` 의 '수집 중단' 배지가 **운영 시각에서는 구조적으로 뜰 수 없다**
+
+| | |
+|---|---|
+| 게이트 | G-12 ("수집 중단 시 화면 003/022 에 마지막 수집시각 + 상태 표시") |
+| 담당 | **개발2** (`src/kyungdong/app/routers/dsh.py:collection_badges()` — D-209 로 dev2 공용 헬퍼) |
+| 재현 | `make db-reset` → `uv run python tools/plc_simulator.py --cycles 3 --realtime` → `GET /dsh/003`·`/prc/022` |
+| 실측 | 마지막 수집 `2026-09-11 15:07:06` · 앵커 기준 경과 **−108,426초** · 화면 '수집 중단' **False** · `collector.status()` 중단 **True** |
+| 원인 | `collection_badges()` 가 `age = anchor() - max(COLLECT_DT)` 로 판정한다. 운영에서는 `COLLECT_DT ≈ now > anchor` 라 `age` 가 **항상 음수**다 → `age > 60` 이 성립할 수 없다 |
+| 기대 | 수집이 `INGEST_STALE_SEC`(60초) 넘게 끊기면 배지가 뜬다. 실시각 기준이거나, 앵커 기준임을 화면이 명시해야 한다 |
+| 반증 | 배지 **경로 자체는 살아 있다** — 마지막 수집을 `앵커 −2h` 로 두면 두 화면 모두 '수집 중단 — 마지막 수집 07:00' 을 렌더한다(`check_ingest.py` G-12-③a · `test_qa2_ingest.py::test_G12_앵커보다_오래된_수집이면_화면도_중단을_표시한다`). 즉 **판정 기준선만 틀렸다** |
+
+### DEF-QA2-002 — 수집 중단 판정이 **두 곳에 복제**돼 화면과 모듈이 다른 답을 낸다 (§10-16)
+
+| | |
+|---|---|
+| 게이트 | G-12 |
+| 담당 | **개발2 + 개발3** (기준선 단일화. 계약상 정본은 `ingest/collector.status()` 다 — `contracts/interfaces.md` §9 TD4-047) |
+| 재현 | `make db-reset` → `uv run python tools/plc_simulator.py --cycles 12` → `/dsh/003` 배지 ↔ `collector.status()["any_stale"]` 비교 |
+| 실측 | `collector.status()` 중단 **True**(실시각 기준) ↔ 화면 배지 **False**(앵커 기준). 같은 DB, 같은 시각, **반대 결론** |
+| 부수 확인 | `progress-dev3.md` **2번 항목**은 "시뮬레이터 기본값은 앵커 기준이라 `/dsh/003`·`/prc/022` 배지가 `수집 중단` 으로 보인다. 초록으로 보려면 `--realtime` 이다" 라고 적었다. **실측은 정확히 반대다** — 앵커 기준이면 배지가 안 뜨고, `--realtime` 이어도 안 뜬다. 개발3 진술은 `plc_simulator` 가 찍는 `collector.status()` 출력을 화면 배지로 오인한 것이다 |
+| 기대 | 중단 판정 함수는 **한 벌**이고 화면이 그것을 부른다 |
+
+### DEF-QA2-003 — 결측 **보정** 코드가 없다 (표시만 한다)
+
+| | |
+|---|---|
+| 게이트 | G-13 ("결측 보정 — 치수 누락·OCR 오류·재질 미입력을 유사 도면·기준값으로") |
+| 담당 | **개발3** |
+| 재현 | `uv run python tools/check_ingest.py` → G-13 ③ / `tests/test_qa2_ingest.py::test_G13_비숫자값은_결측으로_남기고_버리지_않는다` |
+| 실측 | 비숫자값 주입 → `DAT_TIMESERIES.QUALITY_FLAG='결측'` · `MEASURE_VALUE=NULL` **행은 남는다**(버리지 않는 것은 옳다). 그러나 `src/` 전체에서 보정(`impute`/대체값/유사 도면) 코드 **0건** |
+| 기대 | 유사 도면·기준값으로 채우는 경로가 존재하고 처리 건수가 남는다 |
+| 참고 | 근본 원인은 D-05(Parsing·OCR 미구성)다. **미구현임을 숨기지 않은 점은 옳다** — 결함은 "게이트 요구 기능 부재" 로만 센다 |
+
+### DEF-QA2-004 — 이상치 판정·제거 코드가 없다. `노이즈` 는 **어휘로만** 존재한다
+
+| | |
+|---|---|
+| 게이트 | G-13 ("이상치 제거") |
+| 담당 | **개발3** |
+| 재현 | `uv run python tools/plc_simulator.py --cycles 14 --anomaly --seed 20260912` 전후 비교 |
+| 실측 | 전류 40A 초과 값 **0 → 1건** 적재 · `QUALITY_FLAG='노이즈'` **0 → 0건** · `'노이즈'` 를 실제로 적재하는 코드 **없음**(어휘 정의뿐: `ingest/tags.py:QUALITY_FLAGS`, `routers/dat.py:QUALITY_FLAGS`) |
+| 기대 | 임계 초과값이 `노이즈` 로 표시되거나 제거되고 그 건수가 남는다 |
+
+### DEF-QA2-005 — Feature 생성 **6종 중 1종**만 코드로 산출 가능하다
+
+| | |
+|---|---|
+| 게이트 | G-13 ("홀 수량·절단 길이·형상 복잡도·두께·재질·용접 길이") |
+| 담당 | **개발3** (Feature 5종) · **아키텍트/PM** ('형상 복잡도' 정본 부재) |
+| 재현 | `uv run python tools/check_ingest.py` → G-13 ⑤ |
+| 실측 | `cad/pipeline.DERIVABLE = {'홀 수량'}` · 차단 5종(`총 절단장`·`판재 면적`·`용접장`·`재질`·`두께` — 전부 D-05 근거 명기) · `EST_CAD_FEATURES` 0행 |
+| 추가 | **'형상 복잡도' 는 TD5 `EST_CAD_FEATURES.FEATURE_TYPE` 어휘에도 없다**(어휘: 홀 수량·총 절단장·판재 면적·용접장·재질·두께). goal.md G-13 요구와 TD5 정본이 어긋난다 — 컬럼을 늘리지 말고(G-02 762 고정) **어느 쪽이 정본인지 확정**해야 한다 |
+| 기대 | 6종 산출 또는 각 종별 차단 근거가 정본에 기록 |
+
+### DEF-QA2-006 — 전처리 **처리 건수**가 `DAT_JOB_LOGS` 에 남지 않는다
+
+| | |
+|---|---|
+| 게이트 | G-13 ("처리 건수를 `DAT_JOB_LOGS`·`DAT_PREPROCESS_RULES` 에 남긴다") |
+| 담당 | **개발3**(CAD·PLC 경로) · **개발1**(`DAT_INTEGRATION_JOBS` 소유) |
+| 재현 | `grep -rn "insert into DAT_JOB_LOGS" src tools` |
+| 실측 | 쓰는 곳 **`src/kyungdong/app/routers/dat.py` 하나뿐**이고 그것은 ERP 통합작업 **POST** 다. `make cad-ingest`(995건 정제)·PLC 수집은 `DAT_JOB_LOGS` 에 **한 줄도 남기지 않는다**. CAD 는 `IF_CAD_IMPORT_LOGS` 에만 남는다 |
+| 실측 | `DAT_PREPROCESS_RULES` 는 **처리 건수 컬럼이 없다**(TD5 10컬럼 = 규칙 정의뿐: RULE_NAME·RULE_STAGE·TARGET_DESC·RULE_EXPR·APPLY_ORDER·USE_YN…). 규칙 5건은 등록돼 있다 |
+| 기대 | 전처리 실행마다 `DAT_JOB_LOGS.PROCESS_CNT`/`FAIL_CNT` 에 건수가 남는다 |
+
+### DEF-QA2-007 — `contracts/missing-policy.md` 가 없다 (G-10 이 가리키는 규약 문서)
+
+| | |
+|---|---|
+| 게이트 | G-10 ("결측 분모·분자는 `contracts/missing-policy.md` 규약") |
+| 담당 | **아키텍트** |
+| 재현 | `ls contracts/` → `api-contract.md · db-schema.md · interfaces.md · screen-map.md` (4종) |
+| 실측 | `contracts/missing-policy.md` **부재**. goal.md §2.2 G-10 행이 없는 문서를 가리킨다 |
+| 기대 | 결측 분모·분자 규약 문서 존재. 없으면 goal.md 를 고쳐 그 근거를 지운다 |
+| 영향 | G-10 의 결측률은 **규약 없이** 측정된다 — 지금은 표본 0건이라 드러나지 않는다 |
+
+### DEF-QA2-008 — `gate.py` 가 G-07~G-11 · G-12~G-13 을 **그룹 종료코드 하나로 뭉갠다** (§10-6 위반)
+
+| | |
+|---|---|
+| 담당 | **아키텍트** (`tools/gate.py:checkers()`) |
+| 재현 | `uv run python tools/gate.py` |
+| 실측 | `G-07~G-11 ... FAIL` 한 줄. 실제로는 `G-07 PASS · G-08 차단 · G-09 차단 · G-10 차단 · G-11 PASS · KPI PASS` 다 — **PASS 2건과 차단 3건이 FAIL 하나로 접힌다.** `gate.py` 자신의 주석이 "그룹 종료코드 하나로 여러 게이트를 뭉개지 않는다(§10-6)" 라고 적었는데 `structural()` 에만 적용되고 `checkers()` 에는 적용되지 않았다 |
+| 완화 | QA2 검사기는 **마지막 출력 줄에 게이트별 판정을 전부** 넣어 `gate.py` 의 실측 칸에 보이게 했다. 근본 수정은 `gate.py` 소유자 몫이다 |
+| 기대 | `check_routes.py` 처럼 `G-nn` 으로 시작하는 판정 줄을 파싱해 게이트별로 찍는다 |
+
+### DEF-QA2-009 — `gate.py` 가 `check_trace.py` 를 **실행하지 않고** G-04·G-05 를 FAIL 로 찍는다
+
+| | |
+|---|---|
+| 담당 | **아키텍트** (`tools/gate.py:structural()`) |
+| 재현 | `ls tools/check_trace.py` (존재) → `uv run python tools/gate.py` |
+| 실측 | `G-04 FAIL (실측 공란)` · `G-05 FAIL (실측 공란)` · 검증 방법란은 여전히 "미작성". 코드가 `NOIMPL if not trace else FAIL` 로 **파일 존재만 보고 FAIL 을 고정**한다 — 검사기를 돌리지 않는다 |
+| 기대 | 검사기를 실행하고 판정 줄을 파싱한다. (QA1 소관 게이트라 수치는 QA1 리포트를 따른다) |
+
+### DEF-QA2-010 — D-62 재확인: 데이터가 없으면 `skip` 하는 테스트가 그대로 있다
+
+| | |
+|---|---|
+| 담당 | **개발3** |
+| 재현 | `grep -n "pytest.skip" tests/*.py` |
+| 실측 | `tests/test_dev3_cad.py:93` ("도면이 없다 — `make cad-ingest`") · `:112` ("도면이 없다") · `:120` ("수집 전") — 전체 3 skipped 가 전부 이 세 건이다 |
+| 기대 | 0건 경로를 **명시 단언**한다(§10-4). `make cad-ingest` 를 돌리면 995건이 들어오므로 N건 경로도 잴 수 있다 |
+| 참고 | QA2 테스트 46건에는 `skip` 이 **0건**이다. 전제가 막힌 N건 경로는 **롤백 트랜잭션**으로 실증했다 |
+
+### DEF-QA2-011 — `contracts/db-schema.md` §7.1 `PRC_PROCESS_HISTORIES` 판정이 실제와 어긋난다
+
+| | |
+|---|---|
+| 담당 | **개발2** |
+| 재현 | `progress-dev2.md` §3 ↔ `select count(*) from PRC_PROCESS_HISTORIES` |
+| 실측 | 판정 **"시드 대상 — 공정실적 시드와 함께 채운다"**(`seed_dev2._seed_histories()`) ↔ 실제 **0건**. `EST_PROJECTS` 0건 전제가 막아 시드가 실행되지 못했다 |
+| 기대 | 계약 §7.1 표에 "시드 대상이나 전제(D-47·D-56) 로 현재 0건" 을 명기하거나, 전제를 푼 뒤 채운다. **지금 상태로는 계약을 읽은 사람이 행이 있을 것이라 믿는다** |
+| 나머지 5건은 판정과 실제가 **일치**한다(아래 §4) |
+
+### DEF-QA2-012 — G-09 '정확성' 의 **'정상 데이터' 정의가 정본에 없다**
+
+| | |
+|---|---|
+| 담당 | **아키텍트/PM** (사업계획서 2.7.4 원문 확인 · 도입기업 합의) |
+| 실측 | 사업계획서 2.7.4 / goal.md §2.2 는 산식을 `정상 데이터 수 ÷ 전체 × 100` 까지만 적었다. **'정상' 이 무엇인지, 분모의 '전체' 가 어느 표인지 정의가 없다** |
+| QA2 조치 | 지어내지 않고 **조작적 정의를 명시**해 검사기에 박고 여기 적는다 → **정상 = 그 행의 코드성 FK 29건(§3) 값이 전부 `BAS_COMMON_CODES(CODE_GROUP, CODE_VALUE, USE_YN='Y')` 에 있는 행** · **전체 = 코드성 컬럼을 가진 표의 모든 행**. 검사기가 이 문장을 화면 출력에 함께 찍는다 |
+| 기대 | 정본이 정의를 확정하면 검사기를 그것에 맞춘다. 확정 전 수치는 **QA2 정의 기준**임을 리포트에 달고 쓴다 |
+
+---
+
+## 2. 통과 항목 (실측 + 명령)
+
+### G-01 · G-02 — 68표·762컬럼 **엄밀 대조** (개수가 아니라 이름·타입)
+
+```
+uv run python tools/check_schema.py
+→ G-01 PASS  테이블 DB 68 / information_schema 68 / TD5 68 · 누락 0 · 초과 0
+→ G-02 PASS  컬럼 DB 762 / IS 762 / TD5 762 · 대조 762 · 이름누락 0 · 이름초과 0
+             · 타입불일치 0 · 미대조타입 0
+→ 부가 실측  컬럼 순서 불일치 0 · NOT NULL 불일치 0
+```
+- `design.columns_of(tid)` **정본 함수를 직접 호출**했다(§10-16). 로직 복제 없음.
+- 타입은 `format_type(atttypid, atttypmod)` 정규 표기와 대조한다 —
+  `BIGSERIAL→bigint`(PK 물리 타입) · `VARCHAR(n)→character varying(n)` · `TIMESTAMP→timestamp without time zone` · `VECTOR(1536)→vector(1536)` 등 **TD5 36종 타입 전부 대조 규칙이 있다**(미대조 0).
+- 측정 전후 `design.json` 지문 `9772b6cd5ea1` · DB 스키마 지문 `67f182cdd353` **동일** → §10-17 판정 불가 아님.
+
+### G-07 — 시드 멱등 · 시간 앵커
+
+```
+make db-reset && uv run python tools/check_data.py     # 내부에서 make db-seed 를 2회 실행
+→ G-07 PASS  db-seed ×2 행수 diff 0종 · 앵커 불변 · 시간함수 위반 0 · N건 표 12 · 0건 표 56
+```
+- **0건 경로·N건 경로 둘 다 단언**: 행이 있는 12표(`BAS_COMMON_CODES 32` · `SYS_ROLE_PERMISSIONS 60` · `SYS_USERS 6` · `SYS_CONFIGS 8` · `DAT_SOURCES 5` · `DAT_INTEGRATION_JOBS 5` · `DAT_PREPROCESS_RULES 5` · `IF_DEVICE_REGISTRY 2` · `IF_EXT_DOCUMENTS 3` · `AGT_VECTOR_DOCS 2` · `DAT_TRAIN_DATASETS 1` · `KPI_TARGETS 2`) 는 재실행에도 그대로, 0건 56표도 그대로.
+- 시간 앵커 `2026-09-10 09:00:00` 재실행에도 **불변**.
+- **소스 AST 스캔**(주석·문서열 오탐 없음): `date.today()` · `datetime.today()` · `utcnow()` **0건**.
+  `datetime.now()` 는 **3곳뿐이고 전부 근거가 있다** —
+  `db/seed.py:110 seed_anchor()`(앵커 발급 자체) · `tools/plc_simulator.py:93 main()`(`--realtime` 분기) ·
+  `src/kyungdong/ingest/collector.py:251 status()`(수집 생존 확인. 생성 기준일이 아니다).
+  이 3곳은 검사기에 **허용 목록으로 명시**했고, 목록 밖에 생기면 위반으로 잡힌다.
+- `make db-reset` **직후 §7 런타임 전용 11표 전부 0건** 확인. 45화면 GET 전수 sweep 후 증가하는 표는 `SYS_ACCESS_LOGS`(+29, 감사로그 G-29) **하나뿐**이다 — GET 이 업무 데이터를 쓰지 않는다.
+
+### G-11 — 조용한 빈칸: **그리드 / 건수 카드 / 비율 카드 3분법**
+
+검사기와 이 리포트에 규약을 명문화했다(§10-14 · 직전 사업 오판 재발 방지):
+
+| 대상 | 0 일 때 무엇이 정답인가 |
+|---|---|
+| **빈 그리드**(`<td class="empty">`) | **문구가 있어야 한다** — `미수집 (D-nn)` / `미확정 (D-nn)` |
+| **건수 카드**(값이 `0 건`) | **`0 건` 이 정답이다.** 여기에 '미수집' 을 요구하면 *세어 봤더니 0이더라* 는 **수집된 사실을 부정하는 거짓 표시**가 된다 |
+| **비율·평균 카드**(분모 0) | **값이 없는 것**이다 → `미수집` 이 맞고 `0 %` 로 메우면 결함이다 |
+
+```
+uv run python tools/check_data.py      # G-11 절
+→ ① 0건 경로  빈 그리드 35개(화면 31종) · 문구 없음 0개 · 서로 다른 문구 26종
+→ ① N건 경로  행이 그려진 그리드 61개(화면 28종)
+→ ② 건수 카드 값이 `0 건` 류인 카드 40개 — 문구를 붙인 거짓 표시 0개
+→ ③ 비율 카드 값이 '미수집' 인 카드 13개 — 0%로 메운 거짓 0개
+```
+- **최초 측정에서 QA2 검사기가 5건을 거짓 표시로 오판했다.** 보조설명(`span.s`)에 "검사 0건" 이
+  들어 있다는 이유로 **비율 카드를 건수 카드로 오인**한 것이다(`/dsh/001 설비 가동률` ·
+  `/dsh/002 합격률` · `/kpi/044 출하 합격률·클레임 발생률` · `/board 설비 가동률`).
+  실제로는 `routers/dsh.ratio_card()` 가 분모 0에 `미수집 (D-06)` 을 낸 **정답**이다.
+  검사기를 **카드 값(`span.v`)** 기준으로 고쳐 오판을 제거했다 — §10-14 를 거꾸로 적용할 뻔했고,
+  개발2 구현(`count_card` / `ratio_card` 분리)이 옳았다.
+
+### KPI 독립 재계산 — `app/kpi.py` 를 믿지 않고 SQL 을 새로 썼다
+
+```
+uv run python tools/check_data.py      # KPI 절
+LEADTIME_MFG  기존 1,320h → 목표 1,080h · 감소율 QA 18.2% / 앱 18.2% 일치
+              표본 QA 0 / 앱 0 일치 · 평균(h) QA None / 앱 None 일치
+LEADTIME_O2D  기존 1,440h → 목표 1,200h · 감소율 QA 16.7% / 앱 16.7% 일치
+              표본 QA 0 / 앱 0 일치 · 평균(h) QA None / 앱 None 일치
+KPI_TARGETS   두 건 모두 기존·목표·개선율·공식여부 일치
+공식 성과지표 2종 표를 렌더하는 화면 4종: /board, /kpi/043, /kpi/044, /kpi/045
+LEADTIME_MFG  화면 4종 · **서로 다른 문자열 1종**
+  LEADTIME_MFG | 제조 리드타임 단축 | 1,320 h | 1,080 h | −18.2 | 0.5 | — | — | 0 건
+LEADTIME_O2D  화면 4종 · **서로 다른 문자열 1종**
+  LEADTIME_O2D | 수주출하 리드타임 감소 | 1,440 h | 1,200 h | −16.7 | 0.5 | — | — | 0 건
+044 품질 KPI 비공식 구분 표기 있음
+```
+- QA2 가 쓴 **독립 SQL**(`check_data.SQL_MFG_QA` · `SQL_O2D_QA`)은 `app/kpi.py` 의 SQL 을 베끼지 않고
+  `SHP_LOT_TRACES`↔`PRC_WORK_ORDERS.CONFIRM_DT` ~ `SHP_SHIPMENT_ITEMS.PACKING_DT`,
+  `EST_PROJECTS.ORDER_CONFIRM_DT` ~ `SHP_SHIPMENTS.SHIP_DT` 를 새로 조립했다.
+- **표본 0건에서 값이 `None` 이고 `—` 로 렌더된다. 0.0 으로 메우지 않았다** — 옳다.
+- **N건 경로도 실증했다**: 롤백 트랜잭션에 리드타임 1,000h / 1,100h 짜리 사슬 한 벌을 넣고
+  QA SQL 이 `n=1 · h=1000.00 / 1100.00` 을 내는 것 확인
+  (`tests/test_qa2_data.py::test_KPI_N건_경로_독립SQL이_앱_산식과_같은_값을_낸다`). **커밋하지 않았다.**
+- **044 는 공식 성과지표가 아님을 화면이 구분 표기한다** — `kpi.NOT_OFFICIAL_NOTE`
+  ("운영지표 — 사업계획서 1.5 성과지표 2건에 포함되지 않는다. 정부 성과지표 산출 근거로 쓰지 않는다")
+  가 `/kpi/044` 에 렌더되고, 같은 화면에 공식 2종 표가 함께 있어 대비가 드러난다.
+  `/kpi/043` 에는 `OFFICIAL_NOTE`(공식 성과지표)가 붙는다.
+
+### G-12 — 통과한 부분 (유실 0 · 순서 보존 · 재전송 무손실)
+
+```
+make db-reset && uv run python tools/check_ingest.py
+③-1 연속 수집 --cycles 6        적재 48/48 · 전역 순서 위반 0
+③-2 단절·복구 --cycles 12 --disconnect 8 --reconnect 11
+    IF_PLC_SIGNALS    신규 96/96   PRC_EQUIP_SIGNALS 12/12
+    DAT_TIMESERIES    신규 72/72   IF_GATEWAY_BUFFER  3/3
+    순서 보존  라이브 구간 위반 0 · 재전송 구간 위반 0
+    Gateway 버퍼 3배치 · 담긴 샘플 24 · 전송완료 3 · **적재 안 된 것 0건**
+    같은 배치 재수집 → 증가 0 (중복 차단 동작)
+```
+- **수집 지점 2개소뿐**(D-06) 확인: `IF_DEVICE_REGISTRY` 2대(레이저커팅기 PLC · 현장POP(터치PC)) ·
+  `BAS_COMMON_CODES '설비'` 2건(EQ10·EQ20) · PLC 태그 **정본 8종뿐**(모르는 태그는 422) ·
+  **시드 4종이 `PRC_EQUIP_SIGNALS`/`IF_PLC_SIGNALS`/`DAT_TIMESERIES` 에 insert 하는 곳 0건**
+  (자동 수집을 흉내 낸 시드 없음 — D-207 판단이 실제로 지켜졌다) ·
+  자동(PLC) 실적으로 기록된 공정 `P40` 밖 **0건**. **전 공정 실시간 수집을 전제한 코드는 없다.**
+- **순서 보존은 구간별로 잰다.** 최초 측정에서 전역 위반 8건을 결함으로 적을 뻔했는데,
+  이는 **store-and-forward 설계상 정상**이다 — 버퍼는 복구된 뒤에야 보낼 수 있으므로
+  재전송분이 라이브 뒤에 붙어 PK 순서가 태그당 1회 역전된다(8태그 × 경계 1회 = 8).
+  라이브 구간 위반 0 · 재전송 구간 위반 0 이 올바른 판정이다.
+- **0건 경로**: 수집 전 `/dsh/003`·`/prc/022` 가 `미수집 (D-06)` 을 렌더하고
+  `collector.status()` 가 두 지점 모두 `last_collect_dt=None` 을 낸다.
+- **N건 경로**: 수집 후 두 화면 모두 마지막 수집시각 `2026-09-10 09:00` 을 렌더한다.
+
+### G-13 — 통과한 부분 (단위 표준화 · 중복 제거)
+
+```
+uv run python tools/check_ingest.py      # G-13 ①②
+① 단위 표준화  DAT_TIMESERIES UOM 불일치 0건
+   (RUN_MINUTE=min · PRODUCE_QTY=ea · SPEED_VALUE=mm/min · PRESSURE_VALUE=bar
+    · CURRENT_VALUE=A · TEMP_VALUE=℃ — ingest/tags.py 정본과 적재값 일치)
+② 중복 제거   주입 전 1,283건 → 등록 995 · 제외 288
+              주입 후 1,288건 → 등록 996 · 제외 292
+              제외 사유 {파일명 중복 287(+3), 0KB 손상 5(+1)}
+              → 주입한 중복 3·0KB 1 은 전부 걸러졌고, 결측(mtime) 1건만 통과
+```
+- **결측·중복·이상치를 주입한 입력으로 전후를 비교**했다(게이트 요구 그대로).
+- `DEDUP_KEY` 는 TD5 규약대로 **도면번호+버전+고객사**다. 다만 **고객사 메타데이터가 인벤토리에 없어**
+  제품 폴더명을 대체 축으로 쓴다(`고객사미확보(D-03)`) — 코드가 이 한계를 숨기지 않고 적어 둔 것은 옳다.
+- 비숫자값 주입 시 행을 **버리지 않고** `QUALITY_FLAG='결측'` 으로 남긴다.
+
+---
+
+## 3. 차단 · 판정 불가 (사유)
+
+| 항목 | 상태 | 사유 (실측) |
+|---|---|---|
+| **G-08** LOT 매핑 ≥85% | **차단** | `SHP_LOT_TRACES` **0건** → 분모 0. **0%도 100%도 아니다.** 사슬 8단계 전부 분모 0 |
+| **G-09** 정확성·정합성·연계성 | **차단** | 세 지표 전부 분모 0. 정합성 하위 5종(BOM↔자재LOT 재질 · CAD두께↔자재LOT · CAD절단장↔길이 · BOM공정↔견적 · 견적단가↔원가기준) 비교가능 **각 0건** |
+| **G-10** 시계열 정렬·결측 | **차단** | `DAT_TIMESERIES` 0 · `PRC_EQUIP_SIGNALS` 0. **db-reset 직후 0건이 정답**이다(수집은 시드가 아니다) — 표본이 없어 정렬·결측을 못 잰다 |
+| **G-10** 동기화율 | **목표 없음 (D-09)** | **사업계획서에 동기화율 목표치가 없다.** 목표가 없는 것을 있는 척하지 않는다 → 실측만 보고. 규약 문서도 부재(DEF-QA2-007) |
+| `make cad-ingest` 995건 | **미실행** | QA2 가 돌리면 `EST_CAD_DRAWINGS` 995건·`IF_CAD_FILES` 1,283건이 **커밋**돼 다른 QA 의 0건 경로 측정을 오염시킨다. G-13 중복 제거는 **DB 를 건드리지 않는** `cad.inventory.clean()` 으로 주입 전후를 쟀다(위 수치는 그 실측이다) |
+
+### 차단의 뿌리 — **0건이 정답인 것과, 0건이라 못 재는 것은 다르다**
+
+| 전제 | 실측 | 판정 |
+|---|---|---|
+| `EST_PROJECTS` | **0건** | 개발3 판정 "고객사 코드 그룹이 비어 있어(D-47) 코드 검증(D-32)을 통과할 수 없다" — **옳다.** 지어내지 않은 것이 맞다 |
+| `BAS_QUALITY_STANDARDS` | **0건** | 품질기준이 도입기업 제공 대기 — 옳다 |
+| 코드 그룹 `품목`·`재질`·`고객사` | **0건** (`select count(*) ... where CODE_GROUP in ('품목','재질','고객사')` → **0**) | 정본에 값이 없다. 비워 둔 것이 맞다 |
+| 채워진 코드 그룹 | 공정 10 · 제품군 5 · 검사구분 3 · 공급구분 3 · 외주구간 2 · 설비 2 · LOT채번 7 = **32** | 정본 근거가 있는 것만 채웠다 |
+
+→ **QA2 판단: 0건 상태에서 화면은 거짓말하지 않는다.** G-11 이 PASS 다(빈 그리드 35개 전부 문구,
+`0 건` 카드 40개에 거짓 문구 0, 분모 0 비율카드 13개에 `0 %` 메움 0). 다만 **G-08·G-09 는
+"통과" 가 아니라 "못 쟀다"** 이고, 전제가 풀리기 전에는 사업 수용 기준 85%를 증명할 수 없다.
+
+---
+
+## 4. `contracts/db-schema.md` §7.1 "시드 여부 미정" 판정 ↔ 실제 데이터
+
+```
+uv run python tools/check_data.py      # §7.1 절
+EST_SHAP_FACTORS               0건  [개발3] 런타임 — 학습 미실시(D-309)          → 일치
+INV_MATERIAL_HISTORY           0건  [개발1] 런타임 누적표(D-102)                → 일치
+INV_SUPPLIER_QUALITY           0건  [개발1] 입고·검사 누적 집계(D-103)           → 일치
+PRC_CONDITION_DEVIATIONS       0건  [개발2] 런타임 파생(D-203)                  → 일치
+PRC_PROCESS_HISTORIES          0건  [개발2] **시드 대상**                        → **불일치** (DEF-QA2-011)
+SHP_CLAIM_CAUSES               0건  [개발2] 런타임 전용(D-204)                   → 일치
+```
+6건 중 5건은 판정과 실제가 맞다. **§7 로 옮길 5건**(`EST_SHAP_FACTORS`·`INV_MATERIAL_HISTORY`·
+`INV_SUPPLIER_QUALITY`·`PRC_CONDITION_DEVIATIONS`·`SHP_CLAIM_CAUSES`)은 계약 §7.1 에서 §7 로
+이동해야 계약이 실제와 같아진다 — **계약 갱신은 아키텍트 몫이고 QA2 는 고치지 않았다.**
+
+---
+
+## 5. QA2 가 만든 것
+
+| 파일 | 무엇을 재는가 | 줄 |
+|---|---|---|
+| `tools/check_schema.py` | G-01·G-02 **이름·타입 762건 전수 대조** + 정본/스키마 지문(§10-17) | 판정 2 |
+| `tools/check_data.py` | G-07~G-11 + **KPI 독립 재계산** + §7.1 대조 | 판정 6 |
+| `tools/check_ingest.py` | G-12·G-13 (수집 2개소·유실·순서·버퍼·전처리 주입 전후) | 판정 2 |
+| `tests/test_qa2_schema.py` | 스키마 회귀 6건 | |
+| `tests/test_qa2_data.py` | 데이터·KPI 회귀 22건 | |
+| `tests/test_qa2_ingest.py` | 수집·전처리 회귀 18건 | |
+
+**46건 전부 통과 · `skip` 0건.** (`uv run pytest -q tests/test_qa2_*.py`)
+
+지킨 규칙
+- **0건 경로와 N건 경로를 둘 다 단언한다.** 전제가 막힌 G-08·G-09·KPI 의 N건 경로는
+  **롤백 트랜잭션**(`conn.tx()` + 강제 예외)에 9단계 사슬 한 벌을 만들어 실증하고 **커밋하지 않았다**.
+  `SHP_LOT_TRACES.MAPPING_OK_YN='Y'` 만 적어 둔 끊긴 LOT 이 **완주로 세어지지 않는지**도 단언했다.
+- **정본 함수를 직접 부른다**(§10-16): `design.columns_of` · `codes.code_columns` · `clock.anchor` ·
+  `kpi.measure`/`improve_rate` · `ingest.tags`/`collector` · `cad.inventory.clean` · `cad.pipeline`.
+  테스트는 검사기 모듈(`tools.check_*`)을 import 해 **같은 산식 한 벌**을 쓴다.
+  예외는 KPI 뿐 — `app/kpi.py` 를 믿지 않는 것이 목적이라 SQL 을 새로 썼다.
+- **동시 변경은 FAIL 이 아니라 판정 불가**(§10-17): `check_schema` 가 `design.json`·DB 스키마 지문을
+  측정 전후로 비교하고, `check_data` 가 **정지 상태 확인 + 되돌아온 변동** 두 신호로 외부 쓰기를
+  감지해 G-07 을 `판정 불가` 로 돌린다(§7). `check_ingest` 는 수집 표가 비어 있지 않으면
+  유실 판정을 **판정 불가**로 낸다.
+- **§10-11**: `check_data` 는 시드를 돌린 뒤 **공통 시드로 되돌린다**(`db/seed.py` 재실행, exit 0 확인).
+  `check_ingest` 는 자기가 넣은 행만 지우고 **검사 전 행수로 복귀했는지 단언**한다
+  (실측: `DAT_TIMESERIES 0 · PRC_EQUIP_SIGNALS 0 · IF_GATEWAY_BUFFER 0 · IF_PLC_SIGNALS 0`).
+- **검사기 2회 연속 실행 판정 동일** — `G-01 PASS · G-02 PASS` / `G-07 PASS · G-08 차단 · G-09 차단 ·
+  G-10 차단 · G-11 PASS · KPI PASS` / `G-12 FAIL · G-13 FAIL` 두 번 모두 같다.
+
+### QA2 가 스스로 잡은 오판 2건 (기록으로 남긴다)
+
+1. **§10-14 를 거꾸로 적용할 뻔했다.** 비율 카드(`설비 가동률`·`합격률`·`클레임 발생률`)의
+   보조설명에 "0건" 이 있다는 이유로 건수 카드로 오인해 "거짓 표시 5건" 을 결함으로 적을 뻔했다.
+   실제로는 분모 0 비율에 `미수집` 을 내는 **정답**이었다. 카드 **값** 기준으로 고쳤다.
+2. **store-and-forward 를 순서 위반으로 오판할 뻔했다.** 버퍼 재전송분이 라이브 뒤에 붙어
+   생기는 전역 역전 8건(태그 8종 × 경계 1회)은 설계상 정상이다. 구간별 판정으로 고쳤다.
+
+---
+
+## 6. 다음 회전에 필요한 것 (QA2 관점)
+
+1. **전제 3종을 풀기 전에는 G-08·G-09 를 잴 수 없다** — `BAS_COMMON_CODES` 의 `품목`·`재질`·`고객사`
+   코드가 들어와야 `EST_PROJECTS` → 9단계 사슬 시드가 성립한다. 도입기업 확정 사항이다.
+   **QA2 는 임시 코드를 넣어 85% 를 만들지 않았다.**
+2. `make cad-ingest` 를 **조용한 창에서 한 번 돌린 뒤** G-13 을 다시 재면
+   `EST_CAD_DRAWINGS` 995건 · `IF_CAD_IMPORT_LOGS` 단계 로그의 N건 경로를 DB 에서 확인할 수 있다.
+   (지금은 `cad.inventory` 인메모리 실측으로만 쟀다 — 수치는 같다: 995/288)
+3. `gate.py` 의 게이트별 판정 줄 파싱(DEF-QA2-008)과 `check_trace.py` 실행(DEF-QA2-009)을 고치면
+   판정표가 실제 상태를 그대로 보여준다. 지금은 PASS 2건·차단 3건이 FAIL 하나로 접혀 있다.
+4. **종료 판정은 조용한 창에서** 다시 해야 한다 — 아래 §7.
+
+---
+
+## 7. 동시 변경 — 마감 측정은 조용한 창에서 다시 한다 (§10-17)
+
+리포트의 수치는 **조용한 구간에서 2회 연속 같은 값**으로 잰 것이다. 그 뒤 마감 확인을 위해
+`make db-reset && uv run python tools/gate.py` 를 한 번 더 돌렸을 때 **다른 에이전트(QA1·QA3)가
+같은 DB 에 쓰고 있었고**, 그 회차만 다음과 같이 흔들렸다.
+
+| 흔들린 것 | 그 회차 실측 | 판정 |
+|---|---|---|
+| G-07 시드 멱등 | 두 시드 사이에 `EST_PROJECTS +2 · BAS_QUALITY_STANDARDS +3 · PRC_WORK_ORDERS +14 · PRC_PROCESS_HISTORIES +14 · SHP_INSPECTIONS +6 …` 가 생겼다 **사라졌다** (롤백 트랜잭션이 지나간 자국) | **판정 불가** — FAIL 이 아니다 |
+| G-빌드 | `1 failed, 1139 passed` → 같은 명령 재실행 시 `1140 passed` | **판정 불가** (재현 안 됨) |
+
+**검사기에 동시 변경 감지를 넣었다** — 회전 6 교훈(한 신호만 보고 판정하지 않는다)대로 두 신호를 본다.
+
+1. **정지 상태 확인** — 시드를 돌리지 않는 2초 구간에 행이 움직이는가.
+   실측: `{'SYS_ACCESS_LOGS': 22}` → 밖에서 화면을 두드리는 프로세스가 있다.
+2. **되돌아온 변동** — `s0→s1` 로 늘었다가 `s1→s2` 로 **같은 만큼** 줄었는가(롤백 트랜잭션 자국).
+
+둘 중 하나라도 걸리면 `G-07` 을 **`판정 불가`** 로 찍고 "조용한 창에서 다시 잰다" 를 출력한다.
+**FAIL 로 찍지 않는다** — 남의 쓰기를 내 게이트의 실패로 기록하면 거짓 결함이 된다.
+
+조용한 창에서 다시 돌릴 명령:
+
+```
+make db-reset
+uv run python tools/check_schema.py
+uv run python tools/check_data.py
+uv run python tools/check_ingest.py
+uv run pytest -q tests/test_qa2_*.py
+uv run python tools/gate.py
+```
+
+QA2 테스트 46건은 **공유 DB 를 쓰는 다른 테스트와 동시에 돌면 흔들릴 수 있다** —
+`test_G10_0건_경로…` 와 `test_qa2_ingest` 픽스처가 수집 표의 0건을 전제한다.
+이것은 QA2 테스트만의 문제가 아니라 이 사업의 **단일 DB 공유 구조**에서 오는 것이고,
+개발3 도 같은 관측을 `progress-dev3.md` 6번에 적었다. 마감 측정은 조용한 창에서 한다.
