@@ -23,7 +23,7 @@ import conn                                                    # noqa: E402
 from kyungdong.app.util import clock                           # noqa: E402
 from kyungdong.cad import inventory as cadinv                  # noqa: E402
 from kyungdong.cad import pipeline as cadpipe                  # noqa: E402
-from kyungdong.ingest import collector, tags                   # noqa: E402
+from kyungdong.ingest import collector, preprocess, tags       # noqa: E402
 from tools import check_ingest as ci                           # noqa: E402
 
 CYCLES = 5
@@ -178,17 +178,28 @@ def test_G12_N건_경로_화면에_마지막_수집시각이_뜬다(collected):
             f"{path}: 수집 {CYCLES}건인데 마지막 수집시각이 화면에 없다 (G-12)")
 
 
-def test_G12_수집중단_판정이_화면과_수집모듈에서_갈린다(collected):
-    """DEF-QA2-002 — 같은 사실에 두 구현이 다른 답을 낸다.
+def test_G12_수집중단_판정이_화면과_수집모듈에서_같다(collected):
+    """**DEF-QA2-002 · D-70 해소 실측.** 같은 사실에 두 구현이 다른 답을 냈다.
 
-    화면 `routers/dsh.collection_badges()` 는 **앵커** 기준, 수집 모듈
-    `ingest.collector.status()` 는 **실시각** 기준이다. 이 단언이 깨지면 결함이 해소된
-    것이므로 리포트를 갱신한다.
+    표지를 뒤집었다 — **판정이 다시 갈리면** 깨진다. 화면 `routers/dsh.collection_badges()` 가
+    **앵커** 기준, 수집 모듈 `ingest.collector.status()` 가 **실시각** 기준이라 같은 DB·같은
+    시각에 반대 결론을 냈다. 지금은 판정이 `collector.stale_verdict()` **한 벌**이고 화면은
+    그것을 부른다.
+
+    `any_stale` 과 견주지 않는다 — 그 값은 한 번도 값이 없는 지점(현장POP)까지 참으로 만드는데
+    화면은 그것을 '수집 중단' 이 아니라 **'미수집'** 으로 띄운다. 배지와 1:1 인 것은
+    `ci.stale_with_data()` 다.
     """
-    module_stale = collector.status()["any_stale"]
+    st = collector.status()
     screen_stale = any("수집 중단" in i["text"] for i in ci.screen_ingest_state().values())
-    assert module_stale is True, "앵커 시각 데이터는 실시각 기준으로는 중단이다"
-    assert screen_stale is False, "화면은 앵커 기준이라 중단으로 보지 않는다"
+    assert ci.stale_with_data(st) is True, "앵커 시각 데이터는 실시각 기준으로 중단이 맞다"
+    assert screen_stale is True, "모듈이 중단이라는데 화면이 배지를 안 띄운다 (§10-16 판정 복제)"
+    assert screen_stale == ci.stale_with_data(st)
+
+    # 판정을 앵커로 **다시 쓰는** 코드가 생기면 그때부터 다시 갈린다 — 그 싹을 막는다.
+    dup = [p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "src").rglob("*.py"))
+           if re.search(r"anchor\(\)\s*-\s*last", p.read_text())]
+    assert dup == [], f"중단 판정이 앵커 기준으로 복제됐다: {dup} (D-70 · §10-16)"
 
 
 def test_G12_앵커보다_오래된_수집이면_화면도_중단을_표시한다(collected):
@@ -246,17 +257,51 @@ def test_G13_중복_제거는_도면번호_버전_고객사_기준이다():
     assert cadinv.CUSTOMER_UNKNOWN in cadinv.dedup_key("A", "1", None)
 
 
-def test_G13_이상치_처리가_없다는_사실을_기록한다():
-    """DEF-QA2-004 — '노이즈' 는 어휘로만 있고 판정·제거 로직이 없다.
+def test_G13_이상치가_실제로_걸러진다(collected):
+    """**DEF-QA2-004 해소 실측.** '노이즈' 가 어휘로만 있고 판정·제거 로직이 0곳이었다.
 
-    이 단언이 깨지면 이상치 처리가 생긴 것이므로 리포트를 갱신한다.
+    표지를 뒤집었다 — 판정이 사라지면 깨진다. **코드 유무로 끝내지 않는다**: 값을 주입해
+    그 값이 `QUALITY_FLAG='노이즈'` 로 표시되는지 본다. 예전에는 40A 초과가 그대로 적재됐다.
+
+    이상치를 **지우지 않는 것**이 설계다(§2.5) — 값은 남기고 플래그로 드러낸다. 학습에서 빼는
+    것은 데이터셋 단계(`DAT_DATASET_ITEMS.OUTLIER_REMOVED_YN`)의 일이다.
     """
     assert "노이즈" in tags.QUALITY_FLAGS
     writers = [p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "src").rglob("*.py"))
                if "노이즈" in p.read_text()
                and (re.search(r"insert\s+into\s+DAT_TIMESERIES", p.read_text(), re.I)
                     or re.search(r"QUALITY_FLAG\s*=\s*['\"]?노이즈", p.read_text()))]
-    assert writers == [], f"이상치 판정 코드가 생겼다: {writers}"
+    assert writers, "이상치 판정·표시 코드가 사라졌다 — 어휘만 남으면 DEF-QA2-004 로 되돌아간다"
+
+    # 판정 기준의 출처를 못박는다 — 없는 상·하한을 지어내지 않는다(D-315).
+    assert preprocess.Z_LIMIT > 0 and preprocess.MIN_HISTORY > 0
+    tol_rows = _n("PRC_STD_CONDITIONS")
+
+    dev, tag = collected["device"], "CURRENT_VALUE"
+    base_dt = clock.anchor() + timedelta(hours=9)
+    mark = conn.q1("select coalesce(max(TS_ID),0) as n from DAT_TIMESERIES")["n"]
+    try:
+        # 표본을 먼저 쌓는다 — `MIN_HISTORY` 미만이면 **판정하지 않는 것**이 옳은 동작이다.
+        for i in range(preprocess.MIN_HISTORY + 2):
+            collector.ingest_batch(dev, "EQ10", [collector.Sample(
+                tag, f"{20 + (i % 2) * 0.1:.4f}", base_dt + timedelta(seconds=i))])
+        warm = conn.q("select QUALITY_FLAG, count(*) as n from DAT_TIMESERIES "
+                      "where TS_ID > %s group by 1", (mark,))
+        assert {r["quality_flag"] for r in warm} == {"정상"}, (
+            f"정상 범위 값을 노이즈로 찍는다 (거짓 양성): {warm}")
+
+        # 이상치 주입 — 표본 대비 크게 벗어난 값
+        out_dt = base_dt + timedelta(seconds=100)
+        collector.ingest_batch(dev, "EQ10", [collector.Sample(tag, "41.5000", out_dt)])
+        row = conn.q1("select MEASURE_VALUE, QUALITY_FLAG from DAT_TIMESERIES "
+                      "where TAG_NAME = %s and MEASURE_DT = %s", (tag, out_dt))
+        assert row is not None, "이상치를 통째로 버렸다 — 값은 남기고 표시만 한다 (§2.5)"
+        assert row["quality_flag"] == "노이즈", (
+            f"주입한 이상치 {row['measure_value']} 가 '{row['quality_flag']}' 로 적재됐다 — "
+            f"판정이 걸러내지 못한다 (표준조건 {tol_rows}건 · z 임계 {preprocess.Z_LIMIT})")
+        assert row["measure_value"] is not None, "이상치의 값을 지웠다 — 원천을 잃는다"
+    finally:
+        conn.x("delete from DAT_TIMESERIES where TS_ID > %s", (mark,))
 
 
 def test_G13_Feature_6종_중_1종만_산출_가능하다():
@@ -276,15 +321,55 @@ def test_G13_Feature_6종_중_1종만_산출_가능하다():
         assert "D-05" in why, "차단 사유에 근거 결정번호가 없다"
 
 
-def test_G13_전처리_규칙은_정의뿐이고_처리건수_컬럼이_없다():
-    """DEF-QA2-006 — 처리 건수가 `DAT_JOB_LOGS` 에 남지 않는다."""
+def test_G13_처리건수가_DAT_JOB_LOGS_에_남는다(collected):
+    """**DEF-QA2-006 해소 실측.** 전처리 처리 건수가 `DAT_JOB_LOGS` 에 한 줄도 안 남았다.
+
+    표지를 뒤집었다 — 기록이 사라지거나 건수가 실제와 어긋나면 깨진다.
+    `DAT_PREPROCESS_RULES` 는 **규칙 정의**뿐이고(TD5 10컬럼에 건수 컬럼이 없다) 실행 건수는
+    `DAT_JOB_LOGS.PROCESS_CNT` 에 남는 것이 정본 구조다 — 그 구조도 함께 못박는다.
+
+    **0건을 처리하고 0을 적는 것으로는 증명되지 않는다.** 처리 대상을 일부러 남겨 두고
+    실행해 기록된 건수가 실제 건수와 같은지 본다.
+    """
     cols = {c["name"] for c in __import__("kyungdong.app.design", fromlist=["design"])
             .columns_of("DAT_PREPROCESS_RULES")}
-    assert "PROCESS_CNT" not in cols and "APPLY_CNT" not in cols
-    assert _n("DAT_PREPROCESS_RULES") == 5, "전처리 규칙 5건 (seed_dev3)"
+    assert "PROCESS_CNT" not in cols and "APPLY_CNT" not in cols, \
+        "규칙 표에 건수 컬럼이 생겼다 — 정의와 실행 기록을 섞지 않는다 (TD5)"
+    assert _n("DAT_PREPROCESS_RULES") >= 5, "전처리 규칙이 시드되지 않았다 (seed_dev3)"
     writers = [p.relative_to(ROOT).as_posix()
                for p in sorted((ROOT / "src").rglob("*.py")) + sorted((ROOT / "tools").rglob("*.py"))
                if not p.name.startswith("check_")
                and re.search(r"insert\s+into\s+DAT_JOB_LOGS", p.read_text(), re.I)]
-    assert writers == ["src/kyungdong/app/routers/dat.py"], (
-        f"DAT_JOB_LOGS 에 쓰는 곳이 바뀌었다: {writers}")
+    assert "src/kyungdong/ingest/preprocess.py" in writers, (
+        f"전처리가 `DAT_JOB_LOGS` 에 쓰지 않는다: {writers} — DEF-QA2-006 으로 되돌아갔다")
+
+    dev, tag = collected["device"], tags.numeric_tags()[0].name
+    t0 = clock.anchor() + timedelta(hours=11)
+    mark_ts = conn.q1("select coalesce(max(TS_ID),0) as n from DAT_TIMESERIES")["n"]
+    mark_jl = conn.q1("select coalesce(max(JOB_LOG_ID),0) as n from DAT_JOB_LOGS")["n"]
+    try:
+        for i in range(6):
+            collector.ingest_batch(dev, "EQ10", [collector.Sample(
+                tag, "비숫자값" if i in (2, 4) else f"{70 + i}.0", t0 + timedelta(seconds=i))])
+        mine = conn.q1("select count(*) as n from DAT_TIMESERIES where TS_ID > %s "
+                       "and QUALITY_FLAG = '결측' and MEASURE_VALUE is null", (mark_ts,))["n"]
+        assert mine == 2, f"보정 대상을 만들지 못했다 (내가 넣은 결측 {mine}건)"
+        # 분모는 **이 설비의 보정 대기 전체**다 — `run()` 은 내가 넣은 것만 보지 않는다.
+        # 앞선 테스트가 남긴 결측까지 세야 기록된 건수와 견줄 수 있다.
+        want = conn.q1("select count(*) as n from DAT_TIMESERIES where EQUIP_CODE = 'EQ10' "
+                       "and QUALITY_FLAG = '결측' and MEASURE_VALUE is null")["n"]
+        assert want >= mine
+
+        res = preprocess.run(equip_code="EQ10")
+        assert res.job_log_id is not None, "전처리를 실행했는데 실행 로그 ID 가 없다"
+        log = conn.q1("select PROCESS_CNT, FAIL_CNT, RESULT_CODE from DAT_JOB_LOGS "
+                      "where JOB_LOG_ID = %s", (res.job_log_id,))
+        assert log is not None, "`DAT_JOB_LOGS` 에 행이 남지 않았다 (G-13)"
+        assert int(log["process_cnt"]) + int(log["fail_cnt"]) == want, (
+            f"보정 대상 {want}건인데 기록은 처리 {log['process_cnt']} · 실패 {log['fail_cnt']} — "
+            "처리 건수가 실제와 다르다")
+        assert log["result_code"] in preprocess.RESULT_CODES, \
+            f"실행 결과 어휘 위반: {log['result_code']}"
+    finally:
+        conn.x("delete from DAT_JOB_LOGS where JOB_LOG_ID > %s", (mark_jl,))
+        conn.x("delete from DAT_TIMESERIES where TS_ID > %s", (mark_ts,))

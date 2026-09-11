@@ -33,7 +33,7 @@ from kyungdong.app import nav                                   # noqa: E402
 from kyungdong.app.util import clock                            # noqa: E402
 from kyungdong.cad import inventory as cadinv                   # noqa: E402
 from kyungdong.cad import pipeline as cadpipe                   # noqa: E402
-from kyungdong.ingest import collector, tags                    # noqa: E402
+from kyungdong.ingest import collector, preprocess, tags        # noqa: E402
 
 PASS, FAIL, BLOCKED, UNDET = "PASS", "FAIL", "차단", "판정 불가"
 VERDICTS: list[tuple[str, str, str]] = []
@@ -41,6 +41,9 @@ VERDICTS: list[tuple[str, str, str]] = []
 WARM_CYCLES = 6                                   # ③-1 단절 없는 연속 수집
 CYCLES, DISCONNECT, RECONNECT = 12, 8, 11        # ③-2 단절·복구
 NUMERIC_TAGS = len(tags.numeric_tags())          # 시계열 적재 대상 태그 수
+# `tools/plc_simulator.py --anomaly` 가 넣는 **정해진 값**. 주입한 그 값이 노이즈로
+# 표시됐는지를 세려면 값을 알아야 한다 — 시뮬레이터 정본과 같은 표를 쓴다.
+ANOMALY_VALUES = {"CURRENT_VALUE": 41.5, "TEMP_VALUE": 88.0}
 ALL_TAGS = len(tags.TAGS)
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -64,6 +67,17 @@ def one(sql: str, params=None) -> int:
 
 def maxid(table: str, col: str) -> int:
     return int(conn.q1(f"select coalesce(max({col}), 0) as n from {table}")["n"])
+
+
+def stale_with_data(st: dict) -> bool:
+    """화면 '수집 중단' 배지와 **1:1 인** 모듈 판정.
+
+    `status()['any_stale']` 은 한 번도 값이 없는 지점(현장POP — 수동 입력이라 늘 0건이다)까지
+    참으로 만든다. 화면은 그것을 '수집 중단' 이 아니라 **'미수집'** 배지로 띄운다
+    (`collector.stale_verdict()` 의 `notice` 분기 · `dsh.collection_badges()` 의 `cls` 분기).
+    두 사실은 다르므로 배지 유무를 `any_stale` 과 견주면 정상 동작을 결함으로 오판한다.
+    """
+    return any(d["stale"] and d["last_collect_dt"] for d in st["devices"])
 
 
 # ══ Phase 0 — 수집 지점 2개소뿐 (D-06) ═══════════════════════════════════
@@ -330,38 +344,98 @@ def gate_12() -> tuple[dict, list[str]]:
         if not (shown or shown_short):
             bad.append(f"{path}: 수집 {got['PRC_EQUIP_SIGNALS']}건인데 마지막 수집시각이 화면에 없다 (G-12)")
 
-    # 수집 중단 표시 — 두 구현이 서로 다른 시간축을 쓴다면 화면과 모듈 판정이 갈린다
+    # 수집 중단 표시 — 두 구현이 서로 다른 시간축을 쓴다면 화면과 모듈 판정이 갈린다.
+    # **`any_stale` 과 견주지 않는다.** 그 값은 한 번도 값이 없는 지점(`미수집`)까지 참으로
+    # 만드는데, 화면은 그것을 '수집 중단' 이 아니라 '미수집' 배지로 띄운다 —
+    # 배지와 1:1 인 것은 `stale_with_data()` 다 (`collector.stale_verdict()` 의 notice 분기).
     screen_stale = any("수집 중단" in i["badges"] or "수집 중단" in i["text"]
                        for i in n_screens.values())
-    say(f"  '수집 중단' 배지 화면 {screen_stale} ↔ collector.status() 중단 판정 {st['any_stale']}")
-    if screen_stale != st["any_stale"]:
+    say(f"  '수집 중단' 배지 화면 {screen_stale} ↔ 수집 모듈 "
+        f"{stale_with_data(st)} (값이 있는데 오래된 지점) · 참고 any_stale {st['any_stale']} "
+        f"(미수집 지점 포함)")
+    if screen_stale != stale_with_data(st):
         bad.append(
-            "수집 중단 판정이 화면(routers/dsh.collection_badges — **앵커** 기준)과 "
-            "수집 모듈(ingest.collector.status — **실시각** 기준)에서 갈린다. "
+            "수집 중단 판정이 화면(routers/dsh.collection_badges)과 "
+            "수집 모듈(ingest.collector.status)에서 갈린다. "
             "같은 사실에 대해 두 곳이 다른 답을 낸다 (§10-16 로직 복제)")
     say()
 
-    # ── ③b 운영 시각(실시각) 데이터에서 '수집 중단' 배지가 뜰 수 있는가 ──
-    say("── G-12-③b 실시각 수집에서 중단 배지 도달 가능성 ─────────────────")
+    # ── ③b 운영 시각(실시각) 데이터에서 '수집 중단' 배지가 뜨는가 (D-69 · D-70 · D-316) ──
+    #
+    # **묻는 것이 바뀌었다.** 회전 6 까지 `routers/dsh.collection_badges()` 가 앵커에서 마지막
+    # 수집시각을 빼서 **따로** 판정했고, 운영 수집(`COLLECT_DT > anchor()`)에서는 그 값이 항상
+    # 음수라 배지가 구조적으로 뜰 수 없었다(QA2 실측 −108,426초). 지금 그 코드는 없다
+    # (`grep -rn "anchor() - last" src/` 0건) — 판정은 `collector.stale_verdict()` **한 벌**이고
+    # 기준 시각은 `stale_reference() = max(real_now, anchor)` 다(D-70 · D-316).
+    # 그래서 "경과가 음수인가" 는 더 이상 결함의 징표가 아니다. 대신 **실시각 축에서 양쪽이 다
+    # 도달하는가** 를 잰다 — 한쪽만 재면 "늘 뜬다"(거짓 경보)나 "늘 안 뜬다"(구조적 불가)를 놓친다.
+    #   ③b-1 방금 수집했으면 배지가 **뜨지 않아야** 한다
+    #   ③b-2 실시각 기준으로 임계를 넘기면 배지가 **떠야** 한다
+    say("── G-12-③b 실시각 축 중단 배지 양방향 도달 (D-69 · D-70) ──────────")
+    dup_judge = [p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "src").rglob("*.py"))
+                 if re.search(r"anchor\(\)\s*-\s*last", p.read_text())]
+    say(f"  중단 판정을 앵커로 다시 쓰는 코드(`anchor() - last…`): {dup_judge or '0건'} "
+        f"· 정본 한 벌 = ingest/collector.stale_verdict()")
+    if dup_judge:
+        bad.append(f"중단 판정이 {dup_judge} 에서 앵커 기준으로 복제됐다 — 정본은 "
+                   "`collector.stale_verdict()` 한 벌이다 (§10-16 · D-70)")
+
+    rt_mark = maxid("IF_PLC_SIGNALS", "PLC_IF_ID")
+    rt_marks = {t: maxid(t, c) for t, c in (("DAT_TIMESERIES", "TS_ID"),
+                                            ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
+                                            ("IF_PLC_SIGNALS", "PLC_IF_ID"))}
     rrt = subprocess.run(
         ["uv", "run", "python", "tools/plc_simulator.py", "--cycles", "3", "--realtime"],
         cwd=ROOT, capture_output=True, text=True, timeout=900)
-    rt_last = conn.q1("select max(COLLECT_DT) as d from PRC_EQUIP_SIGNALS")["d"]
-    rt_status = collector.status()
-    rt_screens = screen_ingest_state()
-    rt_screen_stale = any("수집 중단" in i["badges"] or "수집 중단" in i["text"]
-                          for i in rt_screens.values())
-    age_anchor = (clock.anchor() - rt_last).total_seconds() if rt_last else None
-    say(f"  실시각 적재 마지막 {rt_last} · 앵커 기준 경과 {age_anchor:.0f}초 "
-        f"(음수면 앵커보다 미래다 → 화면 배지는 영원히 뜨지 않는다)")
-    say(f"  화면 '수집 중단' {rt_screen_stale} ↔ collector.status() 중단 {rt_status['any_stale']}")
-    if rt_last is not None and age_anchor is not None and age_anchor < 0 and not rt_screen_stale:
-        bad.append(
-            "운영 시각(실시각)으로 수집하면 `COLLECT_DT > anchor()` 라 "
-            "`routers/dsh.collection_badges()` 의 `anchor() - last_dt` 가 항상 음수다 → "
-            "**003·022 의 '수집 중단' 배지가 구조적으로 뜰 수 없다** (G-12 요구 미충족)")
     if rrt.returncode != 0:
         say(f"  시뮬레이터(--realtime) exit {rrt.returncode}: {rrt.stderr.strip()[:200]}")
+    rt_last = conn.q1("select max(COLLECT_DT) as d from PRC_EQUIP_SIGNALS")["d"]
+    rt_status = collector.status()
+    rt_screen_stale = any("수집 중단" in i["badges"] or "수집 중단" in i["text"]
+                          for i in screen_ingest_state().values())
+    ref = collector.stale_reference()                       # 정본 기준 시각 (§10-16)
+    age_real = (ref - rt_last).total_seconds() if rt_last else None
+    age_anchor = (clock.anchor() - rt_last).total_seconds() if rt_last else None
+    say(f"  ③b-1 방금 수집  마지막 {rt_last} · 정본 기준시각 {ref} "
+        f"· 경과 {age_real:.0f}초 (임계 {rt_status['stale_sec']}초)")
+    say(f"       참고: 앵커 기준 경과 {age_anchor:.0f}초 — 음수여도 정본이 "
+        f"`max(real_now, anchor)` 라 판정은 실시각 축에서 난다(D-316)")
+    say(f"       화면 '수집 중단' {rt_screen_stale} ↔ 수집 모듈 {stale_with_data(rt_status)}")
+    if rt_screen_stale or stale_with_data(rt_status):
+        bad.append("방금(실시각) 수집했는데 '수집 중단' 이 뜬다 — 거짓 경보다 (G-12)")
+
+    # ③b-2 실시각 축에서 임계를 넘긴 수집 — 예전에는 여기가 구조적으로 도달 불가였다.
+    for table, col in (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
+                       ("IF_PLC_SIGNALS", "PLC_IF_ID")):
+        conn.x(f"delete from {table} where {col} > %s", (rt_marks[table],))
+    stale_dt = ref - timedelta(seconds=rt_status["stale_sec"] + 120)
+    collector.ingest_batch(
+        int(conn.q1("select DEVICE_ID from IF_DEVICE_REGISTRY where DEVICE_NAME = %s",
+                    ("레이저커팅기 PLC",))["device_id"]),
+        "EQ10",
+        [collector.Sample(t.name, "1" if t.numeric else "가동", stale_dt) for t in tags.TAGS],
+    )
+    st2 = collector.status()
+    scr2 = screen_ingest_state()
+    say(f"  ③b-2 실시각 −{rt_status['stale_sec'] + 120}초 수집  마지막 {stale_dt} "
+        f"(앵커보다 {'미래' if stale_dt > clock.anchor() else '과거'}다)")
+    for path, info in scr2.items():
+        has_badge = "수집 중단" in info["badges"] or "수집 중단" in info["text"]
+        has_ts = stale_dt.strftime("%H:%M:%S") in info["text"]
+        say(f"       {path}  '수집 중단' {'있음' if has_badge else '**없음**'}"
+            f" · 마지막 수집시각 {'있음' if has_ts else '**없음**'}")
+        if not has_badge:
+            bad.append(f"{path}: 운영 시각(실시각) 기준 임계 초과 수집인데 '수집 중단' 배지가 "
+                       "뜨지 않는다 — 배지가 실시각 축에서 도달 불가다 (G-12 · D-69)")
+        if not has_ts:
+            bad.append(f"{path}: 실시각 수집인데 마지막 수집시각이 화면에 없다")
+    say(f"       수집 모듈 {stale_with_data(st2)} ↔ 화면 "
+        f"{any('수집 중단' in i['badges'] or '수집 중단' in i['text'] for i in scr2.values())}")
+    for table, col in (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
+                       ("IF_PLC_SIGNALS", "PLC_IF_ID")):
+        conn.x(f"delete from {table} where {col} > %s", (rt_marks[table],))
+    say("       (③b 시나리오용 행은 지웠다 — G-13 의 분모를 흐리지 않는다)")
+    _ = rt_mark
     say()
 
     verdict("G-12", (PASS if not bad else FAIL) if clean_start else UNDET,
@@ -397,7 +471,8 @@ REQUIRED_FEATURES = ("홀 수량", "절단 길이", "형상 복잡도", "두께"
 
 def gate_13(uom_bad: list[str]) -> None:
     say("── G-13 전처리 (단위 표준화·중복 제거·결측 보정·이상치 제거·Feature 생성) ──")
-    bad: list[str] = []
+    bad: list[str] = []          # 고칠 수 있는데 안 된 것 → FAIL
+    blocked: list[str] = []      # 도입기업 원천이 없어 막힌 것 → 차단 (D-91)
 
     # ① 단위 표준화 — 코드(정본 태그표) + 적재 실측
     say(f"  ① 단위 표준화  ingest/tags.py 가 태그별 단위를 고정한다: "
@@ -435,7 +510,9 @@ def gate_13(uom_bad: list[str]) -> None:
     if dup_blocked != 1:
         bad.append(f"중복·0KB 주입 후 등록 증가가 {dup_blocked} 건이다 (기대 1)")
 
-    # ③ 결측 보정 — 치수 누락·OCR 오류·재질 미입력을 유사 도면·기준값으로 **보정**하는 코드
+    # ③ 결측 보정 — **코드가 있는가** 를 묻고 끝내지 않는다. 결측을 주입해 **실제로 채우는지** 본다.
+    #    보정 뒤에도 `QUALITY_FLAG='결측'` 은 남는다(D-314) — 원천이 결측이었다는 사실이라
+    #    지우면 추적이 끊긴다. 그래서 "보정됐다" 의 증거는 플래그가 아니라 `MEASURE_VALUE` 다.
     mtime_missing = sum(1 for f in files if f.mtime is None)
     corrective = []
     for p in sorted((ROOT / "src").rglob("*.py")):
@@ -443,15 +520,53 @@ def gate_13(uom_bad: list[str]) -> None:
         if re.search(r"(impute|보정|대체값|fillna|유사\s*도면)", src):
             corrective.append(p.relative_to(ROOT).as_posix())
     say(f"  ③ 결측 보정  인벤토리 mtime 결측 {mtime_missing} 건 · "
-        f"PLC 비숫자값은 `QUALITY_FLAG='결측'` 으로 **표시만** 하고 버리지 않는다")
-    say(f"     보정(대체값 산출) 코드 후보: {corrective or '없음'}")
+        f"적재는 `QUALITY_FLAG='결측'` 으로 표시만 하고 버리지 않는다")
+    say(f"     보정(대체값 산출) 코드: {corrective or '**없음**'}")
     if not corrective:
-        bad.append("결측 **보정**(유사 도면·기준값으로 채우는) 코드가 없다 — "
-                   "표시(플래그)만 있고 보정은 미구현이다 (D-05 Parsing·OCR 미구성)")
+        bad.append("결측 **보정**(대체값을 산출해 채우는) 코드가 없다 — 표시(플래그)만 있다")
 
-    # 결측 주입 전후 — 비숫자 값을 넣으면 '결측' 으로 남고 행이 사라지지 않는가
+    # 결측 주입 → 정본 함수 `preprocess.impute_missing()` 실행 → 전후 비교 (§10-16)
+    mark_ts = maxid("DAT_TIMESERIES", "TS_ID")
+    mark_sig = maxid("IF_PLC_SIGNALS", "PLC_IF_ID")
+    mark_eq = maxid("PRC_EQUIP_SIGNALS", "SIGNAL_ID")
+    dev_id = int(conn.q1("select DEVICE_ID from IF_DEVICE_REGISTRY where DEVICE_NAME = %s",
+                         ("레이저커팅기 PLC",))["device_id"])
+    tag = tags.numeric_tags()[0]
+    t0 = clock.anchor() + timedelta(hours=6)
+    #   정상 → 정상 → **결측** → 정상 … 선형 보간이 걸릴 수 있는 모양으로 넣는다
+    for i in range(6):
+        collector.ingest_batch(dev_id, "EQ10", [collector.Sample(
+            tag.name, "비숫자값" if i == 3 else f"{50 + i}.0", t0 + timedelta(seconds=i))])
+    miss_rows = conn.q("select TS_ID, MEASURE_VALUE, QUALITY_FLAG from DAT_TIMESERIES "
+                       "where TS_ID > %s and QUALITY_FLAG = '결측'", (mark_ts,))
+    say(f"     주입: 정상 5 · 비숫자 1 → `결측` 으로 남은 행 {len(miss_rows)} "
+        f"(값 {[r['measure_value'] for r in miss_rows]} — 행을 버리지 않았다)")
+    if len(miss_rows) != 1:
+        bad.append(f"비숫자값 1건을 주입했는데 `결측` 행이 {len(miss_rows)}건이다 "
+                   "— 결측을 버리거나 삼켰다 (§2.5 조용한 실패)")
+    ires = preprocess.impute_missing(equip_code="EQ10")
+    filled = conn.q("select MEASURE_VALUE, QUALITY_FLAG from DAT_TIMESERIES "
+                    "where TS_ID > %s and QUALITY_FLAG = '결측'", (mark_ts,))
+    say(f"     `preprocess.impute_missing()` → 검사 {ires.scanned} · 보정 {ires.imputed} "
+        f"· 미보정 {ires.unimputed} · 방법 {ires.by_method}")
+    say(f"     보정 후 그 행: 값 {[r['measure_value'] for r in filled]} · 플래그 "
+        f"{[r['quality_flag'] for r in filled]} (플래그는 남긴다 — D-314)")
+    imputed_ok = ires.imputed >= 1 and all(r["measure_value"] is not None for r in filled)
+    if not imputed_ok:
+        bad.append(f"결측을 주입했는데 보정되지 않았다 (보정 {ires.imputed} · "
+                   f"남은 빈 값 {sum(1 for r in filled if r['measure_value'] is None)}) — "
+                   "결측 보정이 코드로만 있고 동작하지 않는다")
+    off_vocab = sorted(set(ires.by_method) - set(preprocess.IMPUTE_METHODS))
+    if off_vocab:
+        bad.append(f"보정 방법이 어휘({preprocess.IMPUTE_METHODS}) 밖이다: {off_vocab}")
     miss_before = one("select count(*) from DAT_TIMESERIES where QUALITY_FLAG = '결측'")
-    say(f"     DAT_TIMESERIES QUALITY_FLAG='결측' {miss_before} 건 (주입 전)")
+    say(f"     DAT_TIMESERIES QUALITY_FLAG='결측' 누계 {miss_before} 건")
+    # 주입분은 여기서 지운다 — 이어지는 ④ 이상치 판정의 표본(직전 정상값)을 흐리지 않는다.
+    for table, col, mk in (("DAT_TIMESERIES", "TS_ID", mark_ts),
+                           ("PRC_EQUIP_SIGNALS", "SIGNAL_ID", mark_eq),
+                           ("IF_PLC_SIGNALS", "PLC_IF_ID", mark_sig)):
+        conn.x(f"delete from {table} where {col} > %s", (mk,))
+    say("     (결측 주입분은 지웠다)")
 
     # ④ 이상치 제거
     # '노이즈' 가 **어휘로만** 있는지, 실제로 적재 경로가 쓰는지를 나눠서 본다.
@@ -474,7 +589,17 @@ def gate_13(uom_bad: list[str]) -> None:
     if not writes_noise:
         bad.append("이상치를 걸러 `QUALITY_FLAG='노이즈'` 로 남기거나 제거하는 코드가 없다 — "
                    "어휘만 정의돼 있고 판정 로직이 없다")
-    # 이상치 주입 — 시뮬레이터 --anomaly 로 전류·온도 임계 초과를 넣고 전후를 본다
+    say(f"     판정 근거 (ingest/preprocess.py): 1순위 {preprocess.BASIS_TOLERANCE} "
+        f"· 2순위 {preprocess.BASIS_ROBUST_Z} · 표본 {preprocess.MIN_HISTORY}건 미만이면 "
+        f"**판정하지 않는다**(D-315)")
+    std_cond = one("select count(*) from PRC_STD_CONDITIONS where USE_YN = 'Y' "
+                   "and TOL_MIN is not null and TOL_MAX is not null")
+    say(f"     1순위 정본 `PRC_STD_CONDITIONS` 허용 상·하한 {std_cond} 건 "
+        f"→ {'1순위' if std_cond else '**2순위(조작적 정의)로 판정한다** — 없는 상·하한을 지어내지 않는다'}")
+
+    # 이상치 주입 — 시뮬레이터 `--anomaly` 가 **정해진 값**(ANOMALY)을 넣는다.
+    # "적재됐는가" 가 아니라 **주입한 그 값이 노이즈로 표시됐는가** 를 센다.
+    # 이상치는 지우지 않는다(§2.5) — 값은 남기고 플래그로 드러내는 것이 설계다.
     before = one("select count(*) from DAT_TIMESERIES")
     hi_before = one("select count(*) from DAT_TIMESERIES "
                     "where TAG_NAME = 'CURRENT_VALUE' and MEASURE_VALUE > 40")
@@ -487,9 +612,23 @@ def gate_13(uom_bad: list[str]) -> None:
     noise_after = one("select count(*) from DAT_TIMESERIES where QUALITY_FLAG = '노이즈'")
     say(f"     이상치 주입(--anomaly) 전후: 시계열 {before}→{after} · "
         f"전류 40A 초과 {hi_before}→{hi_after} · '노이즈' 플래그 {noise_rows}→{noise_after}")
-    if hi_after > hi_before and noise_after == noise_rows:
-        bad.append(f"임계 초과값 {hi_after - hi_before}건이 그대로 적재됐는데 "
-                   "'노이즈' 플래그도 제거도 없다 — 이상치 처리 부재")
+    caught = missed = 0
+    for tag_name, value in ANOMALY_VALUES.items():
+        rows = conn.q("select QUALITY_FLAG, count(*) as n from DAT_TIMESERIES "
+                      "where TAG_NAME = %s and MEASURE_VALUE = %s group by 1 order by 1",
+                      (tag_name, value))
+        by = {x["quality_flag"]: int(x["n"]) for x in rows}
+        caught += by.get("노이즈", 0)
+        missed += sum(v for k, v in by.items() if k != "노이즈")
+        say(f"       주입값 {tag_name}={value} → {by or '적재 0건'}")
+    say(f"     주입한 이상치 {caught + missed} 건 중 '노이즈' 표시 {caught} · 미표시 {missed} "
+        f"(미표시분은 표본 {preprocess.MIN_HISTORY}건 미만 구간 = 판정 불가 — "
+        f"`robust_z()` 가 `None` 을 돌려준다)")
+    if caught + missed == 0:
+        bad.append("`--anomaly` 로 주입한 값이 한 건도 적재되지 않았다 — 주입 경로를 다시 잰다")
+    elif caught == 0:
+        bad.append(f"주입한 이상치 {missed}건이 전부 '정상' 으로 적재됐다 — "
+                   "이상치 판정이 실제로는 걸러내지 못한다 (G-13)")
     if r.returncode != 0:
         say(f"     시뮬레이터 exit {r.returncode}: {r.stderr.strip()[:200]}")
 
@@ -505,11 +644,51 @@ def gate_13(uom_bad: list[str]) -> None:
     derivable = [f for f in REQUIRED_FEATURES if alias.get(f, f) in cadpipe.DERIVABLE]
     say(f"     TD5 어휘에도 없는 요구 Feature: {missing_vocab or '없음'}")
     say(f"     6종 중 실제 산출 코드가 있는 것 {len(derivable)}종 {derivable}")
-    if len(derivable) < len(REQUIRED_FEATURES):
-        bad.append(f"Feature 6종 중 {len(REQUIRED_FEATURES) - len(derivable)}종이 산출 불가 — "
-                   f"{[f for f in REQUIRED_FEATURES if f not in derivable]}")
+    # 못 만드는 Feature 는 **결함이 아니라 차단**이다 — 원천(도면 Parsing·표제란 OCR)이 없다(D-05).
+    # 다만 **막힌 이유를 댈 수 있어야** 차단이다. 사유가 어디에도 없으면 그건 차단이 아니라 누락이고
+    # 결함으로 센다. 사유의 출처는 두 곳뿐이고, **여기서 별칭을 지어내지 않는다**(§10-18):
+    #   ① `cad/pipeline.BLOCKED_FEATURES` 에 TD5 이름으로 적힌 사유 (결정번호 필수)
+    #   ② TD5 `FEATURE_TYPE` 정본 어휘에 그 항목이 **아예 없다**는 실측 —
+    #      정본에 자리가 없는 것을 코드가 만들면 그게 합성이다. 이때 원천은 `EST_CAD_OBJECTS`
+    #      이고 그것이 0행인 근거(D-05)를 함께 잰다.
+    vocab_gap: list[str] = []
+    for f in REQUIRED_FEATURES:
+        if f in derivable:
+            continue
+        key = alias.get(f, f)
+        why = cadpipe.BLOCKED_FEATURES.get(key)
+        if why is not None and re.search(r"D-\d+", why):
+            blocked.append(f"Feature '{f}'({key}) — {why}")
+        elif why is not None:
+            bad.append(f"Feature '{f}' 차단 사유에 결정번호가 없다: {why!r}")
+        elif key not in cadpipe.FEATURE_TYPES:
+            # TD5 정본 어휘에 자리가 없다. 원천이 정말 비었는지 확인하고 차단으로 센다.
+            blocked.append(
+                f"Feature '{f}' — TD5 `EST_CAD_FEATURES.FEATURE_TYPE` 정본 어휘 "
+                f"{cadpipe.FEATURE_TYPES} 에 자리가 없다. 형상 정보의 원천인 "
+                f"`EST_CAD_OBJECTS` 가 {one('select count(*) from EST_CAD_OBJECTS')}행이고 "
+                "Parsing 미구성이라(D-05) 산출 근거가 없다 — 별칭을 지어 채우지 않는다(§10-18)")
+            vocab_gap.append(f)
+        else:
+            bad.append(f"Feature '{f}'({key}) 가 산출 불가인데 "
+                       "`cad/pipeline.BLOCKED_FEATURES` 에 차단 사유가 없다 — "
+                       "못 만드는 이유를 적지 않으면 차단이 아니라 누락이다")
+    if vocab_gap:
+        say(f"     **보고**: {vocab_gap} 는 goal.md §2 G-13 이 요구하는데 TD5 어휘에 없다. "
+            "`cad/pipeline.BLOCKED_FEATURES` 에도 줄이 없어 사유가 코드에 적혀 있지 않다 — "
+            "제품 쪽에 한 줄 추가가 필요하다(QA 는 제품 코드를 고치지 않는다). 근거 D-71")
     feat_rows = one("select count(*) from EST_CAD_FEATURES")
-    say(f"     EST_CAD_FEATURES {feat_rows} 행 (확정 객체 0건이면 Feature 도 0건이다)")
+    confirmed = one("select count(*) from EST_CAD_OBJECTS where CONFIRM_YN = 'Y'")
+    say(f"     EST_CAD_FEATURES {feat_rows} 행 · 확정(CONFIRM_YN='Y') 객체 {confirmed} 건")
+    # **채워져 있으면 의심한다.** 원천이 막혔는데 Feature 가 있으면 지어낸 것이다(§10-18).
+    if feat_rows and not confirmed:
+        bad.append(f"확정 객체가 0건인데 EST_CAD_FEATURES 가 {feat_rows}행이다 — "
+                   "원천 없이 만들어진 합성 Feature 다 (§10-18)")
+    made_up = conn.q("select distinct FEATURE_TYPE from EST_CAD_FEATURES "
+                     "where FEATURE_TYPE = any(%s)", (list(cadpipe.BLOCKED_FEATURES),))
+    if made_up:
+        bad.append(f"차단된 Feature 가 적재돼 있다: {[m['feature_type'] for m in made_up]} — "
+                   "원천(D-05)이 없는데 값이 있다면 지어낸 것이다 (§10-18)")
 
     # ⑥ 처리 건수가 DAT_JOB_LOGS · DAT_PREPROCESS_RULES 에 남는가
     rules = conn.q("select RULE_NAME, RULE_STAGE, APPLY_ORDER from DAT_PREPROCESS_RULES "
@@ -537,14 +716,74 @@ def gate_13(uom_bad: list[str]) -> None:
         bad.append("CAD 정제·PLC 수집 전처리의 처리 건수가 `DAT_JOB_LOGS` 에 남지 않는다 — "
                    "쓰는 곳은 `routers/dat.py`(ERP 통합작업 POST) 하나뿐이다 (G-13 요구 미충족)")
 
+    # 코드가 있다는 것과 **행이 남는다**는 것은 다른 사실이다. 정본 진입점을 직접 불러 잰다(§10-16).
+    # 0건을 처리하고 0을 적는 것으로는 "처리 **건수**가 남는다" 를 증명하지 못한다 —
+    # 처리할 것을 **일부러 남겨 두고** 실행해 `PROCESS_CNT` 가 실제 건수와 같은지 본다.
+    jl_mark_ts = maxid("DAT_TIMESERIES", "TS_ID")
+    jl_mark_sig = maxid("IF_PLC_SIGNALS", "PLC_IF_ID")
+    jl_mark_eq = maxid("PRC_EQUIP_SIGNALS", "SIGNAL_ID")
+    t1 = clock.anchor() + timedelta(hours=7)
+    for i in range(6):
+        collector.ingest_batch(dev_id, "EQ10", [collector.Sample(
+            tag.name, "비숫자값" if i in (2, 4) else f"{60 + i}.0", t1 + timedelta(seconds=i))])
+    want_cnt = one("select count(*) from DAT_TIMESERIES where TS_ID > %s "
+                   "and QUALITY_FLAG = '결측' and MEASURE_VALUE is null", (jl_mark_ts,))
+    say(f"     처리 대상을 남겨 둔다: 비숫자 2건 주입 → 보정 대기 {want_cnt} 행")
+    jl_before = one("select count(*) from DAT_JOB_LOGS")
+    prun = preprocess.run(equip_code="EQ10")
+    jl_after = one("select count(*) from DAT_JOB_LOGS")
+    logged = preprocess.job_logs(limit=1)
+    say(f"     `preprocess.run()` 실행 → DAT_JOB_LOGS {jl_before}→{jl_after} "
+        f"(JOB_LOG_ID {prun.job_log_id})")
+    if logged:
+        g = logged[0]
+        say(f"       남은 행: 작업 '{g['job_name']}' · PROCESS_CNT {g['process_cnt']} "
+            f"· FAIL_CNT {g['fail_cnt']} · 결과 {g['result_code']}")
+        say(f"       비고: {(g['error_msg'] or '')[:150]}")
+    joblog_ok = jl_after == jl_before + 1 and prun.job_log_id is not None
+    if not joblog_ok:
+        bad.append(f"전처리를 실행했는데 `DAT_JOB_LOGS` 에 행이 남지 않는다 "
+                   f"({jl_before}→{jl_after}) — 처리 건수 기록이 동작하지 않는다 (G-13)")
+    elif logged:
+        got_cnt = int(logged[0]["process_cnt"] or 0) + int(logged[0]["fail_cnt"] or 0)
+        say(f"       처리 대상 {want_cnt} ↔ 기록된 PROCESS_CNT+FAIL_CNT {got_cnt}")
+        if got_cnt != want_cnt:
+            bad.append(f"보정 대상이 {want_cnt}건인데 `DAT_JOB_LOGS` 에 {got_cnt}건으로 남았다 — "
+                       "처리 건수가 실제와 다르다 (G-13)")
+    for k, why in sorted(prun.blocked.items()):
+        say(f"       도면 결측 보정 차단 {k}: {why}")
+    for table, col, mk in (("DAT_TIMESERIES", "TS_ID", jl_mark_ts),
+                           ("PRC_EQUIP_SIGNALS", "SIGNAL_ID", jl_mark_eq),
+                           ("IF_PLC_SIGNALS", "PLC_IF_ID", jl_mark_sig)):
+        conn.x(f"delete from {table} where {col} > %s", (mk,))
+    jl_left = conn.x("delete from DAT_JOB_LOGS where JOB_LOG_ID = %s", (prun.job_log_id,))
+    say(f"     (⑥ 주입분과 검사기가 만든 DAT_JOB_LOGS {jl_left}행은 지웠다 — "
+        "G-11 런타임 전용 표 0건을 오염시키지 않는다)")
+
     say()
-    verdict("G-13", PASS if not bad else FAIL,
-            f"단위 표준화 위반 {len(uom_bad)} · 중복 제거 주입 후 신규등록 {dup_blocked}(기대 1) · "
-            f"결측 보정 코드 {'있음' if corrective else '없음'} · "
-            f"이상치 처리 {'있음' if writes_noise else '없음'} · "
-            f"Feature {len(derivable)}/{len(REQUIRED_FEATURES)}종 · 결함 {len(bad)}건")
+    # ── 판정 (D-91) ────────────────────────────────────────────────────
+    # 남은 미충족이 **도입기업 데이터·원천 부재로 막힌 것뿐**이면 `차단` 이다. FAIL 은
+    # "고칠 수 있는데 안 고쳤다" 는 뜻이라 게이트를 잘못 가리킨다. 반대로 blocked 가 비어도
+    # bad 가 있으면 FAIL 이다 — 차단이 결함을 덮지 않는다.
+    blocked_note = ("Feature "
+                    f"{len(REQUIRED_FEATURES) - len(derivable)}/{len(REQUIRED_FEATURES)}종이 "
+                    f"D-05(CAD Parsing·표제란 OCR 미구성)로 차단: "
+                    + " / ".join(f"{f}({cadpipe.BLOCKED_FEATURES.get(alias.get(f, f), 'TD5 어휘에 없다 — D-05')})"
+                                 for f in REQUIRED_FEATURES if f not in derivable))
+    common = (f"단위 표준화 위반 {len(uom_bad)} · 중복 제거 주입 후 신규등록 {dup_blocked}(기대 1) · "
+              f"결측 보정 실측 {ires.imputed}건 보정({ires.by_method or '-'}) · "
+              f"이상치 주입 {caught + missed}건 중 노이즈 표시 {caught} · "
+              f"처리 건수 DAT_JOB_LOGS {jl_before}→{jl_after}")
+    if bad:
+        verdict("G-13", FAIL, f"{common} · 결함 {len(bad)}건 · {blocked_note}")
+    elif blocked:
+        verdict("G-13", BLOCKED, f"{common} · 결함 0건. 남은 미충족은 원천 부재뿐 — {blocked_note}")
+    else:
+        verdict("G-13", PASS, common)
     for b in bad:
         say(f"  결함 G-13 {b}")
+    for b in blocked:
+        say(f"  차단 G-13 {b}")
     say()
 
 

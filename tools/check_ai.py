@@ -750,22 +750,77 @@ def gate_25() -> None:
                    if re.search(r"insert\s+into\s+EST_ML_MODELS", p.read_text(), re.I)]
     say(f"  EST_ML_MODELS 쓰기 경로 {len(write_paths)} 곳: {write_paths or '**0곳**'}")
 
+    # **코드가 있다** 와 **되돌아간다** 는 다른 사실이다. 두 버전을 넣고 정본 함수를 직접 불러
+    # v1.0 → v0.9 복귀를 실측한다(§10-16). 학습이 없어 `EST_ML_MODELS` 가 0행이므로 경로를
+    # 재려면 검사기가 표본을 만들 수밖에 없다 — **넣은 행은 전부 지운다**(G-11 오염 금지).
+    # 이 표본은 **성능 수치가 아니다.** METRIC_JSON 을 비워 두는 이유이고, 이것으로 G-25 를
+    # PASS 로 만들지 않는다. 여기서 재는 것은 오직 "되돌아가는가" 하나다.
+    rb_ok, rb_note = False, ""
+    mark = int(conn.q1("select coalesce(max(MODEL_ID), 0) as n from EST_ML_MODELS")["n"])
+    name = "QA3롤백경로실측"
+    try:
+        for ver, status_, ago in (("v0.9", mlreg.VALIDATED, "1 day"), ("v1.0", mlreg.DEPLOYED, "0 day")):
+            conn.x("insert into EST_ML_MODELS "
+                   "(MODEL_NAME, MODEL_TYPE, MODEL_VERSION, DEPLOY_STATUS, DEPLOYED_DT, CREATED_DT) "
+                   f"values (%s, %s, %s, %s, now() - interval '{ago}', now())",
+                   (name, "회귀", ver, status_))
+        cur0 = mlreg.deployed_model(name)
+        prev0 = mlreg.previous_version(name)
+        say(f"  롤백 실측  배포중 {cur0['model_version']} · 직전 {prev0['model_version']} "
+            f"(`ml.registry.previous_version()`)")
+        out = mlreg.rollback(name)
+        after = mlreg.deployed_model(name)
+        hist = conn.q("select MODEL_VERSION, DEPLOY_STATUS from EST_ML_MODELS "
+                      "where MODEL_NAME = %s order by MODEL_ID", (name,))
+        say(f"             `ml.registry.rollback()` → {out['rolled_back_from']} → "
+            f"{out['rolled_back_to']} · 되돌린 뒤 배포중 {after['model_version']} "
+            f"· 직전 배포본 강등 {out['demoted']}건")
+        say(f"             이력 보존: {[(h['model_version'], h['deploy_status']) for h in hist]} "
+            "(지우지 않고 상태만 바꾼다)")
+        # 되돌릴 곳이 없으면 **성공한 척하지 않는가** (0건 경로 — §10-4)
+        try:
+            mlreg.rollback("존재하지않는모델_QA3")
+            zero_path = "**422 가 아니라 성공했다**"
+        except Exception as e:                                    # noqa: BLE001
+            zero_path = f"{getattr(e, 'status_code', type(e).__name__)} (되돌릴 것이 없다고 말한다)"
+        say(f"             0건 경로: 배포본 없는 모델 롤백 → {zero_path}")
+        rb_ok = (after["model_version"] == "v0.9" and out["rolled_back_from"] == "v1.0"
+                 and str(zero_path).startswith("422"))
+        rb_note = (f"v1.0→v0.9 복귀 실측 {'성공' if rb_ok else '실패'} · "
+                   f"없는 모델 롤백 {zero_path}")
+    finally:
+        n = conn.x("delete from EST_ML_MODELS where MODEL_ID > %s", (mark,))
+        say(f"             (실측용 모델 {n} 행 삭제 → EST_ML_MODELS "
+            f"{count('EST_ML_MODELS')} 행 · G-11 0건 유지)")
+
     items = [
-        ("모델 버전·성능·상태", len(models) > 0, f"EST_ML_MODELS {len(models)} 행"),
-        ("학습 이력", len(runs) > 0, f"EST_ML_TRAIN_RUNS {len(runs)} 행"),
-        ("예측 기록", len(preds) > 0, f"EST_ML_PREDICTIONS {len(preds)} 행"),
-        ("롤백 경로", len(rb) > 0, f"배포상태 전환 코드 {len(rb)} 곳"),
-        ("Train/Val/Test 분리", len(splits) > 0, f"DAT_DATASET_SPLITS {len(splits)} 행"),
+        ("모델 버전·성능·상태", len(models) > 0, f"EST_ML_MODELS {len(models)} 행", "분모 0"),
+        ("학습 이력", len(runs) > 0, f"EST_ML_TRAIN_RUNS {len(runs)} 행", "분모 0"),
+        ("예측 기록", len(preds) > 0, f"EST_ML_PREDICTIONS {len(preds)} 행", "분모 0"),
+        ("롤백 경로", rb_ok, f"배포상태 전환 코드 {len(rb)} 곳 · {rb_note}", "코드"),
+        ("Train/Val/Test 분리", len(splits) > 0, f"DAT_DATASET_SPLITS {len(splits)} 행", "분모 0"),
     ]
-    for name, ok, m in items:
-        say(f"  {'PASS ' if ok else '미충족'} {name:<20} {m}")
-    unmet = [n for n, ok, _ in items if not ok]
-    # 성능·버전은 학습 미실시(분모 0)라 `차단`, **롤백 경로는 데이터와 무관한 코드 부재**다.
-    verdict("G-25", FAIL,
-            f"미충족 {len(unmet)}/5 — {', '.join(unmet)}. "
-            "모델·학습·예측은 학습 미실시로 분모 0(차단 성격)이지만, **롤백 경로는 코드가 0곳**이고 "
-            "이는 데이터 부재와 무관한 구현 결함이다. DAT_DATASET_SPLITS 0행 — "
-            "Train/Val/Test 비율이 정본에 없어 시드하지 않았다(개발3 판단)")
+    for nm, ok, m, _kind in items:
+        say(f"  {'PASS ' if ok else '미충족'} {nm:<20} {m}")
+    unmet = [(nm, kind) for nm, ok, _m, kind in items if not ok]
+    data_blocked = [nm for nm, kind in unmet if kind == "분모 0"]
+    code_gaps = [nm for nm, kind in unmet if kind != "분모 0"]
+
+    # 판정 (D-91) — 남은 미충족이 **학습 미실시로 분모 0** 인 것뿐이면 `차단` 이다.
+    # 롤백처럼 데이터와 무관한 항목이 비면 그것은 구현 결함이라 FAIL 이다.
+    # **충족 1/5 을 PASS 로 올리지 않는다** — 차단은 "아직 못 잰다" 지 "통과했다" 가 아니다.
+    common = (f"미충족 {len(unmet)}/5 — {', '.join(nm for nm, _ in unmet)}. "
+              f"롤백 경로: {rb_note}. "
+              "모델·학습·예측·분할은 **학습 미실시로 분모 0** 이다 — 견적 Label 원천(D-04)과 "
+              "Train/Val/Test 비율이 정본에 없어 시드하지 않았다(개발3 판단). "
+              "합성 라벨로 채우지 않는다(§10-18)")
+    if code_gaps:
+        verdict("G-25", FAIL, f"{common}. **{', '.join(code_gaps)} 는 데이터 부재와 무관한 "
+                              "구현 결함이다**")
+    elif data_blocked:
+        verdict("G-25", BLOCKED, common)
+    else:
+        verdict("G-25", PASS, f"5/5 충족 · 롤백 {rb_note}")
     say()
 
 

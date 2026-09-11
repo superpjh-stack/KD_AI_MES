@@ -299,15 +299,54 @@ def test_g24_inspections_have_no_write_path_yet():
 
 
 # ── G-25 MLOps ───────────────────────────────────────────────────────────
-def test_g25_no_rollback_path_yet():
-    """**차단 표지** — 배포 상태를 되돌리는 코드가 0곳이다. 생기면 실패해서 리포트를 갱신시킨다."""
+def test_g25_rollback_returns_to_previous_version():
+    """**해소 실측** — 배포 상태를 되돌리는 코드가 0곳이었다. 표지를 뒤집었다.
+
+    **코드가 있다** 로 끝내지 않는다. 두 버전을 넣고 정본 함수를 직접 불러 v1.0 → v0.9 복귀를
+    잰다. 학습 미실시로 `EST_ML_MODELS` 가 0행이라 표본은 여기서 만들 수밖에 없고,
+    **끝나고 전부 지운다**(G-11 런타임 전용 표 0건).
+
+    이 표본은 **성능 수치가 아니다** — `METRIC_JSON` 을 비워 둔다. 이것으로 G-25 가 PASS 가
+    되지는 않는다. 남은 4개(모델 버전·성능·상태 / 학습 이력 / 예측 기록 / Train·Val·Test 분리)는
+    학습 미실시로 **분모 0** 이고 그것은 `tools/check_ai.py` 가 `차단` 으로 적는다.
+    """
     import re as _re
     dep = _re.compile(r"(update\s+EST_ML_MODELS|set\s+DEPLOY_STATUS|"
                       r"def\s+\w*(rollback|deploy|promote)\w*\s*\()", _re.I)
     hits = [f"{p.relative_to(ROOT).as_posix()}"
             for p in (ROOT / "src").rglob("*.py")
             for line in p.read_text().splitlines() if dep.search(line)]
-    assert hits == [], f"롤백·배포 전환 경로가 생겼다: {hits} — G-25 를 다시 재라"
+    assert hits, "롤백·배포 전환 경로가 사라졌다 — G-25 가 회전 6 상태로 되돌아갔다"
+
+    name = "QA3롤백회귀_견적예측"
+    mark = int(conn.q1("select coalesce(max(MODEL_ID),0) as n from EST_ML_MODELS")["n"])
+    try:
+        for ver, status_, ago in (("v0.9", mlreg.VALIDATED, "1 day"),
+                                  ("v1.0", mlreg.DEPLOYED, "0 day")):
+            conn.x("insert into EST_ML_MODELS (MODEL_NAME, MODEL_TYPE, MODEL_VERSION, "
+                   "DEPLOY_STATUS, DEPLOYED_DT, CREATED_DT) "
+                   f"values (%s, %s, %s, %s, now() - interval '{ago}', now())",
+                   (name, "회귀", ver, status_))
+        assert mlreg.deployed_model(name)["model_version"] == "v1.0"
+        assert mlreg.previous_version(name)["model_version"] == "v0.9"
+
+        out = mlreg.rollback(name)
+        assert out["rolled_back_from"] == "v1.0" and out["rolled_back_to"] == "v0.9"
+        assert mlreg.deployed_model(name)["model_version"] == "v0.9", "되돌아가지 않았다"
+        # 동시 배포 금지 — 되돌린 뒤 '배포' 는 하나뿐이고 이력은 지워지지 않는다.
+        rows = conn.q("select MODEL_VERSION, DEPLOY_STATUS from EST_ML_MODELS "
+                      "where MODEL_NAME = %s order by MODEL_ID", (name,))
+        assert len(rows) == 2, "롤백이 이력을 지웠다 — 되돌린 사실이 남지 않는다"
+        assert [r["deploy_status"] for r in rows] == [mlreg.DEPLOYED, mlreg.VALIDATED]
+
+        # 0건 경로 — 되돌릴 곳이 없으면 **422**. 없는데 성공한 척하지 않는다 (§2.5).
+        with pytest.raises(Exception) as e:
+            mlreg.rollback("존재하지않는모델_QA3")
+        assert getattr(e.value, "status_code", None) == 422
+    finally:
+        conn.x("delete from EST_ML_MODELS where MODEL_ID > %s", (mark,))
+    assert int(conn.q1("select count(*) as n from EST_ML_MODELS")["n"]) == 0, \
+        "실측용 모델이 남았다 — G-11(런타임 전용 표 0건)을 오염시킨다"
 
 
 def test_g25_splits_absent_because_ratio_not_in_canon():

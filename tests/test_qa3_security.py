@@ -161,25 +161,89 @@ def test_g27_lockout_thresholds_come_from_env():
         ratelimit.reset_all()
 
 
-def test_g27_login_and_lockout_are_not_wired_yet():
-    """**결함 표지 (DEF-QA3-004)** — 잠금 모듈은 있는데 부르는 라우트가 0곳, POST /login 도 0곳."""
+def test_g27_login_and_lockout_are_wired(client):
+    """**DEF-QA3-004 해소 실측.** 표지를 뒤집었다 — 이제 **연결이 풀리면** 깨진다.
+
+    회전 6 까지 `util/session.py` · `util/ratelimit.py` 는 만들어져 있는데 부르는 곳이 0곳이라
+    통째로 죽어 있었다(POST /login 도 0곳). 지금은 `app/auth.py` 가 그 둘을 부르는 곳이다.
+    **코드가 있다** 로 끝내지 않고 세 갈래를 다 태워서 잰다 — 맞는 비번·틀린 비번·한도 초과.
+    """
     s = src_text()
     wired = [f for f, t in s.items()
              if "ratelimit." in t and not f.endswith(("util/ratelimit.py", "util/__init__.py"))]
     login_post = [f for f, t in s.items() if re.search(r"@(?:app|router)\.post\(\"/login", t)]
-    assert wired == [] and login_post == [], (
-        f"로그인·잠금이 붙기 시작했다 (잠금 {wired}, POST /login {login_post}) — "
-        "G-27 을 다시 재고 리포트를 갱신하라")
+    assert wired and login_post, (
+        f"로그인·잠금 연결이 풀렸다 (잠금 {wired}, POST /login {login_post}) — "
+        "모듈만 남고 부르는 곳이 사라지면 G-27 은 회전 6 상태로 되돌아간 것이다")
+
+    from kyungdong.app import auth
+    pw = "Qa3!Login#2026x"
+    assert auth.policy_errors(pw) == [], "시험용 비밀번호가 정책을 못 넘는다 — 값을 바꿔라"
+    row = conn.q1("select USER_ID, LOGIN_ID, PASSWORD_HASH from SYS_USERS "
+                  "where LOGIN_ID = 'admin'")
+    assert row is not None, "admin 계정이 없다 — `make db-seed`"
+    mark = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
+    fail_max = settings().h("LOGIN_FAIL_MAX").as_int()
+    try:
+        conn.x("update SYS_USERS set PASSWORD_HASH = %s where USER_ID = %s",
+               (auth.hash_password(pw), row["user_id"]))
+        ratelimit.reset_all()
+        session.reset_all()
+
+        # ① 맞는 비밀번호 → 200 + **서버측** 세션. 쿠키만 주고 마는 것은 세션이 아니다.
+        ok = csrf_post(client, "/login", {"login_id": "admin", "password": pw}, page="/login")
+        assert ok.status_code == 200, f"맞는 비밀번호인데 {ok.status_code}"
+        assert session.COOKIE in ok.cookies, "세션 쿠키를 내려주지 않는다"
+        assert session.active_count() == 1, "쿠키만 주고 서버측 세션을 만들지 않았다 (G-27)"
+
+        # ② 틀린 비밀번호 → 401. 조용히 통과시키지 않는다.
+        bad = csrf_post(client, "/login", {"login_id": "admin", "password": "틀린비번"},
+                        page="/login")
+        assert bad.status_code == 401, f"틀린 비밀번호인데 {bad.status_code}"
+
+        # ③ 한도까지 실패 → 잠금 403. 맞는 비밀번호로도 못 들어간다.
+        for _ in range(fail_max):
+            csrf_post(client, "/login", {"login_id": "admin", "password": "x"}, page="/login")
+        locked = csrf_post(client, "/login", {"login_id": "admin", "password": pw}, page="/login")
+        assert locked.status_code == 403, (
+            f"실패 {fail_max}회(LOGIN_FAIL_MAX) 뒤에도 {locked.status_code} — 계정 잠금이 안 걸린다")
+
+        # 실패도 **남는다** — 조용히 지나가는 인증 실패를 만들지 않는다 (G-29·G-30).
+        assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s "
+                  "and LOG_TYPE = '접속' and RESULT_CODE = '오류'", (mark,)) >= 1
+    finally:
+        conn.x("update SYS_USERS set PASSWORD_HASH = %s where USER_ID = %s",
+               (row["password_hash"], row["user_id"]))
+        conn.x("delete from SYS_ACCESS_LOGS where LOG_ID > %s", (mark,))
+        ratelimit.reset_all()
+        session.reset_all()
 
 
-def test_g27_password_policy_is_displayed_but_not_enforced():
-    """**결함 표지 (DEF-QA3-005)** — 복잡도·주기 값은 있는데 **강제하는 코드가 0곳**이다."""
+def test_g27_password_policy_is_enforced():
+    """**DEF-QA3-005 해소 실측.** 값이 화면에 뜨는 것과 **강제하는 것**은 다른 사실이다.
+
+    표지를 뒤집었다 — 강제 코드가 사라지면 깨진다. 임계값 자체는 여전히 `.env` 가설(D-16)이고
+    **여기서 정하지 않는다**: 배지가 `가설` 인지도 함께 단언해 수치가 조용히 정본이 되는 것을 막는다.
+    """
+    from kyungdong.app import auth
     s = src_text()
     users = {k: [f for f, t in s.items()
                  if k in t and "settings.py" not in f and "main.py" not in f]
              for k in ("PASSWORD_MIN_LEN", "PASSWORD_CHANGE_CYCLE_DAYS")}
-    assert users["PASSWORD_MIN_LEN"] == [] and users["PASSWORD_CHANGE_CYCLE_DAYS"] == [], (
-        f"비밀번호 정책을 강제하는 코드가 생겼다: {users} — G-27 을 다시 재라")
+    assert users["PASSWORD_MIN_LEN"] and users["PASSWORD_CHANGE_CYCLE_DAYS"], (
+        f"비밀번호 정책을 강제·안내하는 코드가 사라졌다: {users} — 값만 있고 강제가 없으면 정책이 아니다")
+
+    # 0건 경로(위반 없음)와 N건 경로(위반) 를 둘 다 단언한다.
+    min_len = settings().h("PASSWORD_MIN_LEN").as_int()
+    assert auth.policy_errors("Qa3!Login#2026x") == []
+    short = auth.policy_errors("Ab1!")
+    assert short, "최소 길이 미달을 통과시킨다"
+    assert any(str(min_len) in e for e in short), f"길이 위반 사유에 임계가 안 적힌다: {short}"
+    assert auth.policy_errors("a" * (min_len + 5)), "복잡도(문자 종류)를 보지 않는다"
+
+    # 주기 안내 — 값이 없으면 **모른다고 말한다**. 조용히 정상으로 두지 않는다.
+    assert "변경" in auth.password_age_notice(None)
+
     s2 = settings()
     assert s2.h("PASSWORD_MIN_LEN").badge.startswith("가설")
     assert s2.h("PASSWORD_CHANGE_CYCLE_DAYS").badge.startswith("가설")
@@ -248,16 +312,44 @@ def test_g29_pii_masking():
     assert pii.mask(None) == "" and pii.mask("") == ""
 
 
-def test_g29_error_log_type_is_never_written():
-    """**결함 표지 (DEF-QA3-007)** — `LOG_TYPE='오류'` 를 남기는 코드가 0곳이다."""
+def test_g29_error_log_type_is_written(client):
+    """**DEF-QA3-007 해소 실측.** `LOG_TYPE='오류'` 가 어휘로만 있고 쓰는 곳이 0곳이었다.
+
+    표지를 뒤집었다 — **거부가 감사에 안 남으면** 깨진다. 문자열 개수만 세면 주석에도 걸리므로
+    권한 없는 조합을 **전부 태워서** 거부 횟수와 `오류` 행 수가 같은지 본다.
+    감사에 안 남는 거부는 없는 것과 같다(G-29 · D-97).
+    """
+    assert "오류" in auditmod.LOG_TYPES
     s = src_text()
     calls = sum(len(re.findall(r'log_type="오류"', t)) for t in s.values())
-    assert "오류" in auditmod.LOG_TYPES
-    assert calls == 0, ("오류 감사 기록이 붙었다 — G-29 를 다시 재고 리포트를 갱신하라")
+    assert calls >= 1, "`오류` 감사를 남기는 코드가 사라졌다 — 거부가 조용해진다"
+
+    denied = [(role, sc) for role in ROLES for sc in nav.all_screens()
+              if not rbac.can_read(role, sc.area)]
+    assert denied, "권한 없는 조합이 0건이다 — 거부 경로를 한 번도 재지 못했다 (0건 경로 아님)"
+    mark = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
+    try:
+        for role, sc in denied:
+            r = client.get(sc.path, headers={"x-kyungdong-role": role})
+            assert r.status_code == 403, f"{sc.path} as {role}: {r.status_code} (기대 403)"
+        got = n1("select count(*) as n from SYS_ACCESS_LOGS "
+                 "where LOG_ID > %s and LOG_TYPE = '오류'", (mark,))
+        assert got == len(denied), (
+            f"거부 {len(denied)}회인데 `오류` 감사가 {got}행이다 — 조용히 지나가는 거부가 있다")
+        row = conn.q1("select ACTION_NAME, RESULT_CODE, ERROR_MSG from SYS_ACCESS_LOGS "
+                      "where LOG_ID > %s and LOG_TYPE = '오류' order by LOG_ID limit 1", (mark,))
+        assert row["result_code"] == "오류" and "권한" in (row["error_msg"] or ""), (
+            f"거부 사유가 감사에 안 적힌다: {row}")
+    finally:
+        conn.x("delete from SYS_ACCESS_LOGS where LOG_ID > %s", (mark,))
 
 
-def test_g29_sixteen_screens_do_not_log_access(client):
-    """**결함 표지 (DEF-QA3-006)** — 45화면 중 16개가 조회해도 접속 로그를 남기지 않는다."""
+def test_g29_every_screen_logs_access(client):
+    """**DEF-QA3-006 해소 실측.** 45화면 중 16개가 조회해도 접속 로그를 남기지 않았다.
+
+    표지를 뒤집었다 — **한 화면이라도 빠지면** 깨진다. 원인이었던 것은 개발2 16화면이 공용
+    가드를 안 지난 것이라, 가드에서 `audit()` 이 빠지면 다시 16개가 통째로 조용해진다.
+    """
     unlogged = []
     for sc in nav.all_screens():
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
@@ -266,56 +358,80 @@ def test_g29_sixteen_screens_do_not_log_access(client):
                  "where LOG_ID > %s and LOG_TYPE = '접속'", (m,))
         if not got:
             unlogged.append(sc.path)
-    assert len(unlogged) == 16, (
-        f"접속 로그를 남기지 않는 화면이 {len(unlogged)}개다 (측정 당시 16개): {unlogged} — "
-        "늘었으면 새 결함이고 줄었으면 DEF-QA3-006 이 해소된 것이다. 리포트를 갱신하라")
+    assert len(nav.all_screens()) == 45, "화면 수가 45가 아니다 — 분모를 먼저 확인하라"
+    assert unlogged == [], (
+        f"접속 로그를 남기지 않는 화면이 {len(unlogged)}개 생겼다: {unlogged} — "
+        "DEF-QA3-006 으로 되돌아갔다")
 
 
-def test_g29_api_audit_has_two_holes(client):
-    """**결함 표지 (DEF-QA3-009)** — API 감사 기록이 두 갈래에서 빠진다.
+def test_g29_api_audit_covers_json_api_and_501(client):
+    """**DEF-QA3-009 해소 실측.** API 감사가 두 갈래에서 빠져 있었다.
 
-    ① JSON Agent API(`/api/agent/query`)는 `SYS_ACCESS_LOGS` 에 아무 것도 남기지 않는다.
-    ② 화면 Agent 질의가 501 로 끝나면 `audit()` 가 호출 뒤에 있어 지나친다.
-    정상 갈래(200)는 남는다 — 그것까지 함께 단언해 '아예 안 남는다' 와 구분한다.
+    표지를 뒤집었다 — 둘 중 하나라도 다시 빠지면 깨진다.
+      ① JSON Agent API(`/api/agent/query`) 가 `SYS_ACCESS_LOGS` 에 아무 것도 안 남겼다.
+      ② 화면 Agent 질의가 501 로 끝나면 `audit()` 가 호출 **뒤**에 있어 지나쳤다.
+    **못 한 것도 남겨야 한다**(G-30) — 501 갈래의 감사는 `RESULT_CODE='오류'` 여야 한다.
     """
     mq = n1("select coalesce(max(QUERY_ID),0) as n from AGT_QUERY_LOGS")
     ma = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
     try:
+        # ① JSON API — 화면이 없으므로 토큰은 `/login` 에서 받는다 (D-102).
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
-        # `/api/agent/query` 는 화면이 없는 JSON API 다 — 토큰은 세션에 매이므로
-        # 브라우저가 그렇듯 `/login` 에서 받은 세션 토큰을 싣는다 (D-102).
         csrf_post(client, "/api/agent/query",
                   {"question": "환율 적용 기준은 무엇인가", "agent_type": "통합"},
                   page="/login", headers={"x-kyungdong-role": "SYSADMIN"})
-        assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (m,)) == 0, \
-            "JSON Agent API 가 감사 기록을 남기기 시작했다 — 리포트를 갱신하라"
+        assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s "
+                  "and LOG_TYPE = 'API'", (m,)) == 1, \
+            "JSON Agent API 가 감사 기록을 남기지 않는다 — DEF-QA3-009 ① 로 되돌아갔다"
 
+        # ② 정상 갈래(200)
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
         r = csrf_post(client, "/inv/009", {"q1": "환율 적용 기준은 무엇인가"},
                       headers={"x-kyungdong-role": "SYSADMIN"})
         assert r.status_code == 200
         assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s "
-                  "and LOG_TYPE = 'API'", (m,)) == 1, "정상 갈래의 API 감사까지 사라졌다"
+                  "and LOG_TYPE = 'API'", (m,)) == 1, "정상 갈래의 API 감사가 사라졌다"
 
+        # ③ 501 갈래 — 남되 **오류로** 남는다. 못 한 것을 정상으로 적으면 그게 조용한 실패다.
         m = n1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")
         r = csrf_post(client, "/inv/009", {"q1": "문서 누락 자재는 격리구역에 두는가"},
                       headers={"x-kyungdong-role": "SYSADMIN"})
         assert r.status_code == 501
-        assert n1("select count(*) as n from SYS_ACCESS_LOGS where LOG_ID > %s", (m,)) == 0, \
-            "501 갈래에도 감사가 남기 시작했다 — 리포트를 갱신하라"
+        row = conn.q1("select LOG_TYPE, RESULT_CODE from SYS_ACCESS_LOGS "
+                      "where LOG_ID > %s and LOG_TYPE = 'API' order by LOG_ID limit 1", (m,))
+        assert row is not None, "501 갈래가 감사에 안 남는다 — DEF-QA3-009 ② 로 되돌아갔다"
+        assert row["result_code"] == "오류", f"501 인데 감사에 {row['result_code']} 로 적힌다"
     finally:
         conn.x("delete from SYS_ACCESS_LOGS where LOG_ID > %s", (ma,))
         conn.x("delete from AGT_QUERY_LOGS where QUERY_ID > %s", (mq,))
 
 
-def test_g29_issued_password_goes_through_url_query():
-    """**결함 표지 (DEF-QA3-008)** — 발급 비밀번호가 URL 쿼리스트링으로 흐른다."""
+def test_g29_issued_password_never_goes_through_url(client):
+    """**해소 실측** — 발급 비밀번호가 URL 쿼리스트링(`?issued=…`)으로 흘렀다.
+
+    표지를 뒤집었다 — 다시 URL 로 새면 깨진다. URL 은 브라우저 히스토리·Referer·
+    액세스 로그에 남아 해시를 아무리 잘 걸어도 원문이 그 자리에 박힌다.
+    """
     s = src_text()
     hits = [f"{f}:{i}" for f, t in s.items()
             for i, line in enumerate(t.splitlines(), 1)
             if re.search(r"issued=\{?raw", line)]
-    assert hits == ["src/kyungdong/app/routers/sys.py:151"], (
-        f"URL 평문 비밀번호 위치가 바뀌었다: {hits} — 고쳐졌으면 리포트를 갱신하라")
+    assert hits == [], f"발급 비밀번호가 다시 URL 로 흐른다: {hits}"
+
+    # 응답 자체로도 확인한다 — 코드 grep 만으로는 다른 이름의 쿼리로 새는 것을 못 잡는다.
+    mark = n1("select coalesce(max(USER_ID),0) as n from SYS_USERS")
+    role_id = n1("select min(ROLE_PERM_ID) as n from SYS_ROLE_PERMISSIONS")
+    try:
+        r = csrf_post(client, "/sys/026",
+                      {"action": "create", "login_id": "qa3tmp", "user_name": "임시",
+                       "dept_name": "QA", "role_id": str(role_id)},
+                      page="/sys/026", headers={"x-kyungdong-role": "SYSADMIN"},
+                      follow_redirects=False)
+        loc = r.headers.get("location") or ""
+        assert "issued" not in loc and "password" not in loc.lower(), \
+            f"발급 응답의 Location 에 비밀번호가 실렸다: {loc}"
+    finally:
+        conn.x("delete from SYS_USERS where USER_ID > %s", (mark,))
 
 
 def test_g29_no_password_literal_in_repo():

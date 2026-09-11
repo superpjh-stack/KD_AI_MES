@@ -291,10 +291,13 @@ def test_G05_프로그램_49건이_화면45_더하기_인터페이스4다():
     assert progs - screens == {f"MES-TD4-{n}" for n in ("046", "047", "048", "049")}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "DEF-QA1-001 — api-contract §3 은 인터페이스 4건의 연계 상태를 `/dat/033` 에서 본다고 "
-    "적었는데 그 화면에 4건이 없다. `/sys/029` 에는 4/4 가 있다 (담당 개발1)"))
 def test_G05_dat033이_인터페이스_연계상태_4건을_보여준다():
+    """**DEF-QA1-001 해소 실측.** `xfail(strict)` 표지를 걷어냈다.
+
+    api-contract §3 은 인터페이스 4건(MES-TD4-046~049)의 연계 상태를 `/dat/033` 에서 본다고
+    적었는데 그 화면에 4건이 없었다(`/sys/029` 에만 4/4 였다). 이제 계약이 적은 자리에서 보인다 —
+    **다시 사라지면 깨진다.** 아래 `/sys/029` 대조군과 함께 두 자리 모두를 지킨다.
+    """
     body = client.get("/dat/033", params={"as": "SYSADMIN"}).text
     shown = [p for p in ("MES-TD4-046", "MES-TD4-047", "MES-TD4-048", "MES-TD4-049")
              if p in body or (design.program(p) or {}).get("name", "＃") in body]
@@ -302,7 +305,11 @@ def test_G05_dat033이_인터페이스_연계상태_4건을_보여준다():
 
 
 def test_인터페이스_4건은_sys029에서는_보인다():
-    """위 xfail 의 대조군 — 화면 자체는 있고 **위치가 계약과 다르다**는 근거."""
+    """대조군 — 인터페이스 4건은 `/sys/029` 에서도 보인다.
+
+    DEF-QA1-001 당시에는 "화면 자체는 있고 **위치가 계약과 다르다**" 는 근거였다. 지금은 두 자리
+    모두 4/4 이고, 이쪽이 사라지면 관리 화면을 잃는다.
+    """
     body = client.get("/sys/029", params={"as": "SYSADMIN"}).text
     shown = [p for p in ("MES-TD4-046", "MES-TD4-047", "MES-TD4-048", "MES-TD4-049") if p in body]
     assert len(shown) == 4, f"/sys/029 에도 {len(shown)}/4 밖에 없다"
