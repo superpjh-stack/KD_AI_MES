@@ -112,3 +112,12 @@ Streamlit UI(FastAPI+Jinja2 로 대체, D-14) · `voice.py`(범위 밖).
 | **D-41** | 차단 | **외주 발주 관리 항목 부재.** TD1 `process_steps` 는 소재가공(외주)·버핑(외주) 데이터로 **"외주 발주번호, 자재 LOT, 반출·반입일, 외주처, 수량"** 을 적었으나, TD5 에 **외주 발주번호·외주처 컬럼이 없다.** 구매 발주(PO) 테이블도 없고 `EST_MATERIAL_REQS.PO_NEED_YN`(발주 필요 여부)뿐이다 | **컬럼을 추가하지 않는다**(G-02 762 고정). 있는 것으로 최대한 소화한다 — 반출·반입 이력은 `PRC_PROCESS_HISTORIES.OUTSOURCE_STEP` 과 `INV_MATERIAL_HISTORY.HIST_TYPE`(반출/반입), 외주처는 `INV_SUPPLIERS`(`SUPPLY_TYPE`='외주'), 외주 발주번호는 `PRC_WORK_ORDERS.WORK_ORDER_NO` 로 대체한다. 화면에 `대체 표기 (D-41)` 을 붙이고 **정규 컬럼 신설을 도입기업에 제안** |
 | **D-42** | 확정 | **`tools/check_trace.py` 는 QA1 이 만든다.** 아키텍트가 대신 만들지 않는다(§3.4 한 파일은 한 사람만) | 추적 1:1 자체는 `tests/test_arch_smoke.py::test_경로와_추적ID가_중복없이_1대1이다` 가 이미 단언한다. **게이트 G-04·G-05 는 QA1 이 올 때까지 `미구현`** 으로 남는다 — `미구현`은 PASS 가 아니다 |
 | **D-43** | 확정 | **계약 3종은 생성 파일이다.** `screen-map.md`(← `nav.py`) · `db-schema.md`(← TD5) · `api-contract.md`(← `nav.py`+TD4). `interfaces.md` 만 손으로 쓴다 | 손으로 고치면 어긋난다. `make contracts` 로 다시 뽑는다 |
+
+## 회전 4에서 추가 (2026-09-11 · 공용 모듈·시드)
+
+| ID | 상태 | 내용 | 처리 |
+|---|---|---|---|
+| **D-44** | 차단 | **`SYS_USERS.ROLE_ID` FK 설계 결함.** TD5 는 `ROLE_ID BIGINT FK: SYS_ROLE_PERMISSIONS` 로 적었으나 그 표는 **역할 × 업무영역(× 화면) 조합마다 한 행**이다. 사용자가 "역할" 이 아니라 **권한 행 하나**를 가리키게 된다 | **컬럼을 추가하지 않는다**(G-02 762 고정). 시드는 `ROLE_ID` 에 **그 역할의 대표 행(최소 `ROLE_PERM_ID`)** 을 넣고, 권한 판정은 `ROLE_CODE` 로 조인해서 한다. `SYS_ROLE_PERMISSIONS` 에 `ROLE_CODE` 만 있는 역할 마스터 분리를 도입기업에 제안 |
+| **D-45** | 확정 | **물리 유니크 `SYS_ROLE_PERMISSIONS UNIQUE NULLS NOT DISTINCT (ROLE_CODE, AREA_CODE, SCREEN_ID)` 를 건다.** 근거: TD5 criteria "물리 인덱스·파티션·실제 제약명은 **구현 단계에서 확정**한다" | 시드를 **upsert** 로 만들기 위해 필요하다 — `delete` 는 D-44 의 FK 가 막는다(실제로 터졌다). `SCREEN_ID` NULL 행도 중복을 막아야 해 `NULLS NOT DISTINCT`(PostgreSQL 15+). **컬럼은 추가하지 않았다** |
+| **D-46** | 확정 | **`util/anchor.py` → `util/clock.py` 로 이름을 바꿨다.** 모듈명 `anchor` 와 함수명 `anchor()` 가 겹쳐 `from util import anchor` 가 함수로 해석됐다(실제로 터졌다) | 개발 3명이 똑같이 걸릴 함정이라 미리 없앴다. 함수명은 `anchor()` 그대로 |
+| **D-47** | 확정 | **정본에 값이 없는 코드 그룹 7종은 비워 둔다** — 품목 · 재질 · 고객사 · 보관위치 · 불량유형 · 클레임유형 · 원가대상 | 화면 입력 마스터다. **시드에 지어내지 않는다**(§0.2). 화면은 `미확정 (D-26)` 을 렌더한다. 테스트가 "비어 있음" 을 단언한다 |

@@ -233,3 +233,80 @@ SQLite 스키마·`demo_data`·데모 예측 상수·Streamlit·`voice.py` 는 �
 - **계약 3종은 생성 파일이다**(D-43). 손으로 고치면 `test_계약을_다시_뽑아도_같다` 가 잡는다. `make contracts` 로 갱신한다.
 - **`tools/check_trace.py` 는 QA1 몫이다**(D-42). 아키텍트가 대신 만들지 않는다 — G-04·G-05 는 QA1 이 올 때까지 `미구현` 이고 **`미구현`은 PASS 가 아니다**. 추적 1:1 자체는 스모크 테스트가 이미 단언한다.
 - 개발자는 `main.py` 를 건드리지 않는다. 자기 `app/routers/<module>.py` 에 `router` 와 `SCREENS = (...)` 만 두면 placeholder 에서 빠진다.
+
+---
+
+## 2026-09-11 회전 4 — 공용 모듈·공통 시드 (아키텍트 · 에이전트 0)
+
+웨이브 B 는 사용자 확인 대기 중이라 아키텍트 잔여분만 했다.
+
+### 게이트 — `make gate`
+
+```
+PASS 5 · FAIL 1 · 차단 0 · 미구현 6  /  12      G-빌드 88 passed (70 → +18)
+```
+
+### 만든 것
+
+| 파일 | 역할 | 실측 검증 |
+|---|---|---|
+| `app/util/codes.py` | **D-32 코드성 FK 검증** — `validate_code` · `require_code`(위반 시 **422**) · `code_group_for`. 29컬럼 → 코드 그룹 매핑을 **명시**(추측 아님) | 매핑 **29/29**, 미지정 **0**. `require_code` 위반 시 422 확인 |
+| `app/util/pii.py` | **G-29 마스킹** — name·phone·email·generic | `홍길동`→`홍**` · `010-1234-5678`→`010-****-5678` · `so*****@example.com` |
+| `app/util/clock.py` | **시간 앵커**(§10-3). 앵커가 없으면 **터진다** — 조용히 오늘 날짜로 대체하지 않는다 | 재실행해도 앵커 불변 확인 |
+| `app/util/audit.py` | **G-29 감사추적** `SYS_ACCESS_LOGS`. 기록 실패를 삼키지 않는다 | LOG_TYPE 은 TD5 4종만 허용(위반 시 예외) |
+| `db/seed.py` | 시간 앵커 · 역할 **6×10=60행** · 계정 6 · 공통코드 25 | **3회 연속 exit 0 · 행 수 diff 0 · 비밀번호 불변** |
+| `tests/test_arch_seed.py` | G-07 멱등 · §10-11 비밀번호 · 앵커 고정 · RBAC DB 반영 · 실명 없음 · 빈 그룹 · D-32 검증 · 마스킹 | **88 passed** (70 → +18) |
+
+### 실측으로 확인한 것
+
+| 항목 | 실측 |
+|---|---|
+| `SYS_ROLE_PERMISSIONS.AREA_CODE` | TD5 비고가 정한 `DSH/INV/EST/SHP/PRC/BAS/DAT/AGT/KPI/SYS` **10코드가 `nav.py` 라우트 접두와 정확히 같다** — 정본이 접두 선택을 확인해 줬다 |
+| 역할·권한 | **60행** (6역할 × 10영역). 현장 작업자 `EST` 는 `READ_YN='N'` — TD3 셀 `-` 가 DB 까지 내려왔다(G-28) |
+| 채운 코드 그룹 | **6** — 공정 10(레이저커팅만 자동 수집) · 제품군 5 · 검사구분 3(수압·기밀·진공) · 공급구분 3 · 외주구간 2 · 설비 2(수집 지점 2개소) |
+| **비운 코드 그룹** | **7** — 품목 · 재질 · 고객사 · 보관위치 · 불량유형 · 클레임유형 · 원가대상. **정본에 값이 없어 지어내지 않았다**(D-47). 테스트가 "비어 있음" 을 단언한다 |
+
+### 실물로 터진 산출물 결함 — D-44
+
+시드 재실행이 **`ForeignKeyViolation` 으로 죽었다**:
+
+```
+update or delete on table "sys_role_permissions" violates foreign key constraint "fk_sys_users_role_id"
+DETAIL:  Key (role_perm_id)=(1) is still referenced from table "sys_users".
+```
+
+원인은 TD5 설계다 — `SYS_USERS.ROLE_ID` 가 `SYS_ROLE_PERMISSIONS.ROLE_PERM_ID` 를 가리키는데
+그 표는 **역할 × 영역(× 화면) 조합마다 한 행**이다. 사용자가 "역할" 이 아니라 **권한 행 하나**를 가리킨다.
+
+→ **컬럼을 추가하지 않고**(G-02 762 고정) 두 가지로 풀었다.
+1. 시드는 `ROLE_ID` 에 **그 역할의 대표 행(최소 `ROLE_PERM_ID`)** 을 넣고, 권한 판정은 `ROLE_CODE` 조인으로 한다.
+2. **물리 유니크**(D-45)를 걸어 시드를 `delete+insert` 에서 **upsert** 로 바꿨다 —
+   `UNIQUE NULLS NOT DISTINCT (ROLE_CODE, AREA_CODE, SCREEN_ID)`. 근거는 TD5 criteria
+   "물리 인덱스·파티션·실제 제약명은 **구현 단계에서 확정**한다" 다. 컬럼은 그대로 762 다.
+
+역할 마스터 분리를 도입기업에 제안한다.
+
+### 또 하나 — D-46 모듈명 함정
+
+`util/anchor.py` 의 모듈명과 `anchor()` 함수명이 겹쳐 `from util import anchor` 가 **함수로 해석**돼
+`anchor.CONFIG_TYPE` 이 `AttributeError` 로 터졌다. 개발 3명이 똑같이 걸릴 함정이라
+모듈을 **`util/clock.py`** 로 바꿨다. 함수명은 `anchor()` 그대로다.
+
+### 지금 해야 할 것 (회전 5)
+
+**웨이브 A 는 완전히 끝났다. 남은 것은 전부 웨이브 B·C 다 — 사용자 확인이 필요하다.**
+
+확인이 오면: 개발1(입고·기준·시스템·데이터 15화면) · 개발2(대시보드·공정·출하·KPI 16화면) ·
+개발3(AI 14화면) 을 §5 프롬프트로 기동한다. **ML 학습이 있는 개발3 회전은 단독**(§10-2).
+
+확인이 없으면 아키텍트가 할 수 있는 것이 거의 없다. 남은 것:
+1. `app/util/` 세션·속도제한(계정 5회/IP 20회)·보안헤더·CSP(외부 CDN 0)·CSRF (§10-12)
+2. `app/auth.py` 골격 — 단 인증 본체는 개발1 몫이라 **시그니처만** 두고 넘긴다
+
+### 알아둘 것
+
+- **시드 계정 6개는 직무 계정**이다(`exec` `quality` `prod` `operator` `supplier` `admin`). 실명 없음(D-39).
+  비밀번호는 **최초 1회만 출력**되고 재실행해도 바뀌지 않는다 — 잃어버리면 계정을 지우고 다시 시드한다.
+- **`require_code()` 를 저장 전에 부른다**(D-32). DB 가 막아주지 않는 29컬럼이다.
+- **`clock.anchor()` 를 쓴다.** `date.today()` 를 쓰면 §10-3 사고가 재현된다.
+- 비운 코드 그룹 7종(D-47)에 값을 넣고 싶으면 **정본 근거를 먼저 찾는다.** 없으면 화면 입력으로 둔다.

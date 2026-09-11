@@ -206,3 +206,16 @@ TD5 비고는 `FK: BAS_COMMON_CODES` 를 가리키지만 컬럼 타입이 `VARCH
 | `PRC_CONDITION_DEVIATIONS` | 작업조건 편차 — 표준·실측 비교로 파생되는지, 시드하는지 (개발2) |
 | `PRC_PROCESS_HISTORIES` | 공정 이력 — 공정실적 시드와 함께 채우는지 (개발2) |
 | `SHP_CLAIM_CAUSES` | 클레임 원인 — 클레임 등록 시 쌓이는지 (개발2) |
+
+## 8. 물리 설계 결정 (TD5 criteria: 물리 인덱스·파티션·제약명은 구현 단계 확정)
+
+**컬럼을 추가하지 않았다** — G-02(762)에 영향 없음.
+
+| 표 | 제약 | 근거 |
+|---|---|---|
+| `BAS_COMMON_CODES` | `UNIQUE(CODE_GROUP, CODE_VALUE)` | TD5 비고 '그룹 내/구분 내 Unique' (D-34) |
+| `SYS_CONFIGS` | `UNIQUE(CONFIG_TYPE, CONFIG_KEY)` | TD5 비고 '그룹 내/구분 내 Unique' (D-34) |
+| `SYS_ROLE_PERMISSIONS` | `UNIQUE NULLS NOT DISTINCT (ROLE_CODE, AREA_CODE, SCREEN_ID)` | 시드 upsert 필수 — delete 는 `SYS_USERS.ROLE_ID` FK 가 막는다 (D-45) |
+
+`NULLS NOT DISTINCT` 는 PostgreSQL 15+ 기능이다. `SCREEN_ID` 가 NULL 인 영역 단위 행도
+중복을 막아야 하므로 쓴다.

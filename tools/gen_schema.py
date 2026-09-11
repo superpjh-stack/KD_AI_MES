@@ -21,6 +21,14 @@ FK_PAT = re.compile(r"FK\s*:?\s*([A-Z_]+)")
 
 # TD5 비고가 "그룹 내 Unique" / "구분 내 Unique" 로 적은 것은 단일 컬럼 유니크가 아니다.
 # 범위 컬럼을 여기 명시한다(추측하지 않는다). 새로 생기면 여기에 적는다.
+# 물리 설계 결정 — TD5 criteria: "물리 인덱스·파티션·실제 제약명은 구현 단계에서 확정한다".
+# 컬럼을 추가하지 않으므로 G-02(762)에 영향이 없다. 근거를 D-번호로 남긴다.
+PHYSICAL_UNIQUE: dict[str, tuple[tuple[str, ...], str]] = {
+    # 역할×영역×화면이 유일해야 시드를 upsert 할 수 있다. delete 는 SYS_USERS.ROLE_ID FK 가 막는다(D-44).
+    # SCREEN_ID 가 NULL 인 영역 단위 행도 중복을 막아야 하므로 NULLS NOT DISTINCT (PostgreSQL 15+).
+    "SYS_ROLE_PERMISSIONS": (("ROLE_CODE", "AREA_CODE", "SCREEN_ID"), "D-45"),
+}
+
 SCOPED_UNIQUE: dict[tuple[str, str], str] = {
     ("BAS_COMMON_CODES", "CODE_VALUE"): "CODE_GROUP",   # "그룹 내 Unique(중복 불가)"
     ("SYS_CONFIGS", "CONFIG_KEY"): "CONFIG_TYPE",       # "구분 내 Unique"
@@ -143,6 +151,22 @@ def main() -> int:
         lines.append(
             f"ALTER TABLE {tid} ADD CONSTRAINT uq_{tid.lower()}_{col.lower()}"
             f" UNIQUE ({scope}, {col});"
+        )
+    lines.append("")
+
+    lines.append("-- ── 물리 설계 유니크 (TD5 criteria: 물리 제약은 구현 단계 확정) ──")
+    for tid, (cols, dec) in sorted(PHYSICAL_UNIQUE.items()):
+        if tid not in by_id:
+            defects.append(f"PHYSICAL_UNIQUE 에 적힌 {tid} 이 TD5 68표에 없다")
+            continue
+        names = {c[1].strip() for c in by_id[tid]["columns"]}
+        missing = [c for c in cols if c not in names]
+        if missing:
+            defects.append(f"{tid}: 물리 유니크 컬럼 {missing} 이 TD5 에 없다")
+            continue
+        lines.append(
+            f"ALTER TABLE {tid} ADD CONSTRAINT uq_{tid.lower()}_phys"
+            f" UNIQUE NULLS NOT DISTINCT ({', '.join(cols)});  -- {dec}"
         )
     lines.append("")
 

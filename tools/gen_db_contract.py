@@ -194,6 +194,21 @@ def main() -> int:
     L.append("")
 
     OUT.parent.mkdir(exist_ok=True)
+    # 물리 설계 결정 — TD5 가 "구현 단계 확정" 으로 남긴 것. 생성기가 실제로 거는 제약을 여기 적는다.
+    sys.path.insert(0, str(ROOT / "tools"))
+    import gen_schema                                    # noqa: E402
+    L += ["## 8. 물리 설계 결정 (TD5 criteria: 물리 인덱스·파티션·제약명은 구현 단계 확정)", "",
+          "**컬럼을 추가하지 않았다** — G-02(762)에 영향 없음.", "",
+          "| 표 | 제약 | 근거 |", "|---|---|---|"]
+    for (tid, col), scope in sorted(gen_schema.SCOPED_UNIQUE.items()):
+        L.append(f"| `{tid}` | `UNIQUE({scope}, {col})` | TD5 비고 '그룹 내/구분 내 Unique' (D-34) |")
+    for tid, (cols, dec) in sorted(gen_schema.PHYSICAL_UNIQUE.items()):
+        L.append(f"| `{tid}` | `UNIQUE NULLS NOT DISTINCT ({', '.join(cols)})` | "
+                 f"시드 upsert 필수 — delete 는 `SYS_USERS.ROLE_ID` FK 가 막는다 ({dec}) |")
+    L += ["",
+          "`NULLS NOT DISTINCT` 는 PostgreSQL 15+ 기능이다. `SCREEN_ID` 가 NULL 인 영역 단위 행도",
+          "중복을 막아야 하므로 쓴다.", ""]
+
     OUT.write_text("\n".join(L))
     print(f"생성: {OUT.relative_to(ROOT)} — 표 {len(tables)} · 컬럼 {total_cols} · "
           f"물리 FK {len(real_fks)} · 코드성 {len(code_fks)} · 오표기 {len(odd_fks)} · "
