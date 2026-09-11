@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 
 from ..templating import render
-from ..util import codes, http
+from ..util import codes, csrf, http
 from .dsh import (COLLECT_DECISION, STD_COND_DECISION, anchor, cell, ctx, dt, guard,
                   collection_badges, lot_cell, mock, num, process_names, project_cell)
 
@@ -118,6 +118,8 @@ async def create_performance(
 ):
     """공정 실적 등록. 등록 권한 없으면 **403**, 계약 위반은 **422**."""
     import conn
+    form = await request.form()
+    csrf.require(request, form.get(csrf.FORM_FIELD))     # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3 = guard(request, "MES-TD3-021", write=True)
 
     codes.require_code("PRC_PERFORMANCES", "PROCESS_CODE", process_code)

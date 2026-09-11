@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{% from "_macros.html" import csrf_field %}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
@@ -17,7 +18,7 @@
 
     <div class="card">
       <h2>실적 등록 — 현장POP·스마트패드 수동 입력</h2>
-      <form id="perf-form" class="d2-filters" method="post" action="{{ current.path }}">
+      <form id="perf-form" class="d2-filters" method="post" action="{{ current.path }}">{{ csrf_field() }}
         <div class="d2-f">
           <label for="p-wo">작업지시</label>
           <select id="p-wo" name="work_order_id" required>

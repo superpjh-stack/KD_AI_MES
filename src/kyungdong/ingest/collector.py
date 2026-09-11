@@ -21,7 +21,7 @@ import conn
 from ..app.settings import settings
 from ..app.util import http
 from ..app.util.codes import require_code
-from . import tags
+from . import preprocess, tags
 
 # 수집 경로 라벨 — TD5 `DAT_TIMESERIES.COLLECT_PATH` 비고 그대로
 COLLECT_PATH = "PLC→Gateway→시계열DB"
@@ -52,6 +52,9 @@ class IngestResult:
     duplicated: int = 0        # 재전송으로 이미 있던 행
     signal_rows: int = 0       # PRC_EQUIP_SIGNALS 신규 행
     timeseries_rows: int = 0   # DAT_TIMESERIES 신규 행
+    noise_rows: int = 0        # 이상치로 판정돼 QUALITY_FLAG='노이즈' 로 적재된 행 (G-13)
+    missing_rows: int = 0      # 숫자 변환 실패 — QUALITY_FLAG='결측' (버리지 않는다)
+    undecided_rows: int = 0    # 표본 부족·산포 0 으로 **판정하지 않은** 행 (판정 불가)
     order: list[datetime] = field(default_factory=list)
 
     @property
@@ -104,6 +107,8 @@ def ingest_batch(
         )
 
     res = IngestResult(received=len(samples), order=[s.collect_dt for s in samples])
+    # 이상치 판정 규칙은 `DAT_PREPROCESS_RULES` 가 정본이다 — **배치당 한 번** 읽는다(G-13).
+    outlier_on = preprocess.rule_on(preprocess.RULE_OUTLIER)
     # 한 수집 시각에 모인 태그들을 PRC_EQUIP_SIGNALS 한 행으로 접는다. 순서는 유지한다.
     by_dt: dict[datetime, dict[str, str]] = {}
     with conn.tx() as cur:
@@ -170,12 +175,20 @@ def ingest_batch(
                 )
                 if cur.fetchone():
                     continue
+                # 이상치 판정 (G-13 · DEF-QA2-004). **값은 지우지 않는다** — 결측과 같은 원칙으로
+                # 표시만 한다. 판정 근거는 `preprocess.judge()` 한 곳에만 있다(§10-16).
+                verdict = preprocess.judge(cur, t.name, equip_code, v, dt, enabled=outlier_on)
+                if verdict.flag == "결측":
+                    res.missing_rows += 1
+                elif verdict.noise:
+                    res.noise_rows += 1
+                elif not verdict.decided:
+                    res.undecided_rows += 1
                 cur.execute(
                     "insert into DAT_TIMESERIES "
                     "(TAG_NAME, EQUIP_CODE, MEASURE_DT, MEASURE_VALUE, UOM, QUALITY_FLAG, COLLECT_PATH, CREATED_DT) "
                     "values (%s,%s,%s,%s,%s,%s,%s, now())",
-                    (t.name, equip_code, dt, v, t.uom,
-                     "정상" if v is not None else "결측", collect_path),
+                    (t.name, equip_code, dt, v, t.uom, verdict.flag, collect_path),
                 )
                 res.timeseries_rows += 1
 
@@ -239,16 +252,73 @@ def resend(device_id: int | None = None) -> dict[str, Any]:
     return {"resent_batches": sent, "failed": failed, "stored_rows": rows}
 
 
+# ── 수집 중단 판정 — **정본은 여기 하나다** (DEF-QA2-002 · §10-16) ─────────
+#
+# 회전 6 까지 판정이 두 곳에 복제돼 있었다. `collector.status()` 는 **실시각**,
+# `routers/dsh.collection_badges()` 는 **앵커** 를 기준으로 삼아 같은 DB·같은 시각에
+# 반대 결론을 냈다(QA2 실측). 계약상 정본은 `contracts/interfaces.md` §9 TD4-047 =
+# 이 모듈이므로, 판정 규칙을 아래 함수 **하나**로 모으고 화면은 이것을 부른다.
+#
+# 기준 시각 = `max(실시각, clock.anchor())` (D-316)
+#   · 운영: 앵커는 과거이므로 실시각이 이긴다 — "지금 수집이 살아 있는가" 를 정확히 답한다.
+#   · 앵커 기준 시드/시뮬레이터 데이터: 실시각과의 차이만큼 오래됐으므로 **중단이 맞다.**
+#   · `--realtime` 수집: 마지막 수집이 곧 지금이므로 중단이 아니다.
+# 앵커를 섞는 이유는 앵커가 **미래**로 발급된 창에서도 같은 답을 내기 위해서다.
+def stale_reference(now: datetime | None = None) -> datetime:
+    """중단 판정의 기준 시각. **이 함수 밖에서 기준을 다시 정하지 않는다.**"""
+    from ..app.util import clock
+    real = now or datetime.now()
+    try:
+        return max(real, clock.anchor())
+    except RuntimeError:
+        return real        # 앵커가 없으면 실시각. 조용히 오늘 날짜를 만들지는 않는다(§10-3)
+
+
+def stale_verdict(last_dt: datetime | None, *, now: datetime | None = None,
+                  stale_sec: int | None = None) -> dict[str, Any]:
+    """한 지점의 중단 판정. 화면 배지 문구까지 여기서 만든다 — 각자 문구를 짓지 않는다."""
+    s = settings()
+    limit = s.h("INGEST_STALE_SEC").as_int() if stale_sec is None else stale_sec
+    ref = stale_reference(now)
+    secs = (ref - last_dt).total_seconds() if last_dt else None
+    stale = last_dt is None or secs > limit
+    return {
+        "checked_at": ref,
+        "last_collect_dt": last_dt,
+        "seconds_since": secs,
+        "stale_sec": limit,
+        "stale": stale,
+        "never": last_dt is None,
+        "notice": (
+            http.not_collected("D-06") if last_dt is None
+            else (http.NOTICE_INGEST_STALE.format(ts=last_dt.strftime("%H:%M:%S")) if stale else None)
+        ),
+    }
+
+
+def badges(now: datetime | None = None) -> list[dict[str, str]]:
+    """`/dsh/003` · `/prc/022` 가 그대로 렌더하는 배지 목록 (개발2 공표 시그니처).
+
+    `routers/dsh.collection_badges()` 는 **이 함수를 부른다** — 판정을 다시 쓰지 않는다.
+    """
+    st = status(now)
+    out = [{"cls": "notice", "text": "자동 수집 2개소 (레이저커팅기 PLC · 현장POP) — D-06"}]
+    for d in st["devices"]:
+        if d["notice"]:
+            out.append({"cls": "undetermined" if d["last_collect_dt"] is None else "bad",
+                        "text": f"{d['device_name']} {d['notice']}"})
+    return out
+
+
 # ── 수집 상태 (화면 /dsh/003 · /prc/022 배지 — 개발2 가 호출한다) ──────────
 def status(now: datetime | None = None) -> dict[str, Any]:
     """수집 지점별 마지막 수집 시각과 중단 여부.
 
-    `now` 는 **실시각**이다(수집이 살아 있는지 묻는 함수이므로). 시드·시뮬레이터가 만드는
-    데이터의 기준일은 `clock.anchor()` 이고 이것과 다르다(§10-3).
+    판정은 `stale_verdict()` **한 곳**에서 한다(DEF-QA2-002). 기준 시각은 `stale_reference()`.
     """
     s = settings()
     stale_sec = s.h("INGEST_STALE_SEC").as_int()
-    ref = now or datetime.now()
+    ref = stale_reference(now)
     devices = conn.q(
         "select d.DEVICE_ID, d.DEVICE_NAME, d.DEVICE_TYPE, d.PROTOCOL, d.USE_YN, "
         "       d.COLLECT_INTERVAL, d.LOCATION_DESC, "
@@ -259,8 +329,8 @@ def status(now: datetime | None = None) -> dict[str, Any]:
     out = []
     for d in devices:
         last = d["last_dt"]
-        secs = (ref - last).total_seconds() if last else None
-        stale = last is None or secs > stale_sec
+        v = stale_verdict(last, now=ref, stale_sec=stale_sec)
+        secs, stale = v["seconds_since"], v["stale"]
         out.append({
             "device_id": int(d["device_id"]),
             "device_name": d["device_name"],
@@ -273,10 +343,7 @@ def status(now: datetime | None = None) -> dict[str, Any]:
             "seconds_since": secs,
             "signal_cnt": int(d["signal_cnt"]),
             "stale": stale,
-            "notice": (
-                http.not_collected("D-06") if last is None
-                else (http.NOTICE_INGEST_STALE.format(ts=last.strftime("%H:%M:%S")) if stale else None)
-            ),
+            "notice": v["notice"],
         })
     pend = conn.q1("select count(*) as n from IF_GATEWAY_BUFFER where BUFFER_STATUS = '대기'")
     return {

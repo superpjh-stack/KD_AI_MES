@@ -6,20 +6,22 @@ G-11 런타임 전용: `SYS_ACCESS_LOGS` 는 깨끗한 DB 에서 0건이 정상�
 """
 from __future__ import annotations
 
-import secrets
-
 from fastapi import APIRouter, Request
 
 from .bas import (anchor_label, code_options, dt, guard, paginate, redirect,  # noqa: F401
                   require_fields, screen_page, search_spec, undetermined, val)
-from .. import rbac
-from ..util import clock, http, mask
+from .. import auth, rbac
+from ..util import clock, csrf, http, mask
 from ..util.audit import LOG_TYPES
 
 import conn                                              # noqa: E402
 
 router = APIRouter()
 SCREENS = ("MES-TD3-026", "MES-TD3-027", "MES-TD3-028", "MES-TD3-029")
+
+# 인증(`app/auth.py`)은 화면이 아니라 공통화면 `login` 이라 `SCREENS` 에 들어가지 않는다.
+# `main.py` 는 **화면 모듈만** 싣는다(§8 등록 규약) — 그래서 개발1 담당 라우터에 얹는다(D-117).
+router.include_router(auth.router)
 
 # TD5 `SYS_CONFIGS.CONFIG_TYPE` 비고가 정한 3구분
 CONFIG_TYPES = ("시스템설정", "인터페이스설정", "알림기준")
@@ -44,7 +46,13 @@ def _role_rep() -> dict[str, int]:
 # 026 사용자 관리
 # ═════════════════════════════════════════════════════════════════════════
 @router.get("/sys/026")
-async def users(request: Request, issued: str = "", issued_for: str = ""):
+async def users(request: Request):
+    return _users_page(request)
+
+
+def _users_page(request: Request, issued: str = "", issued_for: str = ""):
+    """발급 비밀번호는 **POST 응답 본문**으로만 흐른다 — URL 쿼리스트링에 싣지 않는다(D-118).
+    쿼리스트링은 접속로그·프록시·브라우저 이력에 남는다(9.2 ① · G-29)."""
     sid = "MES-TD3-026"
     scr, td3 = guard(request, sid)
     q = request.query_params
@@ -127,8 +135,9 @@ async def users(request: Request, issued: str = "", issued_for: str = ""):
 @router.post("/sys/026")
 async def users_save(request: Request):
     sid = "MES-TD3-026"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("login_id", "user_name", "role_code"))
     if v["role_code"] not in rbac.roles():
         raise http.fail("validation", f"알 수 없는 역할: {v['role_code']}")
@@ -139,16 +148,17 @@ async def users_save(request: Request):
         raise http.fail("internal",
                         f"역할 '{v['role_code']}' 의 권한행이 없다 — 먼저 `make db-seed`")
 
-    raw = secrets.token_urlsafe(12)            # 저장소에 리터럴 0건 (G-29)
-    from passlib.hash import argon2
+    # 저장소에 리터럴 0건 (G-29) · 발급값도 **계정 정책을 만족해야 한다** (9.2-2 · auth.policy_errors)
+    raw = auth.generate_password()
     conn.x(
         "insert into SYS_USERS (LOGIN_ID, PASSWORD_HASH, USER_NAME, DEPT_NAME, ROLE_ID, "
         " PHONE_NO, EMAIL, PWD_CHANGED_DT, LOCK_YN, USE_YN, CREATED_DT) "
         "values (%s,%s,%s,%s,%s,%s,%s, now(), 'N','Y', now())",
-        (v["login_id"], argon2.hash(raw), v["user_name"],
+        (v["login_id"], auth.hash_password(raw), v["user_name"],
          (f.get("dept_name") or "").strip() or None, rep,
          (f.get("phone_no") or "").strip() or None, (f.get("email") or "").strip() or None))
-    return redirect(f"/sys/026?issued={raw}&issued_for={v['login_id']}")
+    # 리다이렉트하지 않는다 — 리다이렉트하면 원문이 URL 로 흐른다(D-118).
+    return _users_page(request, issued=raw, issued_for=v["login_id"])
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -221,8 +231,9 @@ async def logs(request: Request):
 async def logs_download(request: Request):
     """로그 반출 — **이력을 먼저 남긴다**(9.2 ① · G-29). 파일 생성은 미구현이다."""
     sid = "MES-TD3-027"
-    guard(request, sid, write=True)
     form = await request.form()
+    csrf.require(request, form.get("_csrf"))
+    guard(request, sid, write=True)
     if (form.get("action") or "").strip() != "download":
         raise http.fail("validation", "알 수 없는 동작")
     _record_download(request, sid, "로그", "CSV",
@@ -327,8 +338,9 @@ async def alerts(request: Request):
 @router.post("/sys/028")
 async def alerts_save(request: Request):
     sid = "MES-TD3-028"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("config_key", "alert_condition"))
     role = (f.get("target_role_code") or "").strip() or None
     if role and role not in rbac.roles():
@@ -454,8 +466,9 @@ async def configs(request: Request):
 @router.post("/sys/029")
 async def configs_save(request: Request):
     sid = "MES-TD3-029"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("config_type", "config_key"))
     if v["config_type"] not in CONFIG_TYPES:
         raise http.fail("validation", f"설정 구분은 {CONFIG_TYPES} 중 하나다")

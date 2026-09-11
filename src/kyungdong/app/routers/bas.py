@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "db"))
 import conn                                              # noqa: E402
 from .. import design, nav, rbac                         # noqa: E402
 from ..templating import render                          # noqa: E402
-from ..util import clock, codes, http                    # noqa: E402
+from ..util import clock, codes, csrf, http              # noqa: E402
 from ..util.audit import audit                           # noqa: E402  (util/__init__ 이 함수를 재노출한다)
 
 router = APIRouter()
@@ -284,8 +284,9 @@ async def quality_standards(request: Request):
 @router.post("/bas/030")
 async def quality_standards_save(request: Request):
     sid = "MES-TD3-030"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("qstd_code", "product_group", "inspect_type", "inspect_item", "apply_from"))
     # D-32 — DB 가 막지 않는 코드성 FK 는 저장 전에 막는다
     codes.require_code("BAS_QUALITY_STANDARDS", "PRODUCT_GROUP", v["product_group"])
@@ -382,8 +383,9 @@ async def work_standards(request: Request):
 @router.post("/bas/031")
 async def work_standards_save(request: Request):
     sid = "MES-TD3-031"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("wstd_code", "process_code", "wstd_name", "std_version"))
     codes.require_code("BAS_WORK_STANDARDS", "PROCESS_CODE", v["process_code"])
     if conn.q1("select 1 as x from BAS_WORK_STANDARDS where WSTD_CODE = %s", (v["wstd_code"],)):
@@ -494,8 +496,9 @@ async def common_codes(request: Request):
 @router.post("/bas/032")
 async def common_codes_save(request: Request):
     sid = "MES-TD3-032"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("code_group", "code_value", "code_name"))
     if conn.q1("select 1 as x from BAS_COMMON_CODES where CODE_GROUP = %s and CODE_VALUE = %s",
                (v["code_group"], v["code_value"])):

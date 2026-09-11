@@ -14,7 +14,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
 
 from ..templating import render
-from ..util import codes, http
+from ..util import codes, csrf, http
 from .dsh import (CLAIM_DECISION, COLLECT_DECISION, anchor, cell, ctx, dt, guard, lot_cell,
                   mock, num, process_names, project_cell)
 
@@ -144,6 +144,8 @@ async def create_shipment(request: Request, lot_trace_id: int = Form(...),
                           plan_dt: str = Form("")):
     """출하 등록. **검사 합격 LOT 만** 선택할 수 있다 — 아니면 422."""
     import conn
+    form = await request.form()
+    csrf.require(request, form.get(csrf.FORM_FIELD))     # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3 = guard(request, "MES-TD3-016", write=True)
 
     lot = conn.q1(
@@ -199,6 +201,8 @@ async def create_shipment(request: Request, lot_trace_id: int = Form(...),
 async def approve_shipment(request: Request, shipment_id: int = Form(...)):
     """출하 확정. **승인 권한이 없으면 403** 이고, 확정 시각과 승인자를 남긴다(G-24)."""
     import conn
+    form = await request.form()
+    csrf.require(request, form.get(csrf.FORM_FIELD))     # 핸들러 첫 줄 (contracts §5 · G-26)
     screen, td3 = guard(request, "MES-TD3-016", approve=True)
 
     sh = conn.q1(

@@ -1,0 +1,5 @@
+{# 공용 매크로 — 아키텍트 소유. 개발 3명이 같은 방식을 쓴다. #}
+
+{# CSRF 토큰 필드 (D-60 · D-92). **쓰기 폼 전부에 넣는다.**
+   핸들러 첫 줄에서 `csrf.require(request, form.get("_csrf"))` 로 받는다. #}
+{% macro csrf_field() %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endmacro %}

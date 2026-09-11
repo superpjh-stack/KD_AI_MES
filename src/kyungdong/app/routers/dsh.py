@@ -24,6 +24,7 @@ from .. import design, nav, rbac
 from ..settings import settings
 from ..templating import render
 from ..util import clock, http
+from ..util.audit import RESULT_ERR, audit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "db"))
 
@@ -39,19 +40,39 @@ CLAIM_DECISION = "D-204"           # 클레임 이력 런타임 등록
 
 
 # ── 공용 헬퍼 ───────────────────────────────────────────────────────────
+def user_id(request: Request) -> int | None:
+    sess = getattr(request.state, "session", None)
+    return getattr(sess, "user_id", None)
+
+
 def guard(request: Request, sid: str, *, write: bool = False, approve: bool = False):
-    """권한 확인 + 정본 로드. 권한 없으면 **403**, 정본이 없으면 지어내지 않는다."""
+    """권한 확인 + 정본 로드 + **감사 기록**. 권한 없으면 **403**, 정본이 없으면 지어내지 않는다.
+
+    **감사는 여기 한 곳에서 남긴다**(D-97 · G-29). 개발2 16화면(`dsh`·`prc`·`shp`·`kpi`)이
+    전부 이 가드를 지나므로 화면마다 `audit()` 을 흩뿌리지 않는다 — 한 곳이 빠지면
+    16화면이 통째로 빠진다는 것이 QA3 가 잡은 결함이다. 개발1 `bas.guard` 와 같은 방식이다.
+    거부(403)도 **`오류`** 로 남긴다 — 감사에 안 남는 거부는 없는 것과 같다.
+    """
     screen = nav.by_id()[sid]
     role = getattr(request.state, "role_code", "") or ""
+
+    def denied(reason: str):
+        audit(request, sid, "조회거부", log_type="오류", result=RESULT_ERR,
+              error=reason, user_id=user_id(request))
+        return http.fail("forbidden", reason)
+
     if not rbac.can_read(role, screen.area):
-        raise http.fail("forbidden", f"{screen.area} 조회 권한 없음")
+        raise denied(f"{screen.area} 조회 권한 없음")
     if write and not rbac.can_write(role, screen.area):
-        raise http.fail("forbidden", f"{screen.area} 등록·수정 권한 없음")
+        raise denied(f"{screen.area} 등록·수정 권한 없음")
     if approve and not rbac.can_approve(role, screen.area):
-        raise http.fail("forbidden", f"{screen.area} 승인 권한 없음 (G-24)")
+        raise denied(f"{screen.area} 승인 권한 없음 (G-24)")
     td3 = design.screen(sid)
     if td3 is None:
         raise http.fail("internal", f"{sid} 정본(SF-TD3)이 없다 — {http.undetermined('D-nn')}")
+    wrote = write or approve
+    audit(request, sid, "승인" if approve else ("등록" if write else "조회"),
+          log_type="변경" if wrote else "접속", user_id=user_id(request))
     return screen, td3
 
 
@@ -119,19 +140,35 @@ def process_names() -> dict[str, str]:
     return {r["code_value"]: r["code_name"] for r in rows}
 
 
+def collection_status() -> dict[str, Any]:
+    """수집 중단 판정 **정본** — `kyungdong.ingest.collector.status()` 한 벌뿐이다.
+
+    **DEF-QA2-002 · §10-16.** 전에는 이 파일이 `anchor() - max(COLLECT_DT)` 로 따로 판정해서
+    같은 DB·같은 시각에 `collector.status()` 와 **반대 결론**을 냈다. 판정을 복제하지 않는다 —
+    화면은 정본 함수를 부르고 `devices[].notice` 문구를 **그대로** 띄운다(개발3 공표 시그니처).
+
+    기준선은 **실시각**이다(DEF-QA2-001). 수집이 살아 있는지를 묻는 물음이므로 시간 앵커
+    (`clock.anchor()` — 시드·시뮬레이터의 기준일, §10-3)를 쓰면 운영 시각에서 `COLLECT_DT > anchor`
+    라 경과가 **항상 음수**가 되어 `INGEST_STALE_SEC` 를 넘을 수가 없었다(QA2 실측 −108,426초).
+    """
+    from ...ingest import collector
+    return collector.status()
+
+
 def collection_badges() -> list[dict[str, str]]:
     """수집 범위·중단 상태 배지 (D-06 · G-12). 수집이 끊기면 숨기지 않고 드러낸다."""
-    import conn
-    row = conn.q1("select max(COLLECT_DT) as last_dt, count(*) as n from PRC_EQUIP_SIGNALS")
-    stale_sec = settings().h("INGEST_STALE_SEC").as_int()
-    out = [{"cls": "notice", "text": "자동 수집 2개소 (레이저커팅기 PLC · 현장POP) — D-06"}]
-    if not row or not row["last_dt"]:
-        out.append({"cls": "undetermined", "text": http.not_collected(COLLECT_DECISION)})
-        return out
-    age = (anchor() - row["last_dt"]).total_seconds()
-    if age > stale_sec:
-        out.append({"cls": "bad",
-                    "text": http.NOTICE_INGEST_STALE.format(ts=dt(row["last_dt"]))})
+    st = collection_status()
+    out = [{"cls": "notice",
+            "text": f"자동 수집 {st['points']}개소 (레이저커팅기 PLC · 현장POP) — {COLLECT_DECISION}"}]
+    for d in st["devices"]:
+        if not d["notice"]:
+            continue
+        # 값이 없는 것(미수집)과 끊긴 것(수집 중단)은 다른 사실이다 — 배지 종류로 구분한다.
+        out.append({"cls": "bad" if d["last_collect_dt"] else "undetermined",
+                    "text": f"{d['device_name']} — {d['notice']}"})
+    out.append({"cls": "notice",
+                "text": f"중단 판정 임계 {st['stale_sec']}초 {st['stale_badge']} · "
+                        f"판정 기준시각 {dt(st['checked_at'], '%Y-%m-%d %H:%M:%S')} (실시각)"})
     return out
 
 

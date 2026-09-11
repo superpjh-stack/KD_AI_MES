@@ -28,7 +28,7 @@ from kyungdong.agent import docs as agent_docs                # noqa: E402
 from kyungdong.agent import retrieval                         # noqa: E402
 from kyungdong.app.settings import settings                   # noqa: E402
 from kyungdong.cad import inventory as cad_inventory          # noqa: E402
-from kyungdong.ingest import tags                             # noqa: E402
+from kyungdong.ingest import preprocess, tags                 # noqa: E402
 
 SAMPLE_DIR = ROOT / "src" / "kyungdong" / "agent" / "sample_docs"
 
@@ -52,6 +52,22 @@ PREPROCESS = [
      "숫자로 변환되지 않는 값은 QUALITY_FLAG='결측' 으로 표시하고 버리지 않는다."),
     (50, "단위 표준화", "변환", "PLC 태그 단위",
      "태그별 단위를 고정한다: " + " · ".join(f"{t.name}={t.uom or '-'}" for t in tags.TAGS)),
+    # ↓ 회전 7 추가 — 규칙만 있고 코드가 없던 두 항목을 코드로 넣었다 (DEF-QA2-003 · 004).
+    #   규칙 표가 정본이고 `USE_YN='N'` 이면 코드가 적용하지 않는다(`preprocess.rule_on`).
+    (60, preprocess.RULE_OUTLIER, "정제", "PLC 시계열 측정값(숫자 태그)",
+     "① 정본 허용 상·하한(PRC_STD_CONDITIONS.TOL_MIN/TOL_MAX)이 있으면 그것으로 판정한다 — "
+     "현재 0건이다(D-203). "
+     f"② 없으면 조작적 정의: 같은 태그·설비의 직전 정상값 {preprocess.MIN_HISTORY}건 이상으로 "
+     f"중앙값·MAD 로버스트 z-score 를 구해 |z| > {preprocess.Z_LIMIT} 를 이상치로 본다 "
+     "(임계는 정본 수치가 아니다 — D-315). "
+     "③ 표본 부족·산포 0 이면 **판정하지 않는다**. "
+     "판정된 행은 QUALITY_FLAG='노이즈' 로 **표시만** 하고 값을 지우지 않는다."),
+    (70, preprocess.RULE_IMPUTE, "변환", "DAT_TIMESERIES 결측 행(MEASURE_VALUE IS NULL)",
+     "앞뒤 정상값이 있으면 시간 비례 선형 보간, 뒤가 없으면 Forward Fill, "
+     "앞이 없으면 미보정으로 남긴다(미래를 끌어오지 않는다). "
+     "보정 뒤에도 QUALITY_FLAG='결측' 은 지우지 않는다 — 원천이 결측이었다는 사실이다(D-314). "
+     "처리·미보정 건수는 DAT_JOB_LOGS.PROCESS_CNT/FAIL_CNT 에 남는다. "
+     "도면 치수·재질 결측 보정은 Parsing·OCR 미구성으로 **차단**이다(D-05)."),
 ]
 
 # ── 지식문서 — 시안 `sample_docs/` 3종 이식 (D-20) ────────────────────────

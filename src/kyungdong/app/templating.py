@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import nav, rbac
+from .util import csrf
 from .settings import settings
 
 TEMPLATES = Path(__file__).parent / "templates"
@@ -47,6 +48,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         search_mode=s.search_mode,
         llm_configured=s.llm_configured,
         csrf_enforced=s.csrf_enforce,
+        csrf_token=csrf.issue(request),
         cad_configured=s.cad_configured,
         **ctx,
     )

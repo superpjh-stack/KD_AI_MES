@@ -93,6 +93,7 @@ class Settings:
 # 가설값 — (env 키, 기본값, 결정 번호, 설명). **기본값은 여기 말고 어디에도 두지 않는다.**
 _HYPOTHESES: tuple[tuple[str, str, str, str], ...] = (
     ("PASSWORD_MIN_LEN",          "10",   "D-16", "비밀번호 최소 길이"),
+    ("PASSWORD_COMPLEXITY_CLASSES", "3",  "D-16", "비밀번호 복잡도 — 문자 종류 수(대/소/숫자/특수)"),
     ("PASSWORD_CHANGE_CYCLE_DAYS", "90",  "D-16", "비밀번호 변경 주기(일)"),
     ("LOGIN_FAIL_MAX",            "5",    "D-16", "로그인 실패 잠금 횟수 (계정 단위)"),
     ("RATE_LIMIT_IP",             "20",   "D-16", "로그인 실패 한도 (IP 단위, 10분 창)"),

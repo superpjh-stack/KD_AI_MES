@@ -4,6 +4,7 @@
    inv·bas·sys·dat 15화면이 이 한 파일을 쓴다(개발1 소유).
    **미디어쿼리를 쓰지 않는다**(§10-13) — 반응형은 app/static/app.css 단일 파일이 한다. #}
 {% extends "base.html" %}
+{% from "_macros.html" import csrf_field %}
 {% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
 
 {% macro cell(c) %}
@@ -118,6 +119,7 @@
     <div class="d1-btns">
       {% for a in extra_actions %}
       <form method="post" action="{{ a.action }}" style="display:inline">
+        {{ csrf_field() }}
         <input type="hidden" name="{{ a.name }}" value="{{ a.value }}">
         <button type="submit" {% if not can_write %}disabled{% endif %}>{{ a.label }}</button>
       </form>
@@ -148,6 +150,7 @@
     <h2>{{ form.title }}</h2>
     <form method="post" action="{{ form.action }}"
           {% if form.upload %}enctype="multipart/form-data"{% endif %}>
+      {{ csrf_field() }}
       {% if form.upload %}<input type="hidden" name="action" value="upload">{% endif %}
       <div class="d1-form">
         {% for f in form.fields %}

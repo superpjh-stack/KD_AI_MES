@@ -203,3 +203,178 @@ def test_예시_값을_렌더하지_않는다(sid):
     """TD3 목업의 `(예시)` 값은 화면에도 시드에도 넣지 않는다 (§0.2)."""
     body = _client().get(nav.by_id()[sid].path).text
     assert "(예시)" not in body, f"{sid}: 목업의 (예시) 값이 그대로 나왔다"
+
+
+# ── G-12 수집 중단 배지 (DEF-QA2-001 · DEF-QA2-002) ─────────────────────
+def _ingest_marks() -> dict[str, int]:
+    import conn
+    return {t: int(conn.q1(f"select coalesce(max({c}),0) as n from {t}")["n"])
+            for t, c in (("IF_PLC_SIGNALS", "PLC_IF_ID"),
+                         ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
+                         ("DAT_TIMESERIES", "TS_ID"))}
+
+
+def _ingest_rollback(marks: dict[str, int]) -> None:
+    """이 테스트가 넣은 행만 지운다 — 다른 측정의 0건 경로를 오염시키지 않는다."""
+    import conn
+    for t, c in (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
+                 ("IF_PLC_SIGNALS", "PLC_IF_ID")):
+        conn.x(f"delete from {t} where {c} > %s", (marks[t],))
+
+
+def _ingest_at(when):
+    """레이저커팅기 PLC 1배치를 `when` 시각으로 적재한다 (정본 수집 함수를 그대로 쓴다)."""
+    import conn
+    from kyungdong.ingest import collector, tags
+    dev = conn.q1("select DEVICE_ID from IF_DEVICE_REGISTRY where DEVICE_NAME = %s",
+                  ("레이저커팅기 PLC",))
+    assert dev is not None, "IF_DEVICE_REGISTRY 에 레이저커팅기 PLC 가 없다 — `make db-seed`"
+    collector.ingest_batch(
+        int(dev["device_id"]), "EQ10",
+        [collector.Sample(t.name, "1" if t.numeric else "가동", when) for t in tags.TAGS])
+
+
+def test_G12_중단_판정은_정본_함수_한_벌이다():
+    """화면 배지와 `collector.status()` 가 **같은 함수**를 본다 (DEF-QA2-002 · §10-16).
+
+    판정을 복제하면 개발자가 한 쪽만 고쳐도 수치가 안 움직인다. 정본은
+    `kyungdong.ingest.collector.status()` 다 (contracts/interfaces.md §9 TD4-047).
+    """
+    from kyungdong.app.routers import dsh
+    from kyungdong.ingest import collector
+
+    src = (ROOT / "src/kyungdong/app/routers/dsh.py").read_text()
+    assert "collector.status()" in src, "화면이 정본 판정 함수를 부르지 않는다"
+    # 임계값 비교를 화면이 따로 하면 그것이 복제다
+    assert "INGEST_STALE_SEC" not in src, (
+        "dsh.py 가 중단 임계를 따로 읽는다 — 판정이 두 곳에 복제됐다 (DEF-QA2-002)")
+    assert "anchor() - " not in src.replace(" ", " "), "앵커 기준 중단 판정이 남아 있다"
+
+    st = dsh.collection_status()
+    ref = collector.status()
+    assert st["points"] == ref["points"] == 2               # 수집 지점 2개소뿐 (D-06)
+    assert st["stale_sec"] == ref["stale_sec"]
+    assert [d["device_id"] for d in st["devices"]] == [d["device_id"] for d in ref["devices"]]
+
+
+def test_G12_수집중단_배지가_운영시각에서_뜬다():
+    """**0건 · 신선 · 중단** 세 경로를 전부 단언한다. `skip` 하지 않는다 (§10-4).
+
+    DEF-QA2-001: 전에는 `anchor() - last_dt` 라 실시각 수집이면 경과가 항상 음수여서
+    배지가 **구조적으로** 못 떴다(QA2 실측 −108,426초). 이제 기준은 실시각이다.
+    """
+    from datetime import datetime, timedelta
+
+    import conn
+    from kyungdong.app.routers import dsh
+    from kyungdong.app.settings import settings
+
+    stale_sec = settings().h("INGEST_STALE_SEC").as_int()
+    marks = _ingest_marks()
+    zero_start = conn.q1("select count(*) as n from IF_PLC_SIGNALS")["n"] == 0
+    try:
+        # ① 0건 경로 — 수집이 한 번도 없으면 '미수집' 이지 '수집 중단' 이 아니다
+        if zero_start:
+            texts = [b["text"] for b in dsh.collection_badges()]
+            assert any("미수집" in t for t in texts), texts
+            assert not any("수집 중단" in t for t in texts), texts
+
+        # ② N건 · 신선 — 방금 들어온 수집은 중단이 아니다 (실시각 기준)
+        _ingest_at(datetime.now() - timedelta(seconds=1))
+        fresh = [b["text"] for b in dsh.collection_badges()]
+        laser = [t for t in fresh if "레이저커팅기" in t]
+        assert not any("수집 중단" in t for t in laser), fresh
+
+        # ③ N건 · 중단 — **운영 시각**으로 임계를 넘기면 배지가 뜬다
+        old = datetime.now() - timedelta(seconds=stale_sec * 5)
+        _ingest_at(old)
+        stopped = [b["text"] for b in dsh.collection_badges()]
+        hit = [t for t in stopped if "수집 중단" in t]
+        assert hit, f"실시각 {stale_sec * 5}초 전이 마지막 수집인데 배지가 없다: {stopped}"
+        assert old.strftime("%H:%M:%S") in " ".join(hit), hit
+    finally:
+        _ingest_rollback(marks)
+
+
+def test_G12_003_022_화면이_같은_배지를_쓴다():
+    from kyungdong.app.routers import dsh, prc
+    assert prc.collection_badges is dsh.collection_badges
+    c = _client()
+    for path in ("/dsh/003", "/prc/022"):
+        assert "자동 수집 2개소" in c.get(path).text, path
+
+
+# ── G-29 접속 감사 — 공용 가드 한 곳에서 남는다 (D-97) ───────────────────
+def test_G29_16화면_조회가_접속_로그를_남긴다():
+    import conn
+    c = _client()
+    for path in DEV2_PATHS:
+        before = int(conn.q1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")["n"])
+        assert c.get(path).status_code == 200, path
+        n = int(conn.q1("select count(*) as n from SYS_ACCESS_LOGS "
+                        "where LOG_ID > %s and LOG_TYPE = '접속' and SCREEN_ID = %s",
+                        (before, nav.by_path()[path].id))["n"])
+        assert n >= 1, f"{path}: 조회했는데 SYS_ACCESS_LOGS 에 '접속' 이 없다 (G-29)"
+
+
+def test_G29_권한_거부는_오류로_남는다():
+    import conn
+    before = int(conn.q1("select coalesce(max(LOG_ID),0) as n from SYS_ACCESS_LOGS")["n"])
+    assert _client("NOSUCHROLE").get("/prc/021").status_code == 403
+    row = conn.q1("select LOG_TYPE, RESULT_CODE from SYS_ACCESS_LOGS "
+                  "where LOG_ID > %s and LOG_TYPE = '오류' order by LOG_ID desc limit 1", (before,))
+    assert row is not None, "403 거부가 감사에 남지 않는다 (G-29)"
+    assert row["result_code"] == "오류"
+
+
+def test_G29_감사는_가드_한_곳에서만_부른다():
+    """16화면에 흩뿌리면 한 곳이 빠질 때 통째로 빠진다 — QA3 가 잡은 결함이다(D-97)."""
+    for name in ("dsh", "prc", "shp", "kpi"):
+        src = (ROOT / f"src/kyungdong/app/routers/{name}.py").read_text()
+        calls = len(re.findall(r"(?<!def )audit\(request", src))
+        assert calls == (2 if name == "dsh" else 0), f"{name}.py 의 audit() 호출 {calls}"
+
+
+# ── G-26 CSRF (DEF-QA3-001) ────────────────────────────────────────────
+CSRF_POSTS = ("/prc/021", "/shp/016", "/shp/016/approve")
+
+
+def test_G26_쓰기_폼에_CSRF_필드가_있다():
+    for rel in ("prc/021.html", "shp/016.html"):
+        body = (TEMPLATE_DIR / rel).read_text()
+        forms = body.count('method="post"')
+        assert forms and body.count("{{ csrf_field() }}") == forms, rel
+        assert '{% from "_macros.html" import csrf_field %}' in body, rel
+
+
+def test_G26_핸들러_첫_줄이_토큰을_검증한다():
+    for name in ("prc", "shp"):
+        src = (ROOT / f"src/kyungdong/app/routers/{name}.py").read_text()
+        posts = len(re.findall(r"@router\.post\(", src))
+        assert src.count("csrf.require(request,") == posts, f"{name}.py POST {posts}건"
+
+
+def test_G26_토큰이_없으면_403_있으면_통과한다():
+    """`CSRF_ENFORCE` 는 아직 0 이다(D-60) — 켠 상태와 끈 상태를 **둘 다** 단언한다."""
+    import os
+
+    from kyungdong.app.settings import settings
+    from kyungdong.app.util import csrf
+
+    body = {"work_order_id": 1, "process_code": "P50",
+            "start_dt": "2026-08-18 08:30", "good_qty": 1, "defect_qty": 0}
+    assert not settings().csrf_enforce      # 끈 상태: 토큰이 없어도 CSRF 로는 막지 않는다
+    assert _client("PRODUCTION").post("/prc/021", data=body).status_code != 403
+
+    os.environ["KYUNGDONG_CSRF_ENFORCE"] = "1"
+    settings.cache_clear()
+    try:
+        c = _client("PRODUCTION")
+        for path in CSRF_POSTS:
+            assert c.post(path, data=body).status_code == 403, f"{path}: 토큰 없이 통과했다"
+        token = csrf.issue(type("R", (), {"state": type("S", (), {})(), "cookies": {}})())
+        r = c.post("/prc/021", data={**body, "_csrf": token})
+        assert r.status_code != 403, f"유효 토큰인데 403 이다: {r.text[:300]}"
+    finally:
+        os.environ["KYUNGDONG_CSRF_ENFORCE"] = "0"
+        settings.cache_clear()

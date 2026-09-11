@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from . import design, nav
 from .settings import settings
 from .templating import render
-from .util import http, security, session
+from .util import csrf, http, security, session
 
 app = FastAPI(title="경동글로벌텍 제조AI 시스템", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -66,6 +66,10 @@ async def attach_role(request: Request, call_next):
     response = await call_next(request)
     for k, v in security.headers().items():
         response.headers.setdefault(k, v)
+    # 세션이 없으면 CSRF 토큰을 묶을 쿠키가 필요하다(util/csrf.py `_bind`).
+    if sess is None and not request.cookies.get(csrf.COOKIE):
+        response.set_cookie(csrf.COOKIE, csrf.new_cookie_value(),
+                            httponly=True, samesite="lax", secure=settings().is_prod)
     return response
 
 

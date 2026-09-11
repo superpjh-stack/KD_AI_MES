@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{% from "_macros.html" import csrf_field %}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
@@ -18,7 +19,7 @@
 
     <div class="card">
       <h2>출하 등록 — 검사 합격 LOT 만 선택할 수 있다</h2>
-      <form id="ship-form" class="d2-filters" method="post" action="{{ current.path }}">
+      <form id="ship-form" class="d2-filters" method="post" action="{{ current.path }}">{{ csrf_field() }}
         <div class="d2-f">
           <label for="s-lot">출하 대상 제품 LOT</label>
           <select id="s-lot" name="lot_trace_id" required>
@@ -40,7 +41,7 @@
 
     <div class="card">
       <h2>출하 확정(승인) — 승인 권한이 필요하다</h2>
-      <form id="approve-form" class="d2-filters" method="post" action="{{ current.path }}/approve">
+      <form id="approve-form" class="d2-filters" method="post" action="{{ current.path }}/approve">{{ csrf_field() }}
         <div class="d2-f">
           <label for="s-ship">승인 대기 출하</label>
           <select id="s-ship" name="shipment_id" required>

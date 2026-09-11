@@ -15,7 +15,8 @@ from fastapi import APIRouter, Request
 from .bas import (anchor_label, code_names, code_options, dt, guard, paginate,  # noqa: F401
                   redirect, require_fields, screen_page, search_spec, undetermined, val)
 from .sys import _record_download
-from ..util import clock, http
+from .. import design
+from ..util import clock, csrf, http
 
 import conn                                              # noqa: E402
 
@@ -146,8 +147,9 @@ async def integration(request: Request):
 async def integration_run(request: Request):
     """통합 작업 실행 — **할 수 있는 것만 하고, 못 하는 것은 실패로 기록한다**(G-30)."""
     sid = "MES-TD3-033"
-    guard(request, sid, write=True)
     form = await request.form()
+    csrf.require(request, form.get("_csrf"))
+    guard(request, sid, write=True)
     if (form.get("action") or "").strip() != "run":
         raise http.fail("validation", "알 수 없는 동작")
 
@@ -422,8 +424,9 @@ async def downloads(request: Request):
 @router.post("/dat/036")
 async def downloads_record(request: Request):
     sid = "MES-TD3-036"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("category", "fmt"))
     if v["category"] not in DATA_CATEGORIES:
         raise http.fail("validation", f"데이터 구분은 {DATA_CATEGORIES} 중 하나다")

@@ -20,7 +20,7 @@ from fastapi import APIRouter, Request
 from .bas import (anchor_label, can_write, code_names, code_options, dt, guard,  # noqa: F401
                   lot_link, opt_num, paginate, project_link, redirect,
                   require_fields, screen_page, search_spec, undetermined, val)
-from ..util import clock, codes, http
+from ..util import clock, codes, csrf, http
 
 import conn                                              # noqa: E402  (bas 가 db 경로를 넣는다)
 
@@ -214,8 +214,9 @@ async def receipt(request: Request):
 @router.post("/inv/005")
 async def receipt_save(request: Request):
     sid = "MES-TD3-005"
-    guard(request, sid, write=True)
     f = await request.form()
+    csrf.require(request, f.get("_csrf"))
+    guard(request, sid, write=True)
     v = require_fields(f, ("supplier_id", "item_code", "receipt_qty"))
     material = (f.get("material") or "").strip() or None
     inspect = (f.get("inspect_result") or "").strip() or None
@@ -457,8 +458,9 @@ async def receipt_data(request: Request):
 @router.post("/inv/007")
 async def receipt_data_action(request: Request):
     sid = "MES-TD3-007"
-    guard(request, sid, write=True)
     form = await request.form()
+    csrf.require(request, form.get("_csrf"))
+    guard(request, sid, write=True)
     action = (form.get("action") or "upload").strip()
     user_id = getattr(getattr(request.state, "session", None), "user_id", None)
 
@@ -681,8 +683,9 @@ async def supplier_quality(request: Request):
 @router.post("/inv/008")
 async def supplier_quality_evaluate(request: Request):
     sid = "MES-TD3-008"
-    guard(request, sid, write=True)
     form = await request.form()
+    csrf.require(request, form.get("_csrf"))
+    guard(request, sid, write=True)
     if (form.get("action") or "evaluate").strip() != "evaluate":
         raise http.fail("validation", "알 수 없는 동작")
 

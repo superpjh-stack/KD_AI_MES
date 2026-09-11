@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterable
 
 import conn
@@ -15,6 +16,7 @@ import conn
 from ..app import rbac
 from ..app.settings import settings
 from ..app.util import http
+from ..ingest import preprocess
 from . import inventory as inv
 from . import provider
 
@@ -52,6 +54,7 @@ class ImportResult:
     skipped: int = 0            # 이미 수집된 파일 (멱등)
     drawings: int = 0
     by_reason: dict[str, int] | None = None
+    job_log_id: int | None = None   # DAT_JOB_LOGS 실행 로그 (G-13 처리 건수)
 
 
 def _log(cur, cad_if_id: int, step: str, result: str,
@@ -69,7 +72,10 @@ def import_inventory(*, limit: int | None = None, scope: str = "product",
     """실측 인벤토리 → `IF_CAD_FILES` → 정제 → `EST_CAD_DRAWINGS` (MES-TD4-048).
 
     **멱등이다** — 같은 (원본 파일명, 원본 경로) 는 다시 수집하지 않는다.
+    정제 **처리 건수는 `DAT_JOB_LOGS` 에 남는다**(G-13 · DEF-QA2-006) —
+    단계별 이력(`IF_CAD_IMPORT_LOGS`)과 실행 단위 집계는 다른 것이다.
     """
+    started = datetime.now()
     files = inv.read_inventory()
     cleaned = inv.clean(files, scope)
     if limit is not None:
@@ -118,6 +124,18 @@ def import_inventory(*, limit: int | None = None, scope: str = "product",
             _log(cur, cad_if_id, "등록", "성공")
             res.registered += 1
             res.drawings += 1
+
+    # 실행 1회 = `DAT_JOB_LOGS` 1행. 제외 건수는 **실패가 아니라 정제 결과**지만
+    # TD5 에 '제외 건수' 컬럼이 없어 `FAIL_CNT`(= 적재되지 않은 건수)로 남기고 사유를 적는다.
+    res.job_log_id = preprocess.log_job(
+        preprocess.JOB_CAD, started=started, ended=datetime.now(),
+        processed=res.registered, failed=res.excluded,
+        result=("성공" if res.registered and not res.excluded
+                else "부분성공" if res.registered else "실패"),
+        message=(f"스캔 {res.scanned} · 등록 {res.registered} · 제외 {res.excluded} "
+                 f"{res.by_reason} · 이미 수집 {res.skipped} (scope={scope}). "
+                 "FAIL_CNT 는 정제 제외 건수다 — 오류가 아니다"),
+    )
     return res
 
 

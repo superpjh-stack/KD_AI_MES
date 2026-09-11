@@ -10,6 +10,9 @@
 
 적재 경로: 수집 API → `IF_PLC_SIGNALS` → `PRC_EQUIP_SIGNALS` / `DAT_TIMESERIES`.
 게이트웨이가 끊기면 `IF_GATEWAY_BUFFER` 에 쌓고 복구 시 **순서대로 무손실 재전송**한다.
+
+전처리(이상치 판정 · 결측 보정 · 처리 건수 기록)는 `ingest/preprocess.py` 한 곳이다 (G-13).
+수집 중단 판정도 `collector.stale_verdict()` **한 곳**이다 — 화면이 따로 판정하지 않는다(§10-16).
 """
 from __future__ import annotations
 
