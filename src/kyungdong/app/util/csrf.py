@@ -26,6 +26,24 @@ from typing import Any
 from ..settings import settings
 from . import http, session
 
+# ── 기계 대 기계 엔드포인트 면제 (D-103) ────────────────────────────────
+# CSRF 는 **브라우저가 쿠키를 자동으로 실어 보내는 것**을 막는 장치다.
+# 아래 경로는 PLC·Gateway·배치가 부르고 **쿠키를 쓰지 않는다** — 이 위협에 해당하지 않는다.
+# "막을 수 없으니 끈다" 가 아니라 **"적용 대상이 아니다"** 는 판단이다.
+# **대신 다른 수단으로 보호해야 한다** — 장비 등록(`IF_DEVICE_REGISTRY`) 기반 인증. 미구현이면 차단으로 남긴다.
+EXEMPT_PATHS: dict[str, str] = {
+    "/api/ingest/plc": "레이저커팅기 Master PLC → Gateway. 세션·쿠키 없음 (D-06 수집 지점 2개소)",
+    "/api/ingest/gateway/resend": "Gateway 버퍼 재전송. 세션·쿠키 없음",
+    "/api/cad/files": "CAD 배치 수집. 세션·쿠키 없음 (D-05)",
+    "/api/docs/import": "외부 표준문서 배치 수집. 세션·쿠키 없음",
+}
+
+
+def exempt(path: str) -> str | None:
+    """면제 사유. 면제가 아니면 None. **목록에 없으면 무조건 검사한다.**"""
+    return EXEMPT_PATHS.get(path)
+
+
 FORM_FIELD = "_csrf"
 HEADER = "X-CSRF-Token"
 COOKIE = "kyungdong_csrf"
@@ -84,6 +102,9 @@ def require(request: Any, token: str | None) -> None:
     """
     if not settings().csrf_enforce:
         return
+    why = exempt(request.url.path)
+    if why is not None:
+        return                      # D-103 — 기계 대 기계. 사유는 EXEMPT_PATHS 에 적혀 있다
     if not valid(request, token):
         raise http.fail("forbidden", "CSRF 토큰이 없거나 유효하지 않습니다")
 
