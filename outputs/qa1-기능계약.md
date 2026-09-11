@@ -10,7 +10,7 @@
 |---|---|
 | 내가 만든 검사기 | `tools/check_trace.py` — **G-04 PASS · G-05 FAIL** (종료코드 1) |
 | 내가 만든 테스트 | `tests/test_qa1_{screens,rbac,errors,thread,ui}.py` — **551 passed · 3 xfailed** |
-| 결함 | **11건** (Critical 1 · Major 4 · Minor 5 · 미구현 1) |
+| 결함 | **11건** (Critical 1 → **해소** · Major 4 · Minor 5 · 미구현 1) · **미해소 Critical 0** (오케스트레이터 실측 2026-09-11) |
 | 판정 불가 | **3건** (터치 버튼 크기 기준 없음 · 폰 폭 실제 렌더 · 동시 측정 중 G-빌드) |
 
 검증 명령
@@ -83,7 +83,15 @@ EXIT=1
   (테스트: `tests/test_qa1_thread.py::test_인터페이스_4건은_sys029에서는_보인다` 가 PASS 로 대조를 박아 뒀다)
 - 테스트: `tests/test_qa1_thread.py::test_G05_dat033이_인터페이스_연계상태_4건을_보여준다` (`xfail(strict)`)
 
-### DEF-QA1-002 · **Critical** · **아키텍트 + 개발1·개발2·개발3**
+### ~~DEF-QA1-002~~ · **해소** (원 등급 Critical) · 아키텍트 + 개발1·개발2·개발3
+
+> **[해소 — 오케스트레이터 실측 2026-09-11]** CSRF 는 **31/31 연결 + `KYUNGDONG_CSRF_ENFORCE=1`** 이다.
+> 검증: `ENFORCE=1` 과 `ENFORCE=0` 의 **실패 집합 diff 0줄**(착수 시 `ENFORCE=1` 은 71 failed + 15 errors).
+> `G-26 PASS` · 화면 상단 `CSRF 미적용` 배지 사라짐 · 기계 엔드포인트 4건은 근거와 함께 면제(D-103).
+> **원 발견 문구는 아래에 그대로 둔다** — 무엇이 어떻게 바뀌었는지 보이게 하기 위해서다.
+> **남은 것**: `/est/011`·`/est/012`·`/est/013`·`/agt/040` 화면이 `csrf_field()` 를 안 찍는다.
+> 지금은 그 화면 쓰기 버튼이 `disabled` 플레이스홀더라 차단이 아니지만 **버튼이 살아나면 한 줄이 필요하다.**
+
 **CSRF 가 POST 27개 중 `0`곳에 연결돼 있다 — D-60 의 “4곳” 보고는 사실과 다르다**
 
 - 재현:
