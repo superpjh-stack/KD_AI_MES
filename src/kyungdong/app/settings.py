@@ -94,7 +94,8 @@ class Settings:
 _HYPOTHESES: tuple[tuple[str, str, str, str], ...] = (
     ("PASSWORD_MIN_LEN",          "10",   "D-16", "비밀번호 최소 길이"),
     ("PASSWORD_CHANGE_CYCLE_DAYS", "90",  "D-16", "비밀번호 변경 주기(일)"),
-    ("LOGIN_FAIL_MAX",            "5",    "D-16", "로그인 실패 잠금 횟수"),
+    ("LOGIN_FAIL_MAX",            "5",    "D-16", "로그인 실패 잠금 횟수 (계정 단위)"),
+    ("RATE_LIMIT_IP",             "20",   "D-16", "로그인 실패 한도 (IP 단위, 10분 창)"),
     ("SESSION_IDLE_MINUTES",      "30",   "D-16", "자동 로그아웃(분)"),
     ("RAG_CONFIDENCE_MIN",        "0.70", "D-10", "RAG 그라운딩 임계값"),
     ("RAG_TIMEOUT_SEC",           "10",   "D-09", "RAG 응답 제한(초) — 목표치 없음, 실측만 보고"),

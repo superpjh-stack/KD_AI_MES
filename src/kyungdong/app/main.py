@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from . import design, nav
 from .settings import settings
 from .templating import render
-from .util import http
+from .util import http, security, session
 
 app = FastAPI(title="경동글로벌텍 제조AI 시스템", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -39,14 +39,27 @@ for module in sorted({s.module for s in nav.all_screens()}):
 
 @app.middleware("http")
 async def attach_role(request: Request, call_next):
-    """인증은 개발1 담당(웨이브 B). 그때까지 역할은 세션 대신 헤더·쿼리로 바꿔 볼 수 있게 둔다.
-    기본값을 SYSADMIN 으로 두는 것은 **개발 편의이며 prod 에서는 인증이 이 자리를 대체한다**."""
-    request.state.role_code = (
-        request.query_params.get("as")
-        or request.headers.get("x-kyungdong-role")
-        or "SYSADMIN"
-    ).upper()
-    return await call_next(request)
+    """세션이 있으면 세션 역할, 없으면 개발용 전환값(D-40).
+
+    **prod 에서는 개발용 전환을 받지 않는다** — 인증 없이 화면이 열리면 보안 결함이다.
+    개발1 이 `app/auth.py` 를 넣으면 미인증 요청은 401 로 막히고 이 분기가 사라진다.
+    """
+    sess = session.load(request.cookies.get(session.COOKIE))
+    request.state.session = sess
+    if sess is not None:
+        request.state.role_code = sess.role_code
+    elif settings().is_prod:
+        request.state.role_code = ""          # 권한 없음 → 403/401 로 드러난다
+    else:
+        request.state.role_code = (
+            request.query_params.get("as")
+            or request.headers.get("x-kyungdong-role")
+            or "SYSADMIN"
+        ).upper()
+    response = await call_next(request)
+    for k, v in security.headers().items():
+        response.headers.setdefault(k, v)
+    return response
 
 
 @app.get("/health")
