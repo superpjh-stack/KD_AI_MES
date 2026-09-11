@@ -100,12 +100,6 @@ def structural(rep: Report) -> None:
                     " / ".join(ln.split(":", 1)[1].strip() for ln in mine),
                     "tools/check_routes.py")
 
-    trace = qa_checker("check_trace.py")
-    rep.add("G-04", f"요구사항 추적 AD2 45 ↔ TD3 ↔ TD4 1:1",
-            NOIMPL if not trace else FAIL, "", "tools/check_trace.py (QA1) 미작성")
-    rep.add("G-05", f"프로그램 {want_progs} (화면 45 + 인터페이스 4)",
-            NOIMPL if not trace else FAIL, "", "tools/check_trace.py (QA1) 미작성")
-
     # 정본 자체가 흔들리지 않았는지 (이 문서의 숫자가 곧 게이트다)
     f = sum(len(g["requirements"]) for g in a["ad2"]["functional_groups"])
     n = sum(len(g["requirements"]) for g in a["ad2"]["nonfunctional_groups"])
@@ -117,24 +111,70 @@ def structural(rep: Report) -> None:
             f" 컬럼{want_cols} 기능{f} 비기능{n}", "§9 재확인 명령")
 
 
-CHECKERS = [
-    ("G-07~G-11", "데이터 게이트 (시드 멱등·디지털 스레드·정확성/정합성/연계성·시계열·빈 칸)", "check_data.py", "QA2"),
-    ("G-12~G-13", "수집·전처리 (유실 0·Gateway 재전송·Feature 생성)", "check_ingest.py", "QA2"),
-    ("G-14~G-25", "AI 게이트 (CAD 인식·견적·BOM·납기·설명가능성·RAG·HITL·MLOps)", "check_ai.py", "QA3"),
-    ("G-26~G-30", "보안·운영 (암호화·계정·RBAC·감사·조용한 실패)", "check_security.py", "QA3"),
+# (검사기 파일, 소유자, 이 검사기가 **반드시 판정 줄을 찍어야 하는** 게이트, 제목)
+CHECKERS: list[tuple[str, str, tuple[str, ...], str]] = [
+    ("check_trace.py",    "QA1", ("G-04", "G-05"),
+     "요구사항 추적 1:1 · 프로그램 49"),
+    ("check_data.py",     "QA2", ("G-07", "G-08", "G-09", "G-10", "G-11"),
+     "데이터 게이트 (시드 멱등·디지털 스레드·정확성/정합성/연계성·시계열·빈 칸)"),
+    ("check_ingest.py",   "QA2", ("G-12", "G-13"),
+     "수집·전처리 (유실 0·Gateway 재전송·Feature 생성)"),
+    ("check_ai.py",       "QA3", ("G-14", "G-15", "G-16", "G-17", "G-18", "G-19", "G-20",
+                                  "G-21", "G-22", "G-23", "G-24", "G-25"),
+     "AI 게이트 (CAD 인식·견적·BOM·납기·설명가능성·RAG·HITL·MLOps)"),
+    ("check_security.py", "QA3", ("G-26", "G-27", "G-28", "G-29", "G-30"),
+     "보안·운영 (암호화·계정·RBAC·감사·조용한 실패)"),
 ]
+
+# 검사기 출력에서 게이트별 판정 줄을 뽑는다 (§10-6 — 종료코드 하나로 뭉개지 않는다).
+_GATE_LINE = re.compile(r"^\s*(G-\d+)\b(.*)$")
+_VERDICT = re.compile(r"(PASS|FAIL|차단|판정\s*불가|미구현)")
+
+
+def parse_gate_lines(stdout: str) -> dict[str, tuple[str, str]]:
+    """게이트 ID → (판정, 상세). **첫 등장**을 쓴다 — 뒤의 요약 줄에 덮이지 않게."""
+    out: dict[str, tuple[str, str]] = {}
+    for line in stdout.splitlines():
+        m = _GATE_LINE.match(line)
+        if not m:
+            continue
+        gate, rest = m.group(1), m.group(2)
+        v = _VERDICT.search(rest)
+        if not v:
+            continue
+        verdict = v.group(1).replace(" ", "")
+        if verdict in ("판정불가", "미구현"):
+            verdict = BLOCKED if verdict == "판정불가" else NOIMPL
+        detail = rest[v.end():].strip(" —-:·") or rest[:v.start()].strip(" —-:·")
+        out.setdefault(gate, (verdict, detail[:120]))
+    return out
 
 
 def checkers(rep: Report) -> None:
-    for gate, name, script, owner in CHECKERS:
+    for script, owner, gates, title in CHECKERS:
         p = qa_checker(script)
         if not p:
-            rep.add(gate, name, NOIMPL, "", f"tools/{script} ({owner}) 미작성 — gate.py 가 만들지 않는다")
+            for g in gates:
+                rep.add(g, f"{title} ({g})", NOIMPL, "",
+                        f"tools/{script} ({owner}) 미작성 — gate.py 가 만들지 않는다")
             continue
-        r = subprocess.run([sys.executable, str(p)], capture_output=True, text=True, timeout=900)
-        rep.add(gate, name, PASS if r.returncode == 0 else FAIL,
-                r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "",
-                f"tools/{script}")
+        try:
+            r = subprocess.run([sys.executable, str(p)], capture_output=True, text=True,
+                               timeout=1800)
+        except subprocess.TimeoutExpired:
+            for g in gates:
+                rep.add(g, f"{title} ({g})", BLOCKED, "검사기 timeout", f"tools/{script}")
+            continue
+        found = parse_gate_lines(r.stdout)
+        for g in gates:
+            if g in found:
+                verdict, detail = found[g]
+                rep.add(g, f"{title} ({g})", verdict, detail, f"tools/{script}")
+            else:
+                # 검사기가 있는데 그 게이트 줄을 안 찍었다 — PASS 로 보지 않는다.
+                rep.add(g, f"{title} ({g})", BLOCKED,
+                        "검사기가 판정 줄을 찍지 않았다",
+                        f"tools/{script} — 출력 형식 확인 (§10-6)")
 
 
 def build(rep: Report) -> None:
