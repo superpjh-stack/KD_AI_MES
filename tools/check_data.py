@@ -355,6 +355,47 @@ def accuracy(run=None) -> tuple[int, int, list[str]]:
     return ok, total, bad
 
 
+# ── `contracts/missing-policy.md` §4 조건 ②③ — 구조 제약이 강제하지만 **실측한다** ──
+def notnull_violations(run=None) -> int:
+    """§4-② NOT NULL 컬럼에 값이 있다. DB 가 강제하므로 **위반 불가**지만 0 임을 잰다."""
+    run = run or conn.q1
+    n = 0
+    for tid in sorted(design.tables()):
+        cols = [c["name"] for c in design.columns_of(tid)
+                if c["pk"] != "Y" and c["nullable"].strip().upper() == "N"]
+        if not cols:
+            continue
+        where = " or ".join(f"{c} is null" for c in cols)
+        n += int(run(f"select count(*) as n from {tid} where {where}")["n"])
+    return n
+
+
+def fk_orphans(run=None) -> tuple[int, int]:
+    """§4-③ 물리 FK 가 실제 행을 가리키는가. (제약 수, 고아 행 수) — 제약이 강제하므로 0 이어야 한다."""
+    run = run or conn.q1
+    fks = conn.q(
+        "select con.conname, src.relname as src, att.attname as col, "
+        "       tgt.relname as tgt, tatt.attname as tcol "
+        "from pg_constraint con "
+        "join pg_class src on src.oid = con.conrelid "
+        "join pg_class tgt on tgt.oid = con.confrelid "
+        "join pg_namespace n on n.oid = src.relnamespace "
+        "join pg_attribute att on att.attrelid = con.conrelid and att.attnum = con.conkey[1] "
+        "join pg_attribute tatt on tatt.attrelid = con.confrelid and tatt.attnum = con.confkey[1] "
+        "where con.contype = 'f' and n.nspname = 'public' order by 1")
+    orphans = 0
+    for f in fks:
+        orphans += int(run(
+            f"select count(*) as n from {f['src']} s where s.{f['col']} is not null "
+            f"and not exists (select 1 from {f['tgt']} t where t.{f['tcol']} = s.{f['col']})")["n"])
+    return len(fks), orphans
+
+
+# §4-④ 수치 범위 — **판정에서 제외한다.** 규약이 그렇게 정했다(범위 표가 정본에 없다).
+RANGE_EXCLUDED = ("contracts/missing-policy.md §4-④ — 단위 표준 수치 범위 표가 정본에 없어 "
+                  "이 항목은 정확성 판정에서 제외한다(규약이 명시)")
+
+
 CONSISTENCY = [
     # (이름, 비교 가능 건, 일치 건)
     ("BOM 자재 ↔ 자재LOT 재질",
@@ -417,11 +458,19 @@ def gate_09() -> None:
     say("── G-09 정확성 · 정합성 · 연계성 (각 ≥ 85% · 사업계획서 2.7.4) ────")
     ok, total, bad = accuracy()
     acc = pct(ok, total)
+    nn = notnull_violations()
+    nfk, orphan = fk_orphans()
     say(f"  정확성  정상 {ok} ÷ 전체 {total} × 100 = {pct_text(acc)}")
-    say(f"          ('정상' = 코드성 FK 29건이 BAS_COMMON_CODES 에 모두 존재하는 행 — "
-        "사업계획서 2.7.4 가 '정상' 을 정의하지 않아 QA2 가 정의했다)")
+    say("          '정상' 의 조작적 정의는 `contracts/missing-policy.md` §4 다"
+        " (QA2 DEF-QA2-012 를 아키텍트가 규약으로 확정했다)")
+    say(f"          ① 코드성 FK 29건 유효 — 분모 {total} · 정상 {ok}")
+    say(f"          ② NOT NULL 컬럼에 값이 있다 — 위반 {nn} (DB 제약이 강제한다. 실측으로 0 확인)")
+    say(f"          ③ 물리 FK {nfk}건이 실제 행을 가리킨다 — 고아 행 {orphan}")
+    say(f"          ④ {RANGE_EXCLUDED}")
     for b in bad:
         say(f"          · {b}")
+    if nn or orphan:
+        bad.append(f"§4-②③ 위반 — NOT NULL {nn} · FK 고아 {orphan}")
 
     comp_total = comp_ok = 0
     for name, den_sql, num_sql in CONSISTENCY:
@@ -441,19 +490,85 @@ def gate_09() -> None:
     parts = {"정확성": (acc, total), "정합성": (con, comp_total), "연계성": (lnk, lt)}
     undecidable = [k for k, (v, d) in parts.items() if v is None or d == 0]
     below = [f"{k} {v}%" for k, (v, d) in parts.items() if v is not None and d and v < THRESHOLD]
+    struct = f"§4-② NOT NULL 위반 {nn} · §4-③ FK 고아 {orphan}/{nfk}제약 · §4-④ 판정 제외"
     if undecidable:
         verdict("G-09", BLOCKED,
-                f"분모 0 → 판정 불가: {' · '.join(undecidable)}"
+                f"분모 0 → 판정 불가(규약 §5): {' · '.join(undecidable)}"
                 f" (측정된 것: " + " · ".join(
-                    f"{k} {pct_text(v)}" for k, (v, d) in parts.items()) + ")")
+                    f"{k} {pct_text(v)}" for k, (v, d) in parts.items()) + f") · {struct}")
     else:
-        verdict("G-09", FAIL if below else PASS,
+        verdict("G-09", FAIL if (below or nn or orphan) else PASS,
                 " · ".join(f"{k} {pct_text(v)}" for k, (v, _d) in parts.items())
-                + f" (기준 {THRESHOLD}%)" + (f" · 미달 {', '.join(below)}" if below else ""))
+                + f" (기준 {THRESHOLD}%)" + (f" · 미달 {', '.join(below)}" if below else "")
+                + f" · {struct}")
     say()
 
 
-# ══ G-10 시계열 신뢰성 — **동기화율 목표가 사업계획서에 없다. 실측만 보고**(D-09) ══
+# ══ G-10 시계열 신뢰성 — 규약: `contracts/missing-policy.md` ═══════════════
+# **동기화율 목표가 사업계획서에 없다(D-09·규약 §0). 실측만 보고한다.**
+POLICY = ROOT / "contracts" / "missing-policy.md"
+
+
+def missing_rate(run=None) -> dict:
+    """규약 §2.1 결측률.
+
+    ```
+    분모 = (측정 구간 길이 ÷ PLC_POLL_SEC) × 활성 태그 수     — 비가동 구간 제외
+    분자 = 실제 적재 건수
+    결측률 = 1 − 분자 ÷ 분모
+    ```
+    · §1 — **수집 지점 2개소 밖은 분모에 넣지 않는다.** 자동 폴링 대상은 `DEVICE_TYPE='PLC'` 뿐이고
+      현장POP(터치PC)은 사람이 입력하므로 기대 수집 건수가 없다(미수집이지 결측이 아니다).
+    · §2.1 — 비가동(`RUN_STATUS='정지'`) 시각의 기대 건수를 뺀다.
+      **상태를 모르는 구간은 결측률에서 제외하고 그 사실을 적는다.**
+    · §5 — **분모 0 이면 `None`.** 0% 도 100% 도 아니다.
+    """
+    run = run or conn.q1
+    from kyungdong.ingest import tags as ingest_tags      # 정본 태그표 (§10-16)
+    from kyungdong.app.settings import settings
+
+    poll = settings().h("PLC_POLL_SEC").as_int() or 1
+    active_tags = len(ingest_tags.TAGS)
+    # 규약 문자 그대로 'IF_PLC_SIGNALS 에 정의된 활성 태그' 로도 세어 본다 (§2.1 문구)
+    tags_in_ledger = int(run("select count(distinct TAG_NAME) as n from IF_PLC_SIGNALS")["n"])
+
+    out = {"poll_sec": poll, "active_tags": active_tags, "tags_in_ledger": tags_in_ledger,
+           "devices": [], "expected": 0, "stored": 0, "excluded_idle": 0, "unknown_state": 0}
+    devs = conn.q("select DEVICE_ID, DEVICE_NAME, DEVICE_TYPE from IF_DEVICE_REGISTRY "
+                  "where USE_YN = 'Y' order by DEVICE_ID")
+    for d in devs:
+        if d["device_type"] != "PLC":
+            out["devices"].append({"name": d["device_name"], "polled": False,
+                                   "why": "자동 폴링 대상이 아니다 — 수동 입력(규약 §1)"})
+            continue
+        span = run("select min(COLLECT_DT) as a, max(COLLECT_DT) as b, "
+                   "count(distinct (TAG_NAME, COLLECT_DT)) as n "
+                   "from IF_PLC_SIGNALS where DEVICE_ID = %s", (d["device_id"],))
+        if span["a"] is None:
+            out["devices"].append({"name": d["device_name"], "polled": True, "span": None,
+                                   "why": "적재 0건 — 측정 구간이 없다(분모 0, 규약 §5)"})
+            continue
+        ticks = int((span["b"] - span["a"]).total_seconds() // poll) + 1
+        idle = int(run("select count(*) as n from PRC_EQUIP_SIGNALS "
+                       "where RUN_STATUS = '정지' and COLLECT_DT between %s and %s",
+                       (span["a"], span["b"]))["n"])
+        unknown = int(run("select count(*) as n from PRC_EQUIP_SIGNALS "
+                          "where RUN_STATUS is null and COLLECT_DT between %s and %s",
+                          (span["a"], span["b"]))["n"])
+        expected = (ticks - idle - unknown) * active_tags
+        out["expected"] += max(expected, 0)
+        out["stored"] += int(span["n"])
+        out["excluded_idle"] += idle
+        out["unknown_state"] += unknown
+        out["devices"].append({
+            "name": d["device_name"], "polled": True,
+            "span": (span["a"], span["b"]), "ticks": ticks, "idle": idle, "unknown": unknown,
+            "expected": max(expected, 0), "stored": int(span["n"])})
+    out["rate"] = (None if not out["expected"]
+                   else round((1 - out["stored"] / out["expected"]) * 100.0, 1))
+    return out
+
+
 def gate_10() -> None:
     say("── G-10 시계열 (Timestamp 정렬 · 결측/지연 기록) ────────────────")
     ts_n = int(conn.q1("select count(*) as n from DAT_TIMESERIES")["n"])
@@ -482,20 +597,49 @@ def gate_10() -> None:
     say(f"  PRC_EQUIP_SIGNALS {sg_n} 행 · 정렬 위반 {sg_bad}")
     say(f"  IF_GATEWAY_BUFFER  " + (" · ".join(f"{b['buffer_status']} {b['n']}" for b in buf) or "0 건"))
     say(f"  DAT_JOB_LOGS {logs} 건 · 실패 누계 {log_fail}")
-    say(f"  결측률 {pct_text(pct(miss, ts_n))} — **동기화율 목표치는 사업계획서에 없다**(D-09)."
-        " 목표 없는 것을 있는 척하지 않는다. 실측만 보고한다")
-    say(f"  결측 분모·분자 규약 문서 `contracts/missing-policy.md` "
-        f"{'있음' if (ROOT / 'contracts' / 'missing-policy.md').exists() else '**없음** — goal.md §2.2 G-10 이 가리키는 문서가 부재다'}")
+    # ── 규약 `contracts/missing-policy.md` 대조 ────────────────────────
+    say(f"  규약 문서 `contracts/missing-policy.md` "
+        f"{'있음' if POLICY.exists() else '**없음** — goal.md §2.2 G-10 이 가리키는 문서가 부재다'}")
+    if not POLICY.exists():
+        verdict("G-10", BLOCKED, "결측 분모·분자 규약 문서가 없다 — 분모를 검사기가 임의로 정할 수 없다")
+        say()
+        return
 
-    if ts_n == 0 and sg_n == 0:
+    m = missing_rate()
+    rate_text = "판정 불가 (분모 0 · 규약 §5)" if m["rate"] is None else f"{m['rate']} %"
+    say(f"  §2.1 수집 결측률  분모 {m['expected']} = (구간 ÷ {m['poll_sec']}초 − 비가동 − 상태미상)"
+        f" × 활성태그 {m['active_tags']} · 분자 {m['stored']} → {rate_text}")
+    for d in m["devices"]:
+        if not d["polled"]:
+            say(f"    §1 분모 제외  {d['name']} — {d['why']}")
+        elif d.get("span") is None:
+            say(f"    {d['name']} — {d['why']}")
+        else:
+            say(f"    {d['name']}  구간 {d['span'][0]}~{d['span'][1]} · 틱 {d['ticks']}"
+                f" · 비가동 제외 {d['idle']} · 상태미상 제외 {d['unknown']}"
+                f" · 기대 {d['expected']} · 적재 {d['stored']}")
+    say(f"    **상태를 모르는 구간 {m['unknown_state']}틱은 결측률에서 제외했다**(규약 §2.1 명시 요구)")
+    say(f"  부가 실측  적재된 행 중 QUALITY_FLAG='결측' 비율 {pct_text(pct(miss, ts_n))} "
+        "— 규약 §2.1 의 수집 결측률과 **다른 지표**다(값 결측 vs 미적재)")
+    say(f"  §2.2 지연  Gateway 재전송분은 '지연'이지 '결측'이 아니다 — IF_GATEWAY_BUFFER "
+        + (" · ".join(f"{b['buffer_status']} {b['n']}" for b in buf) or "0 건"))
+    say(f"  §3 기록 위치  IF_GATEWAY_BUFFER {int(conn.q1('select count(*) as n from IF_GATEWAY_BUFFER')['n'])}"
+        f" · DAT_JOB_LOGS {logs} · DAT_PREPROCESS_RULES "
+        f"{int(conn.q1('select count(*) as n from DAT_PREPROCESS_RULES')['n'])}"
+        f" · DAT_QUALITY_CHECKS {int(conn.q1('select count(*) as n from DAT_QUALITY_CHECKS')['n'])}")
+    say("  §0 목표치  **사업계획서에 시계열 동기화율 목표가 없다**(D-09). 실측만 보고한다 — "
+        "직전 사업(광성정밀)의 85%·PTP 1s 를 가져오지 않는다")
+
+    if m["rate"] is None:
         verdict("G-10", BLOCKED,
-                "DAT_TIMESERIES 0 · PRC_EQUIP_SIGNALS 0 — `make db-reset` 직후 0건은 정상이다"
-                "(수집은 시드가 아니다). 정렬·결측은 표본이 없어 판정 불가."
-                " N건 경로는 tools/check_ingest.py 가 시뮬레이터로 잰다")
+                f"규약 §2.1 분모 0 → 판정 불가(§5). DAT_TIMESERIES {ts_n} · PRC_EQUIP_SIGNALS {sg_n}"
+                " — `make db-reset` 직후 0건은 정상이다(수집은 시드가 아니다)."
+                " N건 경로는 tools/check_ingest.py 와 tests/test_qa2_ingest.py 가 시뮬레이터로 잰다")
     else:
         verdict("G-10", PASS if ts_bad == 0 and sg_bad == 0 else FAIL,
-                f"정렬 위반 시계열 {ts_bad} · 설비신호 {sg_bad} · 결측 {miss}/{ts_n}"
-                f" · 목표치 없음(D-09) — 실측만 보고")
+                f"§2.1 수집 결측률 {rate_text} (목표 없음 — D-09·규약 §0, 실측만 보고)"
+                f" · §2.3 정렬 위반 시계열 {ts_bad} · 설비신호 {sg_bad}"
+                f" · 상태미상 제외 {m['unknown_state']}틱")
     say()
 
 

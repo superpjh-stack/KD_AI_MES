@@ -115,6 +115,25 @@ def test_G12_적재_유실이_0이다(collected):
     assert _n("DAT_TIMESERIES") == CYCLES * len(tags.numeric_tags())
 
 
+def test_G10_규약_2_1_결측률_N건_경로가_0퍼센트다(collected):
+    """`contracts/missing-policy.md` §2.1 산식의 **N건 경로**. 유실이 0이면 결측률도 0이다.
+
+    0건 경로(분모 0 → 판정 불가)는 `tests/test_qa2_data.py` 가 단언한다(§10-4 둘 다).
+    """
+    from tools import check_data as cd
+    m = cd.missing_rate()
+    assert m["poll_sec"] == 1 and m["active_tags"] == 8
+    assert m["expected"] == CYCLES * len(tags.TAGS), (
+        f"기대 수집 건수 = (구간 {CYCLES}틱 − 비가동 {m['excluded_idle']} − 상태미상 "
+        f"{m['unknown_state']}) × 태그 8 이어야 한다: {m['expected']}")
+    assert m["stored"] == m["expected"]
+    assert m["rate"] == 0.0, f"유실 0 인데 결측률이 {m['rate']}% 다"
+    assert m["excluded_idle"] == 0 and m["unknown_state"] == 0, (
+        "이 표본은 전부 '가동' 상태다 — 제외 구간이 생기면 산식 전제가 달라진다")
+    # §1 — 현장POP 은 자동 폴링 대상이 아니라 분모에 들어가지 않는다
+    assert [d["name"] for d in m["devices"] if not d["polled"]] == ["현장POP(터치PC)"]
+
+
 def test_G12_순서가_구간별로_보존된다(collected):
     """store-and-forward 다 — 재전송분이 라이브 뒤에 붙는 전역 역전은 설계상 정상이다."""
     buffered = set(collected["buffered"])
@@ -160,7 +179,7 @@ def test_G12_N건_경로_화면에_마지막_수집시각이_뜬다(collected):
 
 
 def test_G12_수집중단_판정이_화면과_수집모듈에서_갈린다(collected):
-    """DEF-QA2-006 — 같은 사실에 두 구현이 다른 답을 낸다.
+    """DEF-QA2-002 — 같은 사실에 두 구현이 다른 답을 낸다.
 
     화면 `routers/dsh.collection_badges()` 는 **앵커** 기준, 수집 모듈
     `ingest.collector.status()` 는 **실시각** 기준이다. 이 단언이 깨지면 결함이 해소된
@@ -174,16 +193,17 @@ def test_G12_수집중단_판정이_화면과_수집모듈에서_갈린다(colle
 
 def test_G12_앵커보다_오래된_수집이면_화면도_중단을_표시한다(collected):
     """화면의 중단 배지 경로 자체는 살아 있다 — 다만 **앵커보다 과거**여야만 뜬다."""
-    old = clock.anchor() - timedelta(hours=2)
-    keep = ci.maxid("PRC_EQUIP_SIGNALS", "SIGNAL_ID")
-    conn.x("update PRC_EQUIP_SIGNALS set COLLECT_DT = %s where SIGNAL_ID <= %s", (old, keep))
+    before = conn.q1("select max(COLLECT_DT) as d from PRC_EQUIP_SIGNALS")["d"]
+    # **정확히 되돌린다** — 상수로 덮어쓰면 서로 다른 수집 시각이 한 값으로 뭉개진다
+    conn.x("update PRC_EQUIP_SIGNALS set COLLECT_DT = COLLECT_DT - interval '2 hours'")
     try:
+        shifted = before - timedelta(hours=2)
         screens = ci.screen_ingest_state()
         assert any("수집 중단" in i["text"] for i in screens.values())
-        assert all(old.strftime("%Y-%m-%d %H:%M") in i["text"] for i in screens.values())
+        assert all(shifted.strftime("%Y-%m-%d %H:%M") in i["text"] for i in screens.values())
     finally:
-        conn.x("update PRC_EQUIP_SIGNALS set COLLECT_DT = %s where SIGNAL_ID <= %s",
-               (clock.anchor(), keep))
+        conn.x("update PRC_EQUIP_SIGNALS set COLLECT_DT = COLLECT_DT + interval '2 hours'")
+    assert conn.q1("select max(COLLECT_DT) as d from PRC_EQUIP_SIGNALS")["d"] == before
 
 
 # ══ G-13 전처리 ══════════════════════════════════════════════════════════
@@ -227,7 +247,7 @@ def test_G13_중복_제거는_도면번호_버전_고객사_기준이다():
 
 
 def test_G13_이상치_처리가_없다는_사실을_기록한다():
-    """DEF-QA2-008 — '노이즈' 는 어휘로만 있고 판정·제거 로직이 없다.
+    """DEF-QA2-004 — '노이즈' 는 어휘로만 있고 판정·제거 로직이 없다.
 
     이 단언이 깨지면 이상치 처리가 생긴 것이므로 리포트를 갱신한다.
     """
@@ -240,7 +260,12 @@ def test_G13_이상치_처리가_없다는_사실을_기록한다():
 
 
 def test_G13_Feature_6종_중_1종만_산출_가능하다():
-    """DEF-QA2-009 — 게이트 요구 6종 대비 코드로 산출 가능한 것은 '홀 수량' 뿐이다."""
+    """DEF-QA2-005 — 게이트 요구 6종 대비 코드로 산출 가능한 것은 '홀 수량' 뿐이다.
+
+    **이 결함은 해소되지 않았다.** (조율자가 DEF-QA2-005 해소로 전달받은 것은
+    `contracts/missing-policy.md` 부재 = DEF-QA2-007 이다. 검사기 메시지의 번호가 틀렸던 것을
+    바로잡았다 — 리포트 §1 참조.)
+    """
     assert set(cadpipe.DERIVABLE) == {"홀 수량"}
     alias = {"절단 길이": "총 절단장", "용접 길이": "용접장"}
     derivable = [f for f in ci.REQUIRED_FEATURES if alias.get(f, f) in cadpipe.DERIVABLE]
@@ -252,7 +277,7 @@ def test_G13_Feature_6종_중_1종만_산출_가능하다():
 
 
 def test_G13_전처리_규칙은_정의뿐이고_처리건수_컬럼이_없다():
-    """DEF-QA2-010 — 처리 건수가 `DAT_JOB_LOGS` 에 남지 않는다."""
+    """DEF-QA2-006 — 처리 건수가 `DAT_JOB_LOGS` 에 남지 않는다."""
     cols = {c["name"] for c in __import__("kyungdong.app.design", fromlist=["design"])
             .columns_of("DAT_PREPROCESS_RULES")}
     assert "PROCESS_CNT" not in cols and "APPLY_CNT" not in cols

@@ -255,14 +255,58 @@ def test_코드성_FK_29건이_전부_그룹에_매핑돼_있다():
     assert codes.unmapped_columns() == [], f"그룹 미정의: {codes.unmapped_columns()}"
 
 
-# ══ G-10 시계열 ══════════════════════════════════════════════════════════
-def test_G10_0건_경로_정렬위반도_결측도_0이고_목표치는_없다():
+# ══ G-10 시계열 — 규약 `contracts/missing-policy.md` 준수 ═════════════════
+# DEF-QA2-007 해소(아키텍트가 규약 문서를 작성). 표지 단언을 **문서 부재 → 문서 준수**로 바꿨다.
+def test_G10_규약_문서가_있다():
+    assert cd.POLICY.exists(), (
+        "goal.md §2.2 G-10 이 가리키는 `contracts/missing-policy.md` 가 사라졌다 — "
+        "DEF-QA2-007 이 재발한 것이다")
+    body = cd.POLICY.read_text()
+    for anchor in ("## 1.", "### 2.1", "### 2.3", "## 4.", "## 5."):
+        assert anchor in body, f"규약에서 {anchor} 절이 사라졌다 — 검사기가 그 절을 구현하고 있다"
+
+
+def test_G10_규약_1_수집지점_2개소_밖은_분모에_넣지_않는다():
+    """§1 — 수집 대상 밖은 결측이 아니라 `미수집 (D-06)` 이다."""
+    m = cd.missing_rate()
+    polled = [d for d in m["devices"] if d["polled"]]
+    excluded = [d for d in m["devices"] if not d["polled"]]
+    assert len(m["devices"]) == 2, "수집 지점은 2개소뿐이다 (D-06)"
+    assert [d["name"] for d in polled] == ["레이저커팅기 PLC"]
+    assert [d["name"] for d in excluded] == ["현장POP(터치PC)"]
+    assert "수동 입력" in excluded[0]["why"]
+
+
+def test_G10_규약_2_1_분모가_정본_주기와_활성태그로_선다():
+    """§2.1 — 분모 = (구간 ÷ PLC_POLL_SEC) × 활성 태그 수. 정본 태그표를 쓴다."""
+    from kyungdong.app.settings import settings
+    from kyungdong.ingest import tags as ingest_tags
+    m = cd.missing_rate()
+    assert m["poll_sec"] == settings().h("PLC_POLL_SEC").as_int()
+    assert m["active_tags"] == len(ingest_tags.TAGS) == 8
+    assert "unknown_state" in m and "excluded_idle" in m, (
+        "비가동·상태미상 제외 건수를 세지 않으면 §2.1 을 지킨 것이 아니다")
+
+
+def test_G10_규약_5_분모_0은_0퍼센트가_아니라_판정불가다():
+    """§5 — 0% 도 100% 도 아니다."""
     n = int(conn.q1("select count(*) as n from DAT_TIMESERIES")["n"])
     assert n == 0, "수집 표에 행이 있다 — check_ingest 뒤 정리가 안 됐는지 확인한다"
+    m = cd.missing_rate()
+    assert m["expected"] == 0 and m["rate"] is None
     assert cd.pct(0, n) is None, "0건에서 결측률을 0% 라고 말하지 않는다"
-    assert not (ROOT / "contracts" / "missing-policy.md").exists(), (
-        "goal.md §2.2 G-10 이 가리키는 결측 분모·분자 규약 문서가 생겼다 — "
-        "DEF-QA2-005 가 해소된 것이므로 리포트를 갱신한다")
+
+
+def test_G10_규약_4_정확성_조작적_정의를_검사기가_그대로_구현한다():
+    """§4 — ① 코드성 FK ② NOT NULL ③ 물리 FK ④ 수치 범위(판정 제외)."""
+    ok, total, _bad = cd.accuracy()                      # ①
+    assert (ok, total) == (0, 0), "전제가 바뀌었다 — N건 경로 테스트로 판정한다"
+    assert cd.notnull_violations() == 0                  # ② DB 제약이 강제한다
+    nfk, orphan = cd.fk_orphans()                        # ③
+    assert nfk == 98, f"물리 FK 제약이 98건이 아니다: {nfk} (contracts/db-schema.md 머리말)"
+    assert orphan == 0, "물리 FK 가 가리키는 행이 없다 — 제약이 깨졌다"
+    assert "판정에서 제외" in cd.RANGE_EXCLUDED           # ④ 명시적 제외
+    assert "§4-④" in cd.RANGE_EXCLUDED
 
 
 # ══ G-11 그리드 vs 건수 카드 vs 비율 카드 ═════════════════════════════════

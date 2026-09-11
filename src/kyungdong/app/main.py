@@ -56,10 +56,53 @@ async def attach_role(request: Request, call_next):
             or request.headers.get("x-kyungdong-role")
             or "SYSADMIN"
         ).upper()
+    # ── 권한 가드 (D-78) — **폼 파싱보다 먼저** 본다 ──────────────────
+    # FastAPI 의 `Form(...)` 은 핸들러 본문보다 앞서 파싱된다. 핸들러 안에서만 권한을 보면
+    # 권한 없는 역할이 403 이 아니라 **422** 를 받는다(실측 재현). 계약 §4.0 검사 순서를 지킨다.
+    denied = _permission_denied(request)
+    if denied is not None:
+        return denied
+
     response = await call_next(request)
     for k, v in security.headers().items():
         response.headers.setdefault(k, v)
     return response
+
+
+# 업무 화면 경로만 가드한다. `/api/*` 는 자체 검사를 하고, 공통 화면은 권한 영역이 없다.
+_SKIP_PREFIXES = ("/api", "/static", "/health", "/login", "/popup", "/error", "/board")
+
+
+def _screen_for(path: str):
+    """`/est/012/confirm` → `/est/012` 화면. 모르면 None."""
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    return nav.by_path().get(f"/{parts[0]}/{parts[1]}")
+
+
+def _permission_denied(request: Request):
+    if request.url.path == "/" or request.url.path.startswith(_SKIP_PREFIXES):
+        return None
+    screen = _screen_for(request.url.path)
+    if screen is None:
+        return None
+    from . import rbac
+    role = request.state.role_code
+    mutating = request.method in ("POST", "PUT", "PATCH", "DELETE")
+    if mutating:
+        # **가드는 "권한이 아예 없는 경우" 만 막는다.** 세부 판정은 핸들러가 한다.
+        # 총괄PM/경영자는 `조회/승인` — 등록·수정 권한 없이 **승인만** 가능하다.
+        # 여기서 can_write 만 요구하면 승인해야 할 역할을 막는다(실측으로 걸렸다).
+        allowed = rbac.can_write(role, screen.area) or rbac.can_approve(role, screen.area)
+    else:
+        allowed = rbac.can_read(role, screen.area)
+    if allowed:
+        return None
+    case = http.BY_KEY["forbidden"]
+    return render(request, "_error.html", status_code=case.status, status=case.status,
+                  message=case.message,
+                  detail=f"{screen.area} {'쓰기' if mutating else '조회'} 권한이 없습니다")
 
 
 @app.get("/health")
