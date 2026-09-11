@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}메인 — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ common.name }}</h1>
+  <div class="meta">{{ common.path }}</div>
+  <pre class="src">{{ common.items }}</pre>
+  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
+</div>
+<div class="card">
+  <h2>성과지표 2종 (사업계획서 1.5 확정값 — D-21)</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>코드</th><th>지표</th><th>기존</th><th>목표</th><th>개선</th><th>가중치</th><th>산식</th></tr></thead>
+    <tbody>
+      <tr><td>LEADTIME_MFG</td><td>제조 리드타임</td><td>1,320 h</td><td>1,080 h</td><td>−18.2%</td><td>0.5</td><td>작업지시 확정 ~ 포장완료 평균 소요시간</td></tr>
+      <tr><td>LEADTIME_O2D</td><td>수주출하 리드타임</td><td>1,440 h</td><td>1,200 h</td><td>−16.7%</td><td>0.5</td><td>출하시각 − 수주확정시각</td></tr>
+    </tbody>
+  </table></div>
+  <p class="meta">측정근거: 2025년 생산 일지(수주출하는 3개월분). 실적 산출은 개발2 `app/kpi.py` 한 곳에서만 한다.</p>
+</div>
+<div class="card">
+  <h2>화면 현황</h2>
+  <p>업무영역 <b>{{ counts.areas }}</b> · 화면 <b>{{ counts.screens }}</b> · 프로그램 <b>{{ counts.programs }}</b> ·
+     테이블 <b>{{ counts.tables }}</b> · 컬럼 <b>{{ counts.columns }}</b> ·
+     요구사항 기능 <b>{{ counts.functional }}</b> + 비기능 <b>{{ counts.nonfunctional }}</b></p>
+  <p class="meta">이 숫자가 goal.md 표와 다르면 정본이 바뀐 것이다 — 발견자가 decisions.md 에 적는다(§0.2).</p>
+</div>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}현황판 — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ common.name }} — 현황판 65" 2대</h1>
+  <div class="meta">{{ common.path }} · 자동 갱신 {{ refresh.value }}초 <span class="badge undetermined">{{ refresh.badge }}</span></div>
+  <pre class="src">{{ common.items }}</pre>
+  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
+  <p><span class="badge undetermined">미구현</span> 카드·차트는 개발2 담당이며 KPI 화면 043~045 와 <b>동일 산식</b>을 쓴다.
+     품질 KPI 는 공식 성과지표가 아니므로 구분 표기한다.</p>
+</div>
+{% endblock %}

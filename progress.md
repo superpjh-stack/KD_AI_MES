@@ -1,0 +1,161 @@
+# progress.md — 경동글로벌텍 제조AI (SF26179182)
+
+**검증된 현황의 유일한 진실.** 실측값 + 검증 명령만 적는다. 명령 없이 적힌 숫자는 없는 것으로 친다.
+판정 기준은 `goal.md` §2. 결정은 `decisions.md`.
+
+---
+
+## 2026-09-11 회전 1 — Phase 0 (아키텍트 단독 · 오케스트레이터 직접 수행)
+
+`/loop goal.md` 동적 모드 1회전. 착수 시 이 폴더에는 `goal.md` `CLAUDE.md` 뿐이었다.
+**§2 게이트를 측정할 수단이 없었으므로 회전 1의 목표를 "측정 가능 상태 만들기" 로 잡았다**(§10-15).
+에이전트는 띄우지 않았다 — Phase 0 은 웨이브 A 앞이고 혼자 하는 일이다.
+
+### 한 일
+
+| 항목 | 실측 | 검증 방법 |
+|---|---|---|
+| 디렉터리 골격 | `docs/{design,산출물,cad}` `src/kyungdong/app/{routers,templates,util,static}` `db` `tools` `tests` `contracts` `work` `outputs` 생성 | `ls -R` |
+| 정본 반입 | design.json 434KB · analysis.json · 사업계획서.pdf 3.1MB · 산출내역서 v0.97 · 화면설명서 HTML + 화면정의서 PPT 11MB · CAD 자료 6종 1.4MB | `du -sh docs/*` |
+| **정본 재실측 (복사본 기준)** | **화면 45 · 영역 10 · 프로그램 49 · 테이블 68 · 컬럼 762 · 공통 4 · 역할 6 / 기능 45 · 비기능 13** — goal.md 표와 일치 | `uv run python -c "…"` (goal.md §9) |
+| 테이블 접두 | `BAS`3 `SYS`4 `INV`6 `EST`16 `SHP`6 `PRC`7 `DAT`11 `AGT`3 `KPI`2 `IF`10 = **68** | 같은 명령 |
+| DB | `kyungdong_db` 생성 · `vector` **0.8.6** 확장 설치 | `psql -d kyungdong_db -Atc "select extversion from pg_extension where extname='vector'"` |
+| uv 프로젝트 | Python 3.12 핀 · `uv sync` 완료 · fastapi·psycopg·xgboost 3.4.1·shap·sklearn·pandas·numpy·jinja2 임포트 확인 | `uv run python -c "import …;print('deps ok')"` |
+| `.env.example` | `KYUNGDONG_*` 26키. 가설값에 `(D-nn)` 주석을 달았다 | `wc -l .env.example` = 44 |
+| `decisions.md` | goal.md §7 의 **D-01~D-27 전건 이관** + 회전 1 발견 **D-28~D-36** | 파일 |
+
+### 스키마 생성 — `tools/gen_schema.py` → `db/schema.sql`
+
+| 항목 | 실측 | 검증 방법 |
+|---|---|---|
+| **G-01 테이블** | **68** ✅ **PASS** | `psql -d kyungdong_db -Atc "select count(*) from information_schema.tables where table_schema='public'"` |
+| **G-02 컬럼** | **762** ✅ **PASS** | `select count(*) from information_schema.columns where table_schema='public'` |
+| FK 제약 | **98** 생성 (TD5 FK 표기 128건 − 코드성 참조 29 − 금액 오표기 1) | `select count(*) … constraint_type='FOREIGN KEY'` |
+| UNIQUE 제약 | **16** (단일 14 + 범위 복합 2) = TD5 `Unique` 표기 16건과 일치 | `select count(*) … constraint_type='UNIQUE'` |
+| pgvector | `AGT_VECTOR_DOCS.EMBEDDING VECTOR(1536)` 적용됨 | schema.sql · `\d AGT_VECTOR_DOCS` |
+
+**TD5 는 내부 정합했다**(D-36) — FK 128건이 전부 실제 68표로 해석되고, PK 는 표당 정확히 1개이며,
+컬럼 행 길이 위반 0건, 타입 어휘 전부 유효. 손 수정 없이 생성기만으로 스키마가 나왔다.
+
+### 생성기가 잡아낸 것 (고치지 않고 등재했다)
+
+| ID | 내용 |
+|---|---|
+| **D-32** | 코드성 FK **29건**이 물리 FK 로 성립하지 않는다 — `VARCHAR(30/50)` 컬럼이 `BAS_COMMON_CODES.CODE_ID BIGSERIAL` 을 가리킨다. 실제 의도는 `(CODE_GROUP, CODE_VALUE)` 참조. **FK 제약 미생성 + 애플리케이션 검증** |
+| **D-33** | `EST_QUOTATION_ITEMS.UNIT_PRICE NUMERIC(16,2)` 이 FK='Y' 로 표기됨 — **금액 값 컬럼을 외래키로 적은 결함.** 컬럼을 추가하지 않고(G-02 고정) 제안만 |
+| **D-34** | 범위 유니크 2건을 복합 제약으로 — `UNIQUE(CODE_GROUP, CODE_VALUE)` · `UNIQUE(CONFIG_TYPE, CONFIG_KEY)` |
+| **D-31** | 임베딩 차원 **1536** 확정 (TD5 명시) → D-08 의 "차원 미정" 해소 |
+| **D-35** | KPI 코드 확정 — `LEADTIME_MFG` · `LEADTIME_O2D` (TD5 `KPI_TARGETS.KPI_CODE` 비고) |
+
+### 생성기 자체 결함 2건 — 만들면서 잡았다
+
+1. **쉼표가 주석에 먹혔다.** `",\n".join()` 이 `-- 한글명,` 을 만들어 `--` 가 쉼표를 삼켰다 → `psql` 이 두 번째 컬럼에서 구문 오류. 쉼표를 **주석 앞**에 두도록 고쳤다. 이것 때문에 첫 적용이 **테이블 0개**로 끝났다.
+2. **범위 유니크를 단일 유니크로 만들 뻔했다.** 비고에 `Unique` 가 있으면 무조건 `UNIQUE` 를 붙이던 로직이 `CODE_VALUE`(그룹 내)·`CONFIG_KEY`(구분 내)에 **틀린 제약**을 걸었다. `SCOPED_UNIQUE` 표에 **명시**하는 방식으로 바꿨다(추측 금지).
+
+### 게이트 판정기 — `tools/gate.py` + `Makefile`
+
+`make gate` 첫 실행 결과:
+
+```
+G-01 테이블 68                 PASS   68
+G-02 컬럼 762                  PASS   762
+정본  design/analysis = goal.md 표  PASS   화면45 영역10 프로그램49 표68 컬럼762 기능45 비기능13
+G-03 / G-04 / G-05 / G-06      미구현  (check_routes·check_trace·nav.py 미작성)
+G-07~G-11 / G-12~G-13 / G-14~G-25 / G-26~G-30   미구현  (QA 검사기 미작성)
+G-빌드 pytest                   미구현  테스트 0파일
+──────────────────────────────────────────
+PASS 3 · FAIL 0 · 차단 0 · 미구현 9  /  12
+```
+
+**`미구현` 은 PASS 가 아니다.** `gate.py` 는 QA 소유 검사기를 있으면 호출하고 없으면 `미구현` 으로 표시하며
+**여기서 만들지 않는다**(goal.md §3.4). 빌드 게이트는 "몇 건 실행됐는지" 를 보고 0건이면 `차단` 을 낸다(§10-15).
+
+---
+
+## 지금 해야 할 것 (회전 2 — 웨이브 A 아키텍트)
+
+가장 앞선 FAIL/미구현은 **G-06 → G-03** 이다. 웨이브 A 를 끝내야 개발 3명이 코드를 쓸 수 있다.
+
+1. `app/nav.py` — 10영역 45화면 단일 소스 (`td3.menu_shortcuts` 순서) → **G-06**
+2. `app/rbac.py` — TD3 `role_matrix` **6역할 × 8영역**
+3. `app/util/` — 오류 규약 10종(§2.5) · 세션 · 속도제한 · 보안헤더 · CSRF
+4. `app/templates/{base,login,_placeholder,_popup,_error}.html` — `_placeholder` 가 TD3/TD4/AD2 문장을 200 으로 렌더
+5. `tools/check_routes.py` → **G-03**
+6. `contracts/` 4종 — `db-schema.md`(D-32·D-33 매핑 포함) · `api-contract.md` · `screen-map.md`(45행 + 담당·소유) · `interfaces.md`
+7. D-20 — Agent 시안 도구 11종 ↔ TD5 68표 재배선 매핑표
+
+## 알아둘 것
+
+- **8020 포트를 쓴다.** 8000·8010 은 이웃 사업 서버가 점유 중이다(실측, D-28).
+- **`db/schema.sql` 은 손으로 고치지 않는다.** `make gen-schema` 로만 바뀐다.
+- **코드성 FK 29건은 DB 가 막아주지 않는다**(D-32). 개발 3명은 코드 값 검증을 애플리케이션에서 해야 한다 — `contracts/interfaces.md` 에 공용 검증 함수를 두는 것이 맞다.
+- **`pdftotext` 가 없다**(D-30). 사업계획서는 `uv run --with pypdf` 로 읽는다.
+- 이 사업의 AI 는 **CAD 견적 자동화 + RAG Agent** 다. **예지보전·품질예측을 만들면 결함**이다(D-01). 직전 사업(광성정밀)이 예지보전이라 코드를 가져올 때 가장 위험하다.
+
+---
+
+## 2026-09-11 회전 2 — 웨이브 A (아키텍트 · 오케스트레이터 직접 수행)
+
+사용자가 "컴퓨터가 잠들어도 계속" 을 요청했다. 절전은 `caffeinate` 로 막았고(`work/caffeinate.pid`, 12시간),
+**뚜껑 닫힘·세션 종료는 막을 수 없다**는 것을 명시하고 `RESUME.md` 로 복귀 비용을 0에 가깝게 만들었다.
+
+### 게이트 실측 — `make gate`
+
+```
+G-01 테이블 68                          PASS   68
+G-02 컬럼 762                           PASS   762
+G-06 메뉴 10영역 단일 소스                 PASS
+G-03 화면 45+공통4+오류1 · ph 0 · 용어 0    FAIL   ①200 PASS / ②placeholder 45건 FAIL / ③용어 PASS
+정본  design/analysis = goal.md 표        PASS   화면45 영역10 프로그램49 표68 컬럼762 기능45 비기능13
+G-04·G-05                              미구현  check_trace.py (QA1)
+G-07~G-30                              미구현  check_data·check_ingest·check_ai·check_security (QA2·QA3)
+G-빌드 pytest                            PASS   59 passed
+──────────────────────────────────────────────────────
+PASS 5 · FAIL 1 · 차단 0 · 미구현 6  /  12
+```
+
+**G-03 의 FAIL 은 placeholder 45건 하나뿐이다** — 개발 3명이 화면을 채우면 사라진다. 정상적인 진행 상태다.
+
+### 만든 것
+
+| 파일 | 역할 | 실측 검증 |
+|---|---|---|
+| `app/design.py` | **정본 로더** — `screen/program/requirement/table_def/trace/columns_of`. `selfcheck()` 가 정본 9항목을 goal.md 표와 대조 | 9/9 일치 (`selfcheck()`) |
+| `app/nav.py` | **메뉴 단일 소스 (G-06)** — `td3.menu_shortcuts` 순서 10영역, 45화면을 design.json 에서 읽는다(45행 손으로 안 적음) | 영역 10 · 화면 45 · 소유 **개발1 15 / 개발2 16 / 개발3 14** = goal.md §3.2 와 일치 |
+| `app/rbac.py` | **6역할 × 8권한영역** — TD3 `role_matrix` 셀 문구를 R/W/A 로 해석. 모르는 문구는 **예외로 터뜨린다** | 현장 작업자 → 수주견적AI관리 = `-` → **403** 확인 |
+| `app/settings.py` | `KYUNGDONG_*` 로더. **가설값 11종을 값+D번호+설명 묶음**으로 들고 다녀 화면에 `가설 (D-nn)` 배지를 띄운다 | 11종 출력 확인 · prod 에서 `SESSION_SECRET` 없으면 기동 거부 |
+| `app/util/http.py` | **오류 계약 7종** 한 곳 (401·403·422·500·501×2·503) + 200 으로 드러내는 알림 문구 5종 | 계약 밖 key 는 `KeyError` |
+| `app/templating.py` | Jinja2 · **autoescape 기본**(§10-8) · 권한 있는 메뉴만 노출 | — |
+| `app/main.py` | 45화면 + 공통 4 + 오류. **담당 라우터가 있으면 그것이 이기고**, 없는 화면만 `_placeholder` | 라우트 53 · placeholder 45 · 담당 라우터 0 |
+| `app/templates/` 7종 + `static/app.css` | `_placeholder` 가 AD2·TD3·TD4·TD5 **정본 문장과 컬럼표**를 200 으로 렌더. CSS 는 **단일 파일**(§10-13) | 전 화면 200 |
+| `tools/check_routes.py` | **G-03·G-06 검사기** | 아래 참조 |
+| `tools/gen_screen_map.py` → `contracts/screen-map.md` | 화면 45행 + 소유권 + 모듈별 + 공통 + RBAC 표. **정본은 `nav.py`** | G-06 PASS |
+| `tests/test_arch_smoke.py` | 정본 규모·메뉴·소유 3분할·추적 1:1·공통 200·45화면 200·403·메뉴 은닉·오류 계약·미구성 노출 | **59 passed** |
+
+### 검사기·게이트 자체 결함 4건 — 만들면서 잡았다 (전부 §10 이 경고한 유형)
+
+1. **오염 검사가 통째로 무력했다.** `QUOTE_OK` 를 **본문 전체**에서 찾아서, placeholder 의 "산출물 정본 문장이다" 에 걸려 항상 면제됐다. → 용어 **주변 160자**만 보도록 고쳤다(D-37). 고치자마자 숨어 있던 4건이 드러났다.
+2. **고친 검사기가 잡은 4건은 오염이 아니었다.** `/dsh/003`·`/prc/022` 가 렌더한 "설비 예지보전 AI는 본 사업 범위 밖이다" · "포밍·용접 설비는 제외한다" 는 **배제 진술**이다. 배제 문맥을 인정하도록 규칙을 정했다(D-37).
+3. **빌드 게이트가 `차단` 을 오판했다.** `gate.py` 가 stdout **마지막 줄**을 요약으로 믿었는데 경고 문서 URL 이 뒤에 붙는다 → 요약 줄을 정규식으로 찾도록 고쳤다.
+4. **`-qq` 때문에 요약 줄이 아예 없었다.** `pyproject` `addopts = "-q"` 에 명령줄 `-q` 가 더해졌다 → `gate.py` 는 `uv run pytest` 로 부른다.
+
+**둘 다 검사기가 "항상 통과" 하거나 "판정을 못 하는" 결함이었다.** 주입 시험으로 양방향을 확인했다 —
+일부러 `프레스 금형 샷카운트` 를 넣으면 3건 FAIL, 빼면 0건 PASS.
+
+### 지금 해야 할 것 (회전 3)
+
+가장 앞선 미구현은 **G-04·G-05**(요구사항 추적)다. 웨이브 A 잔여분을 끝낸 뒤 웨이브 B 로 넘어간다.
+
+1. `contracts/db-schema.md` — 68표·762컬럼 + **D-32 코드성 FK 29건 검증 규약** + D-33 매핑
+2. `contracts/api-contract.md` — 45화면 라우트 + 공통 + Agent API + 수집 API + CAD 업로드 API
+3. `contracts/interfaces.md` — `db.conn.q/x/tx` · `design.*` · `templating.render` · `util.http` · `ingest`·`cad` 시그니처
+4. `db/conn.py` — psycopg 연결·`q/x/tx` (DB 죽으면 **503**, 조용히 빈 배열 금지)
+5. D-20 — Agent 시안 도구 11종 ↔ TD5 68표 재배선 매핑표
+6. `tools/check_trace.py`(QA1 소유지만 **게이트가 안 서면 아무 판정도 못 한다** — 아키텍트가 최소판을 만들고 QA1 이 인수할지 결정)
+
+### 알아둘 것
+
+- **`?as=OPERATOR` 로 역할을 바꿔 화면을 볼 수 있다**(D-40 가설). 인증이 들어오면 이 미들웨어를 **제거**해야 한다 — 남으면 보안 결함이다.
+- **담당 라우터가 placeholder 를 이긴다.** 개발자는 `app/routers/<module>.py` 에 `router` 와 `SCREENS = ("MES-TD3-0nn", …)` 를 두면 된다. main.py 는 건드리지 않는다.
+- `contracts/screen-map.md` 는 **생성 파일**이다. `nav.py` 를 고치고 `uv run python tools/gen_screen_map.py` 를 다시 돌린다.
+- 게이트 판정을 볼 때 **`미구현` 6건이 PASS 가 아니다.** 현재 진짜 측정된 것은 G-01·G-02·G-03·G-06·빌드뿐이다.

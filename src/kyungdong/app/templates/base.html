@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ system_name }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <span class="sys">{{ system_name }}</span>
+  <span class="env">{{ env }}</span>
+  {% if not llm_configured %}<span class="badge bad">LLM 미구성 (D-08)</span>{% endif %}
+  {% if not cad_configured %}<span class="badge bad">CAD Parsing 미구성 (D-05)</span>{% endif %}
+  <span class="badge notice">검색 모드 {{ search_mode }}</span>
+  <span style="margin-left:auto" class="meta">{% if role %}{{ role.name }}{% endif %}</span>
+</header>
+<div class="layout">
+  <nav class="side">
+    {% for shortcut, screens in menu %}
+    <div class="grp">
+      <b>{{ shortcut }}</b>
+      {% for s in screens %}
+      <a href="{{ s.path }}" {% if current and current.id == s.id %}class="on"{% endif %}>{{ s.no }} {{ s.name }}</a>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </nav>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<footer class="foot">
+  경동글로벌텍 제조AI 시스템 · 과제번호 SF26179182 · 공급기업 주식회사 재일 —
+  화면·항목·문장은 SF-TD3/TD4/SF-AD2 정본에서 렌더한다. 값이 없으면 <span class="badge undetermined">미확정 (D-nn)</span> 을 표시한다.
+</footer>
+</body>
+</html>

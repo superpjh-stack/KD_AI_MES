@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ status }} {{ message }}</h1>
+  {% if detail %}<pre class="src">{{ detail }}</pre>{% endif %}
+  <p class="meta">오류 계약 goal.md §2.5 — 조용한 실패 금지. 이 화면이 보이는 것이 정상 동작이다.</p>
+</div>
+{% endblock %}

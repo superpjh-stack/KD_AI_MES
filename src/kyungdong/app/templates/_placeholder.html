@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ screen.no }} {{ screen.name }}</h1>
+  <div class="meta">
+    {{ screen.area }} · {{ screen.path }} ·
+    {{ screen.requirement_id }} ↔ {{ screen.id }} ↔ {{ screen.program_id }} ·
+    담당 {{ screen.owner }} (routers/{{ screen.module }}.py)
+  </div>
+  <p><span class="badge undetermined">미구현 화면</span>
+     아래는 산출물 정본 문장이다. 실 데이터 연동은 담당 개발자가 채운다.</p>
+</div>
+
+{% if requirement %}
+<div class="card">
+  <h2>요구사항 {{ requirement.id }} — {{ requirement.name }} ({{ requirement.kind }})</h2>
+  <pre class="src">{{ requirement.description }}</pre>
+  {% if requirement.details %}<h2>상세</h2><pre class="src">{{ requirement.details }}</pre>{% endif %}
+  {% if requirement.constraints %}<h2>제약사항</h2><pre class="src">{{ requirement.constraints }}</pre>{% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>화면 {{ screen.id }} (SF-TD3)</h2>
+  <pre class="src">{{ td3.composition }}</pre>
+  <h2>화면 항목</h2><pre class="src">{{ td3.items }}</pre>
+  <h2>검토 사항</h2><pre class="src">{{ td3.checks }}</pre>
+  <h2>사용 테이블</h2><pre class="src">{{ td3.tables }}</pre>
+  <h2>채널</h2><pre class="src">{{ td3.channels }}</pre>
+</div>
+
+{% if program %}
+<div class="card">
+  <h2>프로그램 {{ program.id }} (SF-TD4)</h2>
+  <pre class="src">{{ program.description }}</pre>
+  <h2>처리 흐름</h2><pre class="src">{{ program.flow }}</pre>
+  <h2>기능</h2><pre class="src">{{ program.functions }}</pre>
+</div>
+{% endif %}
+
+{% if tables %}
+<div class="card">
+  <h2>테이블 정의 (SF-TD5)</h2>
+  {% for t in tables %}
+  <h2>{{ t.id }} — {{ t.name }} ({{ t.columns|length }}컬럼)</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>한글명</th><th>영문명</th><th>타입</th><th>PK</th><th>FK</th><th>NULL</th><th>비고</th></tr></thead>
+    <tbody>
+    {% for c in t.columns %}
+      <tr><td>{{ c.ko }}</td><td>{{ c.name }}</td><td>{{ c.type }}</td>
+          <td>{{ c.pk }}</td><td>{{ c.fk }}</td><td>{{ c.nullable }}</td><td>{{ c.note }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

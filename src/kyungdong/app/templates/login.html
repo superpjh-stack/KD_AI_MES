@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}로그인 — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>로그인</h1>
+  <div class="meta">{{ common.path }} · MES-AD2-026 · MES-AD2-054</div>
+  <pre class="src">{{ common.items }}</pre>
+  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
+  <p><span class="badge undetermined">미구현</span> 인증은 개발1 담당이다 (bcrypt/Argon2 해시 · 정책 수치는 가설 D-16).</p>
+  <h2>계정 정책 (가설값 — 사업계획서 9.2 는 수치를 적지 않았다)</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>항목</th><th>값</th><th>근거</th></tr></thead>
+    <tbody>
+    {% for h in policy %}<tr><td>{{ h.what }}</td><td>{{ h.value }}</td><td><span class="badge undetermined">{{ h.badge }}</span></td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}
