@@ -407,7 +407,10 @@ def test_사용자_등록이_난수_비밀번호를_1회만_보여준다():
                           "phone_no": "010-0000-1234", "email": "t@example.com"})
     assert r.status_code == 200, r.text[:300]
     assert "발급 비밀번호" in r.text
-    issued = re.search(r"발급 비밀번호 ([A-Za-z0-9_\-]+)", r.text)
+    # 정규식이 `[A-Za-z0-9_-]` 만 허용해 깨졌었다 — 복잡도 정책(D-16)으로 비밀번호에
+    # `+`·`!` 같은 특수문자가 들어가면서 앞부분만 잡혀 해시 안에서 우연히 발견됐다.
+    # **구현이 맞고 테스트가 낡은 것이다.** 공백 전까지를 통째로 잡는다.
+    issued = re.search(r"발급 비밀번호 (\S+)", r.text)
     assert issued, "난수가 화면에 나오지 않았다"
     # 다시 열면 보이지 않는다
     assert "발급 비밀번호" not in get("/sys/026").text
