@@ -286,3 +286,41 @@ def test_실제_추천검토_경로는_adopt다():
     r = csrf_post(client, "/api/agent/recommend/999999/adopt", {"decision": "승인"},
                   page="/login", params={"as": "SYSADMIN"})
     assert r.status_code == 422, f"/adopt 도 사라졌다 → {r.status_code}"
+
+
+def test_템플릿이_dict_키를_메서드로_가리지_않는다():
+    """**`{{ td3.items }}` 는 dict 의 `.items` 메서드를 찍는다** (D-198).
+
+    Jinja 는 속성 접근을 먼저 시도하므로 `items`·`keys`·`values` 라는 **키**는
+    같은 이름의 dict 메서드에 가려진다. 화면에는 `<built-in method items of dict
+    object at 0x…>` 가 그대로 나온다 — 6개 템플릿에서 실제로 그러고 있었다.
+    D-46(`anchor`→`clock`)·D-54(`util.audit`)와 같은 **이름 가림** 함정이다.
+
+    키 접근은 `td3['items']` 로 쓴다 — 대괄호는 키를 먼저 본다.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    tpl = _Path(__file__).resolve().parents[1] / "src" / "kyungdong" / "app" / "templates"
+    bad = []
+    for p in tpl.rglob("*.html"):
+        for m in _re.finditer(r"\{\{\s*(\w+)\.(items|keys|values)\s*\}\}", p.read_text()):
+            bad.append(f"{p.relative_to(tpl)}: {m.group(0)}")
+    assert bad == [], f"dict 메서드에 가린 키 접근: {bad}"
+
+
+def test_화면에_파이썬_객체_표현이_새지_않는다():
+    """`<built-in method …>` · `<object at 0x…>` 가 화면에 보이면 결함이다."""
+    import re as _re
+
+    from kyungdong.app import nav
+
+    leaked = []
+    for sc in nav.all_screens():
+        r = client.get(sc.path, headers={"x-kyungdong-role": "SYSADMIN"})
+        if r.status_code != 200:
+            continue
+        for m in _re.finditer(r"&lt;(built-in method|bound method|[a-z_]+ object at) [^&]{0,40}",
+                              r.text):
+            leaked.append(f"{sc.no}: {m.group(0)[:60]}")
+    assert leaked == [], f"파이썬 객체 표현이 화면에 샌다: {leaked[:6]}"

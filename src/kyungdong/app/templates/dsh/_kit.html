@@ -214,7 +214,7 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
     {% for line in block.lines %}<p>{{ line }}</p>{% endfor %}
     {% endfor %}
   {% else %}
-    <h3>화면 목적</h3><p>{{ td3.items }}</p>
+    <h3>화면 목적</h3><p>{{ td3['items'] }}</p>
     <h3>체크</h3><p>{{ td3.checks }}</p>
   {% endif %}
   {% for n in notes %}

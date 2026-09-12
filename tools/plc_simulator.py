@@ -161,7 +161,8 @@ def check_loopback(base_url: str) -> str:
     return host
 
 
-def deliver_http(base_url: str, dev: int, samples: list, timeout: float = 10.0):
+def deliver_http(base_url: str, dev: int, samples: list, path: str,
+                 timeout: float = 10.0):
     """진짜 `POST /api/ingest/plc` — **루프백의 우리 앱에만** 보낸다(`check_loopback`).
 
     **서버가 없으면 소리내어 죽는다** — 조용히 inproc 으로 되돌아가지 않는다(§10-9).
@@ -172,7 +173,12 @@ def deliver_http(base_url: str, dev: int, samples: list, timeout: float = 10.0):
 
     check_loopback(base_url)
 
+    # **출처 표지를 payload 에 싣는다** (D-196). 안 실으면 수집 API 가 기본값
+    # `PLC→Gateway→시계열DB`(실수집 라벨)로 적어서 **시뮬레이터 데이터가 실수집이 된다.**
+    # inproc 경로는 `collect_path` 를 직접 넘겨 표지가 붙었는데 HTTP 경로만 빠져 있었다 —
+    # 표지를 두 경로가 따로 붙이고 있었던 것이 원인이다.
     body = json.dumps({"device_id": dev, "equip_code": EQUIP_CODE,
+                       "collect_path": path,
                        "samples": [x.as_dict() for x in samples]},
                       ensure_ascii=False, default=str).encode()
     req = urllib.request.Request(f"{base_url.rstrip('/')}/api/ingest/plc", data=body,
@@ -251,14 +257,17 @@ def main() -> int:
         print("  ※ 주소 `SIM-` 은 시뮬레이터 값이다 — 실물 태그맵은 도입기업 제공 (D-176)")
         return 0
 
+    # **시각 기준과 데이터 출처는 다른 축이다.** `--realtime` 은 *언제로 적을지*를 바꿀 뿐,
+    # 이 값이 시뮬레이터에서 나왔다는 사실을 바꾸지 않는다. 전에는 `--realtime` 이면
+    # `COLLECT_PATH` 를 실수집 라벨(`PLC→Gateway→시계열DB`)로 적어서 **시뮬레이터 데이터가
+    # 실수집과 구분되지 않았다**(D-195). 표지는 언제나 붙는다.
+    path = collector.COLLECT_PATH_SIM
     if a.realtime:
         from datetime import datetime
         t0 = datetime.now().replace(microsecond=0) - timedelta(seconds=a.cycles * a.poll_sec)
-        path = collector.COLLECT_PATH
-        basis = "실시각 (--realtime)"
+        basis = "실시각 (--realtime) — **출처 표지는 그대로 시뮬레이터다**"
     else:
         t0 = clock.anchor()
-        path = collector.COLLECT_PATH_SIM
         basis = f"시간 앵커 {t0.isoformat(sep=' ')} (§10-3 date.today() 금지)"
 
     rng = random.Random(a.seed)
@@ -327,7 +336,7 @@ def main() -> int:
             buffered += 1
             continue
         if a.via == "http":
-            r = deliver_http(base_url, dev, samples)
+            r = deliver_http(base_url, dev, samples, path)
             stored += int(r.get("stored", 0))
             dup += int(r.get("duplicated", 0))
             if not r.get("ordered", True):

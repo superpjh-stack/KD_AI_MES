@@ -256,13 +256,33 @@ def p_d169() -> tuple[bool, str]:
     return not secret, f"IF_DEVICE_REGISTRY {len(cols)}컬럼 · 인증 칸 {secret or '없음'}"
 
 
+def p_d197() -> tuple[bool, str]:
+    """판정 불가를 담을 **어휘 값이 있는지**를 정본에서 잰다.
+
+    표본 부족으로 판정하지 않은 행이 `QUALITY_FLAG='정상'` 으로 적힌다 — TD5 어휘가
+    `정상/노이즈/결측` 3종뿐이고 `등` 도 없어 담을 값이 없다. 코드로는 못 고친다.
+    """
+    d = json.loads(_src("docs/design/design.json"))
+    remark = ""
+    for det in d["td5"]["details"]:
+        for c in det.get("columns", []):
+            if len(c) >= 7 and c[1] == "QUALITY_FLAG":
+                remark = str(c[6])
+    has_slot = ("판정" in remark) or remark.rstrip().endswith("등")
+    src = _src("src/kyungdong/ingest/preprocess.py")
+    undecided_as_normal = 'OutlierVerdict("정상", BASIS_UNDECIDABLE, False)' in src
+    return (not has_slot) and undecided_as_normal, (
+        f"TD5 QUALITY_FLAG 어휘 `{remark}` — 판정불가 칸 {has_slot} · "
+        f"판정 안 한 행을 정상으로 적는다 {undecided_as_normal}")
+
+
 PROBES = {
     "D-32": p_d32, "D-33": p_d33, "D-41": p_d41, "D-44": p_d44, "D-54": p_d54,
     "D-56": p_d56, "D-57": p_d57, "D-60": p_d60, "D-62": p_d62, "D-69": p_d69_70,
     "D-70": p_d69_70, "D-71": p_d71, "D-75": p_d75, "D-76": p_d76, "D-77": p_d77,
     "D-81": p_d81, "D-94": p_d94, "D-98": p_d98, "D-102": p_d102, "D-120": p_d120,
     "D-127": p_d127, "D-129": p_d129_151, "D-151": p_d129_151, "D-136": p_d136,
-    "D-146": p_d146, "D-168": p_d168, "D-169": p_d169,
+    "D-146": p_d146, "D-168": p_d168, "D-169": p_d169, "D-197": p_d197,
 }
 
 # probe 를 **의도적으로** 두지 않은 것 — 코드를 봐서는 알 수 없다.

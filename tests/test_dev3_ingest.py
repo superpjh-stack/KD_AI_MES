@@ -186,3 +186,42 @@ def test_클라우드측_단절은_버퍼가_지고_PLC_는_넘긴_것으로_본
     assert st["unsent"] == 0, f"Gateway 가 가져간 값이 장비에 또 남아 있다: {st}"
     assert st["buffer"] == 0, "재전송 뒤에도 대기 버퍼가 남았다"
     assert st["signals"] == 80, f"재전송 포함 유실 0 이어야 한다: {st}"
+
+
+def test_realtime_여도_시뮬레이터_표지가_붙는다():
+    """**시각 기준과 데이터 출처는 다른 축이다** (D-195).
+
+    `--realtime` 은 *언제로 적을지*를 바꿀 뿐 이 값이 시뮬레이터에서 나왔다는 사실을
+    바꾸지 않는다. 전에는 `--realtime` 이면 `COLLECT_PATH` 를 실수집 라벨로 적어서
+    **시뮬레이터 데이터가 실수집과 구분되지 않았다** — 화면·리포트에서 성과로 인용된다.
+    """
+    import importlib
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    sim = importlib.import_module("plc_simulator")
+    src = (ROOT / "tools" / "plc_simulator.py").read_text()
+    i = src.index("if a.realtime:")
+    branch = src[i - 400:i + 400]
+    assert "path = collector.COLLECT_PATH_SIM" in branch, "표지가 분기 밖에서 고정되지 않았다"
+    assert "path = collector.COLLECT_PATH\n" not in branch, \
+        "--realtime 이 실수집 라벨을 쓴다 — 시뮬레이터 데이터가 실수집처럼 보인다"
+
+
+def test_HTTP_로_보내도_시뮬레이터_표지가_DB_에_남는다():
+    """**표지를 두 경로가 따로 붙이면 한쪽이 빠진다** (D-196).
+
+    `inproc` 은 `collect_path` 를 직접 넘겨 표지가 붙었는데 **HTTP 경로만 빠져 있었다** —
+    수집 API 가 기본값 `PLC→Gateway→시계열DB`(실수집 라벨)로 적어서 시뮬레이터 데이터가
+    실수집이 됐다. 화면·리포트에서 그대로 성과로 인용된다.
+    """
+    import importlib
+    import json as _json
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    sim = importlib.import_module("plc_simulator")
+    src = (ROOT / "tools" / "plc_simulator.py").read_text()
+    i = src.index("def deliver_http(")
+    assert '"collect_path": path' in src[i:i + 900], "HTTP payload 가 출처 표지를 안 싣는다"
+    # 수집 API 가 그 값을 실제로 쓰는가 — 기본값으로 덮어쓰면 싣는 의미가 없다.
+    api = (ROOT / "src" / "kyungdong" / "app" / "routers" / "ingest.py").read_text()
+    assert 'body.get("collect_path")' in api, "수집 API 가 payload 의 표지를 무시한다"
