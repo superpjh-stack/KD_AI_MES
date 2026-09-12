@@ -373,3 +373,63 @@ def test_G13_처리건수가_DAT_JOB_LOGS_에_남는다(collected):
     finally:
         conn.x("delete from DAT_JOB_LOGS where JOB_LOG_ID > %s", (mark_jl,))
         conn.x("delete from DAT_TIMESERIES where TS_ID > %s", (mark_ts,))
+
+
+# ══ G-10 N건 경로 (D-182) ═════════════════════════════════════════════════
+def test_g10_은_시뮬레이터로_N건_경로를_재고_되돌린다():
+    """**분모 0 은 판정 불가이지 PASS 도 FAIL 도 아니다**(규약 §5).
+
+    그런데 `make db-reset` 직후 런타임 표는 늘 0이라 G-10 은 **영원히 차단**이었다 —
+    측정은 시뮬레이터로 이미 하고 있었는데 그 결과가 G-10 에 귀속되지 않았을 뿐이다.
+    결함 수정이 아니라 **판정이 사실을 말하게 만드는 일**이다(D-182).
+
+    끝나고 런타임 표가 **0으로 돌아와야** 한다 — 남으면 G-11 이 오염된다.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "tools"))
+    import check_data as cd
+
+    tbls = ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS")
+    before = {t: int(conn.q1(f"select count(*) as n from {t}")["n"]) for t in tbls}
+    if any(before.values()):
+        # 실데이터가 있으면 시뮬레이터는 **손대지 않는다** — 그 사실을 단언하고 끝낸다.
+        assert cd.simulate_for_g10() is None, "실데이터가 있는데 시뮬레이터가 덮어썼다"
+        return
+
+    sim = cd.simulate_for_g10()
+    assert sim is not None, "시뮬레이터를 못 돌렸다"
+    try:
+        m = cd.missing_rate()
+        # **주입한 만큼 세어지는가** — 완벽한 시계열을 만들면 결측률이 늘 0% 라 지표가
+        # 결측을 잡는지 알 수 없다(§10-16 되돌림 원칙).
+        assert m["rate"] == sim["expected_rate"], (
+            f"주입 {sim['expected_rate']}% ↔ 실측 {m['rate']}%")
+        assert m["expected"] > 0 and m["stored"] > 0, m
+        ts_bad, sg_bad = cd.order_violations()
+        assert ts_bad == 0 and sg_bad == 0, (ts_bad, sg_bad)
+    finally:
+        cd.cleanup_g10(sim)
+    after = {t: int(conn.q1(f"select count(*) as n from {t}")["n"]) for t in tbls}
+    assert after == before == {t: 0 for t in tbls}, f"런타임 표가 0으로 안 돌아왔다: {after}"
+
+
+def test_g10_판정줄은_고지를_수치_앞에_둔다():
+    """`gate.py` 가 판정 줄을 **120자에서 자른다.** 고지가 뒤에 있으면 잘려 나가고
+    `PASS · 결측률 10.0%` 만 남아 **실물 설비 실측처럼** 인용된다 — G-14 에서 같은 이유로
+    고지를 앞에 뒀다(D-151).
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "tools"))
+    import check_data as cd
+
+    src = _Path(cd.__file__).read_text()
+    i = src.index('verdict("G-10", PASS if ok else FAIL,')
+    line = src[i:i + 400]
+    notice = line.index("시뮬레이터 기준")
+    number = line.index("결측률")
+    assert notice < number, "고지가 수치 뒤에 있다 — 잘리면 거짓 증거가 된다"
+    assert "실물 설비 실측이 아니다" in line

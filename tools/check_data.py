@@ -605,6 +605,23 @@ def gate_09() -> None:
 POLICY = ROOT / "contracts" / "missing-policy.md"
 
 
+def order_violations() -> tuple[int, int]:
+    """적재 순서(PK) 와 측정 시각의 정렬이 어긋난 건수 — 같은 태그·설비 안에서 본다.
+
+    **한 곳에서만 센다.** 같은 SQL 을 두 판정이 각각 들고 있으면 한쪽만 고쳐져
+    같은 DB 에 반대 결론이 난다 — D-70 이 정확히 그 사고였다(중단 판정이 두 곳에 복제).
+    """
+    ts = int(conn.q1(
+        "select count(*) as n from ("
+        " select MEASURE_DT, lag(MEASURE_DT) over (partition by TAG_NAME, EQUIP_CODE order by TS_ID) as prev"
+        " from DAT_TIMESERIES) x where prev is not null and MEASURE_DT < prev")["n"])
+    sg = int(conn.q1(
+        "select count(*) as n from ("
+        " select COLLECT_DT, lag(COLLECT_DT) over (partition by EQUIP_CODE order by SIGNAL_ID) as prev"
+        " from PRC_EQUIP_SIGNALS) x where prev is not null and COLLECT_DT < prev")["n"])
+    return ts, sg
+
+
 def missing_rate(run=None) -> dict:
     """규약 §2.1 결측률.
 
@@ -665,20 +682,76 @@ def missing_rate(run=None) -> dict:
     return out
 
 
+# ── G-10 N건 경로 (D-182) ────────────────────────────────────────────────
+# **분모 0 은 판정 불가이지 PASS 도 FAIL 도 아니다**(규약 §5). 그런데 `make db-reset` 직후
+# 런타임 표는 늘 0이라 G-10 은 **영원히 차단**이었다 — 측정은 `check_ingest.py` 가 이미
+# 시뮬레이터로 하고 있었는데 그 결과가 G-10 에 귀속되지 않았다. 결함 수정이 아니라
+# **판정이 사실을 말하게 만드는 일**이다.
+#
+# **결측을 일부러 낸다.** 완벽한 시계열을 만들면 결측률이 늘 0% 이고, 그러면 이 지표가
+# 결측을 실제로 잡는지 알 수 없다(§10-16 되돌림 원칙 — 값이 안 움직이면 재고 있지 않은 것이다).
+# 20주기 중 **2주기를 빼서** 기대 결측률 10.0% 를 만들고, 실측이 그 값이 아니면 적는다.
+G10_CYCLES = 20
+G10_SKIP = (7, 13)              # 무작위 아님 — 재실행하면 같은 자리다
+G10_SIM_DECISION = "D-174"      # 시뮬레이터 선언 — 실물 장비가 아니다
+
+
+def simulate_for_g10() -> dict | None:
+    """런타임 표가 **0건일 때만** 시뮬레이터로 채운다. 실데이터가 있으면 손대지 않는다.
+
+    끝나고 **넣은 만큼만** 지운다 — `IF_PLC_SIGNALS`·`DAT_TIMESERIES`·`PRC_EQUIP_SIGNALS` 는
+    런타임 전용이라 0건이 정상이고(G-11), 남기면 다음 게이트가 오염된다.
+    """
+    import random
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    import plc_simulator as sim                              # 값 생성은 한 곳뿐이다
+
+    from kyungdong.app.settings import settings
+    from kyungdong.app.util import clock
+    from kyungdong.ingest import collector
+
+    tbls = ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS")
+    before = {t: int(conn.q1(f"select count(*) as n from {t}")["n"]) for t in tbls}
+    if any(before.values()):
+        return None                                          # 실데이터가 있다 — 그대로 잰다
+    try:
+        dev = sim.device_id()
+    except SystemExit as e:
+        say(f"  시뮬레이터를 못 돌렸다 — {e}")
+        return None
+
+    poll = settings().h("PLC_POLL_SEC").as_int() or 1
+    t0 = clock.anchor()
+    rng = random.Random(20260911)
+    made = 0
+    for i in range(G10_CYCLES):
+        samples = sim.cycle_samples(t0, i, poll, rng, False)
+        if i in G10_SKIP:                                    # **결측 주입** — 이 주기는 안 보낸다
+            continue
+        r = collector.ingest_batch(dev, sim.EQUIP_CODE, samples,
+                                   collect_path=collector.COLLECT_PATH_SIM)
+        made += r.stored
+    return {"before": before, "cycles": G10_CYCLES, "skipped": list(G10_SKIP),
+            "stored": made, "poll": poll, "tables": tbls,
+            "expected_rate": round(len(G10_SKIP) / G10_CYCLES * 100.0, 1)}
+
+
+def cleanup_g10(sim: dict) -> None:
+    """**넣은 것을 되돌린다.** 0건으로 돌아가지 않으면 그것이 결함이다."""
+    for t in sim["tables"]:
+        conn.x(f"delete from {t}")
+        n = int(conn.q1(f"select count(*) as n from {t}")["n"])
+        if n != sim["before"][t]:
+            say(f"  **정리 실패** {t} {n} 행 (검사 전 {sim['before'][t]}) — G-11 이 오염된다")
+
+
 def gate_10() -> None:
     say("── G-10 시계열 (Timestamp 정렬 · 결측/지연 기록) ────────────────")
     ts_n = int(conn.q1("select count(*) as n from DAT_TIMESERIES")["n"])
     sg_n = int(conn.q1("select count(*) as n from PRC_EQUIP_SIGNALS")["n"])
 
-    # 적재 순서(PK) 와 측정 시각의 정렬이 어긋난 건수 — 같은 태그·설비 안에서 본다
-    ts_bad = int(conn.q1(
-        "select count(*) as n from ("
-        " select MEASURE_DT, lag(MEASURE_DT) over (partition by TAG_NAME, EQUIP_CODE order by TS_ID) as prev"
-        " from DAT_TIMESERIES) x where prev is not null and MEASURE_DT < prev")["n"])
-    sg_bad = int(conn.q1(
-        "select count(*) as n from ("
-        " select COLLECT_DT, lag(COLLECT_DT) over (partition by EQUIP_CODE order by SIGNAL_ID) as prev"
-        " from PRC_EQUIP_SIGNALS) x where prev is not null and COLLECT_DT < prev")["n"])
+    ts_bad, sg_bad = order_violations()
     dup = int(conn.q1(
         "select count(*) as n from (select TAG_NAME, EQUIP_CODE, MEASURE_DT from DAT_TIMESERIES "
         "group by 1,2,3 having count(*) > 1) x")["n"])
@@ -727,16 +800,56 @@ def gate_10() -> None:
         "직전 사업(광성정밀)의 85%·PTP 1s 를 가져오지 않는다")
 
     if m["rate"] is None:
+        # **분모가 0 이면 그대로 끝내지 않는다** (D-182). `make db-reset` 직후 런타임 표는
+        # 늘 0이라 G-10 은 영원히 차단이었다 — 측정은 시뮬레이터로 이미 하고 있었는데
+        # 그 결과가 G-10 에 귀속되지 않았을 뿐이다. 여기서 직접 재고 되돌린다.
+        # 시뮬레이터를 못 돌리면 **그때만** 차단이다.
+        if gate_10_simulated():
+            say()
+            return
         verdict("G-10", BLOCKED,
                 f"규약 §2.1 분모 0 → 판정 불가(§5). DAT_TIMESERIES {ts_n} · PRC_EQUIP_SIGNALS {sg_n}"
                 " — `make db-reset` 직후 0건은 정상이다(수집은 시드가 아니다)."
-                " N건 경로는 tools/check_ingest.py 와 tests/test_qa2_ingest.py 가 시뮬레이터로 잰다")
+                " 시뮬레이터도 못 돌렸다 — 위 사유를 본다")
     else:
         verdict("G-10", PASS if ts_bad == 0 and sg_bad == 0 else FAIL,
                 f"§2.1 수집 결측률 {rate_text} (목표 없음 — D-09·규약 §0, 실측만 보고)"
                 f" · §2.3 정렬 위반 시계열 {ts_bad} · 설비신호 {sg_bad}"
                 f" · 상태미상 제외 {m['unknown_state']}틱")
     say()
+
+
+def gate_10_simulated() -> bool:
+    """G-10 **N건 경로** — 실데이터가 0건일 때 시뮬레이터로 채워 재고 되돌린다 (D-182).
+
+    **고지를 수치 앞에 둔다.** `gate.py` 가 판정 줄을 120자에서 자르므로, 뒤에 두면
+    `PASS · 결측률 10.0%` 만 남아 **실물 설비 실측처럼** 인용된다. G-14 에서 같은 이유로
+    고지를 앞에 뒀다(D-151).
+    """
+    sim = simulate_for_g10()
+    if sim is None:
+        return False                              # 실데이터가 있거나 시뮬레이터를 못 돌렸다
+    try:
+        say("── G-10 N건 경로 (시뮬레이터 — 실물 설비가 아니다) ──────────────")
+        say(f"  주기 {sim['cycles']} 중 **{len(sim['skipped'])}주기 결측 주입** "
+            f"{sim['skipped']} (무작위 아님 · 재실행하면 같은 자리)")
+        m = missing_rate()
+        ts_bad, sg_bad = order_violations()
+        rate = m["rate"]
+        say(f"  분모 {m['expected']} · 분자 {m['stored']} · 결측률 {rate}% "
+            f"(기대 {sim['expected_rate']}%)")
+        say(f"  정렬 위반 시계열 {ts_bad} · 설비신호 {sg_bad}")
+        # **맞추려고 고치지 않는다** — 어긋나면 그 차이가 실측이다(D-155 선례).
+        gap = "" if rate == sim["expected_rate"] else (
+            f" · ⚠ 주입 {sim['expected_rate']}% ↔ 실측 {rate}% 가 어긋난다 — 맞추지 않고 적는다")
+        ok = ts_bad == 0 and sg_bad == 0 and rate is not None
+        verdict("G-10", PASS if ok else FAIL,
+                f"시뮬레이터 기준 {G10_SIM_DECISION} — 실물 설비 실측이 아니다 · "
+                f"결측률 {rate}% (주입 {sim['expected_rate']}%) · "
+                f"정렬 위반 {ts_bad}/{sg_bad} · 목표치 없음(D-09){gap}")
+    finally:
+        cleanup_g10(sim)                          # **반드시 되돌린다** (G-11 런타임 0건)
+    return True
 
 
 # ══ G-11 조용한 빈칸 — **그리드 vs 건수 카드 vs 비율 카드** ════════════════

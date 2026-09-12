@@ -1,6 +1,6 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
-	plc-scan plc-poll plc-status plc-register plc-unregister \
+	plc-scan plc-poll plc-status plc-register plc-unregister check-decisions \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
 
@@ -33,6 +33,9 @@ run:
 
 simulate:                       ## 레이저커팅기 1대 → 수집 API (수집 지점 2개소뿐 — D-06)
 	uv run python tools/plc_simulator.py
+
+check-decisions:                ## 결정 대장 정합성 — 해소됐는데 안 닫힌 항목을 찍는다 (D-181)
+	uv run python tools/check_decisions.py
 
 plc-scan:                       ## ① PLC 스캔만 — work/plc_device.db 레지스터에 쌓는다 (D-174)
 	uv run python tools/plc_simulator.py --plc-reset --cycles $(or $(CYCLES),20) --scan-only
