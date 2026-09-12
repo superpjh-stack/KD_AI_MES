@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
-from kyungdong.app.util import http                      # noqa: E402
+from kyungdong.app.util import assumed, http             # noqa: E402
 from kyungdong.cad import dwgconv                        # noqa: E402
 from kyungdong.cad import inventory as inv               # noqa: E402
 from kyungdong.cad import pipeline, provider             # noqa: E402
@@ -199,3 +199,98 @@ def test_수집_로그가_단계별로_남는다():
     reasons = {r["exclude_reason"] for r in conn.q(
         "select distinct EXCLUDE_REASON from IF_CAD_IMPORT_LOGS where EXCLUDE_REASON is not null")}
     assert reasons <= {inv.EXCLUDE_ZERO, inv.EXCLUDE_DUP}
+
+
+# ══ HITL 승인이 확정을 만드는 경로 (G-14·G-19 의 3단계 전제) ═══════════════
+# `check_ingest ⑤` 는 "확정 객체 0건 + Feature N행 = 합성" 으로 판정한다. 그 규칙을 **우회하지
+# 않고** 규칙이 요구하는 경로 — 객체 → `review_object()` 승인 → 확정 → Feature — 가 실제로
+# 도는지 잰다. 넣은 행은 **전부 지운다**(런타임 전용 표 0건 · G-11 을 오염시키지 않는다).
+def test_HITL_승인이_확정을_만들고_그_확정으로만_Feature_가_생긴다():
+    row = conn.q1("select DRAWING_ID from EST_CAD_DRAWINGS order by DRAWING_ID limit 1")
+    if row is None:
+        pytest.skip("도면 0건 — `make cad-ingest` 먼저")   # noqa: PT018
+    did = int(row["drawing_id"])
+    admin = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'admin'")
+    feat0 = int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"])
+    obj = conn.q1(
+        "insert into EST_CAD_OBJECTS "
+        "(DRAWING_ID, DETECT_METHOD, OBJECT_TYPE, CONFIDENCE_SCORE, CONFIRM_YN, CREATED_DT) "
+        "values (%s, 'Parsing', '홀', 0.5, 'N', now()) returning OBJECT_ID", (did,))
+    oid = int(obj["object_id"])
+    try:
+        # ① 승인 전에는 확정이 아니다 → Feature 0건
+        assert pipeline.build_features(did)["created"] == 0
+        assert int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"]) == feat0
+        # ② 권한 없는 역할은 403 — 확정이 생기지 않는다
+        with pytest.raises(http.HTTPException):
+            pipeline.review_object(oid, reviewer_id=int(admin["user_id"]),
+                                   role_code="OPERATOR", result="승인")
+        assert conn.q1("select CONFIRM_YN from EST_CAD_OBJECTS where OBJECT_ID = %s",
+                       (oid,))["confirm_yn"] == "N"
+        # ③ 승인 권한이 있으면 확정이 생긴다 — **이 경로 하나뿐이다**
+        out = pipeline.review_object(oid, reviewer_id=int(admin["user_id"]),
+                                     role_code="SYSADMIN", result="승인")
+        assert out["confirm_yn"] == "Y"
+        assert conn.q1("select CONFIRM_YN from EST_CAD_OBJECTS where OBJECT_ID = %s",
+                       (oid,))["confirm_yn"] == "Y"
+        # ④ 확정이 있으면 Feature 가 생긴다 — 집계 가능한 것은 '홀 수량' 1종뿐(D-05)
+        built = pipeline.build_features(did)
+        assert built["confirmed_objects"] == 1
+        assert built["created"] == 1, built
+        made = conn.q("select FEATURE_TYPE, FEATURE_VALUE, SOURCE_DESC from EST_CAD_FEATURES "
+                      "where DRAWING_ID = %s", (did,))
+        assert [m["feature_type"] for m in made] == ["홀 수량"]
+        assert float(made[0]["feature_value"]) == 1.0
+        assert "CONFIRM_YN" in made[0]["source_desc"], made[0]["source_desc"]
+    finally:
+        conn.x("delete from EST_CAD_FEATURES where DRAWING_ID = %s", (did,))
+        conn.x("delete from EST_OBJECT_REVIEWS where OBJECT_ID = %s", (oid,))
+        conn.x("delete from EST_CAD_OBJECTS where OBJECT_ID = %s", (oid,))
+    assert int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"]) == feat0
+    assert int(conn.q1("select count(*) as n from EST_OBJECT_REVIEWS")["n"]) == 0
+    assert int(conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]) == 0
+
+
+# ══ 단위 가정 (D-150) — 표지 없이 단위만 바뀌면 거짓 실측이다 ══════════════
+def test_단위_가정은_표지를_달고_붙고_명시된_단위는_건드리지_않는다():
+    """`store_dxf_features` 는 기본으로 쓰지 않는다 — 쓰는 경로를 명시로 열고 되돌린다."""
+    rows = conn.q("select DRAWING_ID, FILE_TYPE, FILE_PATH from EST_CAD_DRAWINGS "
+                  "where upper(FILE_TYPE) in ('DXF','DWG') order by DRAWING_ID limit 40")
+    if not rows:
+        pytest.skip("DXF·DWG 도면 0건")
+    feat0 = int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"])
+    unknown = known = 0
+    touched: list[int] = []
+    try:
+        for r in rows:
+            got = pipeline.store_dxf_features(int(r["drawing_id"]), allow_unconfirmed=True)
+            if not got.get("written"):
+                continue
+            touched.append(int(r["drawing_id"]))
+            if got["unit_assumed"]:
+                unknown += 1
+            else:
+                known += 1
+            if unknown and known:
+                break
+        assert unknown, "단위 미상 도면이 하나도 없다 — 표본을 확인한다"
+        marked = conn.q("select UOM, SOURCE_DESC from EST_CAD_FEATURES "
+                        "where SOURCE_DESC like %s", ("%단위 가정 (%",))
+        assert marked, "단위 미상 도면인데 표지가 붙은 Feature 가 없다"
+        for m in marked:
+            assert "25.4" in m["source_desc"], f"배율 오차 경고가 없다: {m['source_desc']}"
+            assert assumed.declaration() in m["source_desc"]
+            assert m["uom"] != "도면단위", "표지는 붙었는데 단위가 안 바뀌었다"
+        # 표지 없는 행에 `도면단위` 가 남아 있어도 되지만, **mm 로 바뀐 채 표지가 없으면** 결함이다.
+        silent = conn.q("select DRAWING_ID, FEATURE_TYPE, UOM, SOURCE_DESC "
+                        "from EST_CAD_FEATURES where UOM like 'mm%%' "
+                        "and SOURCE_DESC not like %s and FEATURE_TYPE <> '두께'",
+                        ("%단위 가정 (%",))
+        for s in silent:
+            # 두께는 원래 mm 로 읽힌다(표제란 표기). 그 밖에 mm 인데 표지가 없으면
+            # `$INSUNITS` 가 실제로 mm 였던 도면이어야 한다.
+            assert "DXF 실측" in s["source_desc"], s
+    finally:
+        for did in touched:
+            conn.x("delete from EST_CAD_FEATURES where DRAWING_ID = %s", (did,))
+    assert int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"]) == feat0

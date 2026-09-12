@@ -40,6 +40,7 @@ F_THICK = "두께"
 F_MATERIAL = "재질"
 
 SOURCE_TAG = "DXF 실측"          # `EST_CAD_FEATURES.SOURCE_DESC` 접두 — 합성과 구분한다
+UNKNOWN_UOM = "도면단위"          # `$INSUNITS` 가 없을 때의 단위 이름. mm 라고 단정하지 않는다
 
 # 표제란 재질 표기. 실제 원본에서 관측된 것만 넣는다(STS304·STS316·SUS316·A240 …).
 # 새 표기를 만나면 여기 추가하고 **적중률을 다시 잰다** — 정규식을 넓혀 적중률을 만들지 않는다.
@@ -81,6 +82,9 @@ class DxfMeasure:
     block_entities: dict[str, int] = field(default_factory=dict)  # BLOCKS 섹션 (전개하지 않음)
     holes: int = 0                       # CIRCLE 전량 — 지름 필터 없음
     circle_diameters: list[float] = field(default_factory=list)
+    # CIRCLE 의 (중심x, 중심y, 반지름) — group code 10·20·40 을 **읽던 그대로** 담는다.
+    # 박스를 만들지 않는다: 박스가 필요한 쪽(G-14 라벨셋)이 [x-r, y-r, x+r, y+r] 로 만든다.
+    circles: list[tuple[float, float, float]] = field(default_factory=list)
     line_len: float = 0.0
     arc_len: float = 0.0
     poly_len: float = 0.0
@@ -103,7 +107,7 @@ class DxfMeasure:
     @property
     def uom(self) -> str:
         """길이 단위. `$INSUNITS` 가 없으면 '도면단위' 다 — mm 라고 단정하지 않는다."""
-        return self.insunits or "도면단위"
+        return self.insunits or UNKNOWN_UOM
 
     def features(self) -> list[dict[str, object]]:
         """`EST_CAD_FEATURES` 행 후보. **뽑지 못한 것은 넣지 않는다**(0 으로 채우지 않는다).
@@ -253,9 +257,12 @@ def parse(path: Path | str, *, encoding: str | None = None) -> DxfMeasure:
                 m.arc_len += abs(r) * math.radians(sweep)
         elif kind == "CIRCLE":
             r = (g.get(40) or [None])[0]
+            cx, cy = (g.get(10) or [None])[0], (g.get(20) or [None])[0]
             m.holes += 1
             if r is not None:
                 m.circle_diameters.append(abs(r) * 2.0)
+                if cx is not None and cy is not None:
+                    m.circles.append((cx, cy, abs(r)))
         elif kind in ("LWPOLYLINE", "POLYLINE"):
             flags = int((g.get(70) or [0.0])[0])
             closed = bool(flags & 1)

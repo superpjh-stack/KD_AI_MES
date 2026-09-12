@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                    # noqa: E402
 from kyungdong.app import design, kpi as kpimod, nav           # noqa: E402
-from kyungdong.app.util import clock, codes                    # noqa: E402
+from kyungdong.app.util import assumed, clock, codes            # noqa: E402
 
 PASS, FAIL, BLOCKED, UNDET = "PASS", "FAIL", "차단", "판정 불가"
 THRESHOLD = 85.0          # 사업계획서 2.7.4 · D-23 — 정확성·정합성·연계성·LOT 매핑 전부 85%
@@ -72,6 +72,56 @@ def synthetic_note() -> str:
     if not row or not row["config_value"]:
         return ""
     return f"합성 데이터 기준 {row['config_value']}"
+
+
+# ── 가정 답변 고지 (D-150) — **수치에 실제로 섞였을 때만 붙인다** ────────────
+# 선언(`SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')`)이 있어도 그 파생물이 판정에 들어오지
+# 않았으면 고지를 붙이지 않는다 — 안 쓰인 고지는 노이즈이고, 쓰인 곳에 없는 고지가 거짓 증거다.
+# 그래서 **쓰였는지를 실측한다**: 가정 표시가 붙은 코드를 참조하는 행 수 · 가정 표시가 붙은
+# Feature 가 정합성 사슬에 들어온 행 수. 문구는 선언에서 읽는다(여기 박지 않는다).
+ASSUMED_CODE_MARK = "가정 답변 기준 %"
+ASSUMED_FEATURE_MARK = "%단위 가정 (%"
+
+
+def assumed_used() -> tuple[int, list[str]]:
+    """(가정 파생값이 판정에 들어온 행 수, 어디에 들어왔는지). 0 이면 고지는 붙지 않는다."""
+    hits: list[str] = []
+    total = 0
+    for (tid, col), group in sorted(codes.code_columns().items()):   # 정본 함수 (§10-16)
+        if not group:
+            continue
+        n = int(conn.q1(
+            f"select count(*) as n from {tid} t join BAS_COMMON_CODES b "
+            f"on b.CODE_GROUP = %s and b.CODE_VALUE = t.{col} and b.USE_YN = 'Y' "
+            f"where b.ATTR1 like %s", (group, ASSUMED_CODE_MARK))["n"])
+        if n:
+            hits.append(f"{tid}.{col}({group}) {n}행")
+            total += n
+    for name, sql in (
+        ("정합성 CAD Feature 두께",
+         "select count(*) as n from EST_CAD_FEATURES f "
+         "join EST_BOM_HEADERS b on b.DRAWING_ID = f.DRAWING_ID "
+         "join SHP_LOT_TRACES t on t.BOM_ID = b.BOM_ID "
+         "join INV_MATERIAL_LOTS m on m.LOT_ID = t.MATERIAL_LOT_ID "
+         "where f.SOURCE_DESC like %s and m.THICKNESS_MM is not null"),
+        ("정합성 CAD Feature 총 절단장",
+         "select count(*) as n from EST_CAD_FEATURES f "
+         "join EST_BOM_HEADERS b on b.DRAWING_ID = f.DRAWING_ID "
+         "join SHP_LOT_TRACES t on t.BOM_ID = b.BOM_ID "
+         "join INV_MATERIAL_LOTS m on m.LOT_ID = t.MATERIAL_LOT_ID "
+         "where f.SOURCE_DESC like %s and m.LENGTH_MM is not null"),
+    ):
+        n = int(conn.q1(sql, (ASSUMED_FEATURE_MARK,))["n"])
+        if n:
+            hits.append(f"{name} {n}행")
+            total += n
+    return total, hits
+
+
+def assumed_note() -> str:
+    """가정 파생값이 판정에 섞였으면 선언에서 읽은 고지, 아니면 빈 문자열."""
+    total, _ = assumed_used()
+    return assumed.base_note() if total else ""
 
 
 # ── 공통 실측 ────────────────────────────────────────────────────────────
@@ -513,20 +563,35 @@ def gate_09() -> None:
     lnk = pct(ll, lt)
     say(f"  연계성  수주→도면→BOM→생산→검사→출하 전부 이어진 프로젝트 {ll} ÷ {lt} = {pct_text(lnk)}")
 
+    # ── 가정 답변(D-150) 이 이 수치에 섞였는가 — **실측**한다 ──────────────
+    a_total, a_hits = assumed_used()
+    a_decl = assumed.declaration()
+    say(f"  가정 선언 SYS_CONFIGS('{assumed.CONFIG_TYPE}','{assumed.CONFIG_KEY}') = "
+        f"{a_decl or '없음'}")
+    say(f"  가정 파생값이 G-09 수치에 들어온 행 {a_total} — {a_hits or '없음'}")
+    if a_decl and not a_total:
+        say("     선언은 있으나 **판정에 섞이지 않았다**: '재질' 코드 그룹이 서도 "
+            "`INV_MATERIAL_LOTS.MATERIAL`·`EST_BOM_ITEMS.MATERIAL` 과 "
+            "`THICKNESS_MM`·`LENGTH_MM` 이 전부 NULL 이라 정합성 분모가 열리지 않는다. "
+            "가정 답변 ② 가 적은 '정합성 분모가 열린다' 는 **실측과 다르다** — "
+            "코드 그룹은 값의 검증표일 뿐 값을 만들지 않는다")
+    a_note = assumed_note()
+
     parts = {"정확성": (acc, total), "정합성": (con, comp_total), "연계성": (lnk, lt)}
     undecidable = [k for k, (v, d) in parts.items() if v is None or d == 0]
     below = [f"{k} {v}%" for k, (v, d) in parts.items() if v is not None and d and v < THRESHOLD]
     struct = f"§4-② NOT NULL 위반 {nn} · §4-③ FK 고아 {orphan}/{nfk}제약 · §4-④ 판정 제외"
+    tail = f" · {a_note} ({a_total}행)" if a_note else ""
     if undecidable:
         verdict("G-09", BLOCKED,
                 f"분모 0 → 판정 불가(규약 §5): {' · '.join(undecidable)}"
                 f" (측정된 것: " + " · ".join(
-                    f"{k} {pct_text(v)}" for k, (v, d) in parts.items()) + f") · {struct}")
+                    f"{k} {pct_text(v)}" for k, (v, d) in parts.items()) + f") · {struct}{tail}")
     else:
         verdict("G-09", FAIL if (below or nn or orphan) else PASS,
                 " · ".join(f"{k} {pct_text(v)}" for k, (v, _d) in parts.items())
                 + f" (기준 {THRESHOLD}%)" + (f" · 미달 {', '.join(below)}" if below else "")
-                + f" · {struct}")
+                + f" · {struct}{tail}")
     say()
 
 

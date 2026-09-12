@@ -50,14 +50,57 @@ def n1(sql: str, params=None) -> int:
 
 
 # ── G-14 CAD 객체 인식 ───────────────────────────────────────────────────
-def test_g14_labelset_is_empty_and_says_why():
-    """정답 박스가 0건이라 G-14 는 `차단`이다. **합성 박스를 넣으면 이 테스트가 실패한다.**"""
-    assert LABELSET["labels"] == [], (
-        "정답 박스가 생겼다 — G-14 를 실제로 잴 수 있다. "
-        "outputs/qa3-AI비기능보안.md 의 `차단` 을 실측으로 바꿔라")
-    assert LABELSET["predictions"] == []
-    assert LABELSET["_meta"]["판정"] == "차단"
+def test_g14_labelset_is_assumed_and_says_so():
+    """**0건 단언을 지우지 않고 방향을 뒤집었다** (선례: CSRF 표지 3건 · G-08 시드 표지 · 품목 코드).
+
+    라벨이 0건이던 동안은 "비었는지" 를 단언했다. 사용자 지시(D-150)로 가정 답변에서 라벨을
+    만든 뒤에는 **"표지가 붙었는지"** 를 단언한다 — 표지 없이 라벨만 있으면 그 수치가
+    도입기업 정답 대비 정확도처럼 인용된다. 그게 이 테스트가 막는 것이다.
+    """
+    meta = LABELSET["_meta"]
+    assert LABELSET["labels"], "라벨이 비었다 — `uv run python tools/gen_cad_labelset.py`"
+    assert LABELSET["predictions"]
+    assert meta["결정번호"] == "D-150", meta.get("결정번호")
+    assert "순환" in meta["판정"] and "정확도 증거 아님" in meta["판정"], meta["판정"]
+    assert "정확도" in meta["⚠_정확도_증거_아님"] and "아니다" in meta["⚠_정확도_증거_아님"]
+    assert "501" in meta["예측의_정체"], "예측이 실제 탐지기 출력이 아니라는 사실이 없다"
     assert LABELSET["evaluator_selftest"]["gate_input"] is False
+
+
+def test_g14_라벨_어휘는_TD5_5종_안에만_있다():
+    """`docs/cad/라벨링 가이드.docx` 의 3종(title_block·bom_table·rev_table)은 TD5 와 다르다(D-98).
+
+    **목록 밖 이름이 하나라도 있으면 FAIL** 이다 — 어휘를 지어내면 TD5 에 담을 자리가 없다.
+    """
+    td5 = {"홀", "슬롯", "노즐", "플랜지", "치수문자"}
+    used = {b["cls"] for b in LABELSET["labels"]} | {b["cls"] for b in LABELSET["predictions"]}
+    assert used <= td5, f"TD5 OBJECT_TYPE 5종 밖의 라벨 어휘가 있다: {sorted(used - td5)}"
+    assert used, "어휘가 비었다"
+    # 빈 4종을 박스로 채우지 않았다는 사실도 단언한다 — 채우면 그게 합성이다.
+    assert meta_vocab_empty(), "라벨이 생기지 않은 어휘와 그 이유가 적혀 있지 않다"
+
+
+def meta_vocab_empty() -> bool:
+    v = LABELSET["_meta"]["어휘"]
+    return bool(v["0건인 것"]) and "D-05" in v["0건인 이유"]
+
+
+def test_g14_주입은_고정비율이고_자리가_적혀_있다():
+    """무작위 주입은 금지다 — 재실행하면 같은 자리여야 하고, 자리가 파일에 남아야 한다."""
+    inj = LABELSET["_meta"]["주입"]
+    assert "무작위 없음" in inj["방식"], inj["방식"]
+    assert inj["FP 자리"] and inj["FN 자리"], "주입 자리가 적혀 있지 않다"
+    # 비율이 실제로 그 비율인가 — 통번호 modulo 로만 정했으므로 정확히 재현된다.
+    assert all(x["n"] % 10 == 3 for x in inj["FP 자리"]), "FP 자리가 고정 규칙을 벗어났다"
+    assert all(x["n"] % 10 == 7 for x in inj["FN 자리"]), "FN 자리가 고정 규칙을 벗어났다"
+
+
+def test_g14_라벨_좌표는_도면별로_갈라져_있다():
+    """다른 도면의 박스가 우연히 매칭되면 TP 가 부풀려진다 — `image` 로 갈라야 한다."""
+    assert all("image" in b for b in LABELSET["labels"])
+    assert all("image" in b for b in LABELSET["predictions"])
+    imgs = {b["image"] for b in LABELSET["labels"]}
+    assert len(imgs) == LABELSET["_meta"]["표본"]["도면"] == 30, (len(imgs), )
 
 
 def test_g14_evaluator_moves_with_threshold():

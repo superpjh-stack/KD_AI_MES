@@ -35,7 +35,7 @@ from kyungdong.agent import citations, llm, retrieval, service   # noqa: E402
 from kyungdong.app import rbac                                   # noqa: E402
 from kyungdong.app.main import app                               # noqa: E402
 from kyungdong.app.settings import settings                      # noqa: E402
-from kyungdong.app.util import csrf                              # noqa: E402
+from kyungdong.app.util import assumed, csrf                     # noqa: E402
 from kyungdong.cad import pipeline as cadpipe                    # noqa: E402
 from kyungdong.cad import provider as cadprov                    # noqa: E402
 from kyungdong.ml import datasets as mldata                      # noqa: E402
@@ -210,7 +210,71 @@ def gate_14() -> None:
            "라벨링 가이드는 'MVP 100장 → 권장 300장' 계획 단계) · 예측 0건 "
            "(Autodesk API·YOLOv8 가중치 미확보 D-05) · EST_CAD_OBJECTS 0건 · "
            "라벨 클래스(title_block·bom_table·rev_table) ≠ TD5 OBJECT_TYPE 5종")
-    verdict("G-14", BLOCKED, f"{TARGETS['G-14']} / 분모 0 — {why}")
+
+    # ── 가정 답변 선언 (D-150) ─────────────────────────────────────────
+    # **고지 문구를 여기 박지 않는다.** `SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')` 선언과
+    # 그 출처 파일에서 읽는다. 선언이 없으면 문구가 빈 문자열이고, 그러면 **수치를 내지 않는다** —
+    # 선언을 지웠는데 수치가 남으면 그 수치가 실측처럼 인용된다.
+    note = assumed.circular_note()
+    decl = assumed.declaration()
+    say(f"  가정 선언 SYS_CONFIGS('{assumed.CONFIG_TYPE}','{assumed.CONFIG_KEY}') = "
+        f"{decl or '없음 — ' + (assumed.mismatch() or '')}")
+    if not labels or not note:
+        if labels and not note:
+            say(f"  **라벨이 {len(labels)}건 있는데 가정 선언이 없다** — 출처를 확인할 수 없는 "
+                "라벨로 수치를 내지 않는다. 선언을 되살리거나 라벨을 회수해야 한다")
+            why = (f"{why} · work/cad_labelset.json 에 라벨 {len(labels)}건이 있으나 "
+                   f"가정 선언이 없다 ({assumed.mismatch()})")
+        verdict("G-14", BLOCKED, f"{TARGETS['G-14']} / 분모 0 — {why}")
+        say()
+        return
+
+    # ── N건 경로 (§10-4) — **순환 라벨이다. 정확도 증거가 아니다.** ──────
+    # 라벨과 예측을 같은 DXF 기하 파싱에서 뽑았으므로 우리 탐지를 우리가 만든 정답과 비교한다.
+    # 그래서 80% 를 넘든 못 넘든 **PASS 도 FAIL 도 아니다** — 판정 불가다. 게이트를 낮추는 것이
+    # 아니라, 이 수치로는 게이트를 판정할 수 없다는 사실을 적는 것이다.
+    meta = ls.get("_meta", {})
+    imgs = sorted({str(b.get("image")) for b in labels + preds})
+    say(f"  라벨 도면 {len(imgs)} 건 · 라벨 어휘 {sorted({b['cls'] for b in labels})} "
+        f"(TD5 5종 중 나머지는 0건 — 우리 파서가 가릴 기준이 없다)")
+    say(f"  주입 {meta.get('주입', {}).get('FP(오검출) 비율')} · "
+        f"{meta.get('주입', {}).get('FN(누락) 비율')}")
+    # 도면별로 재고 합산한다 — 다른 도면의 박스가 우연히 매칭되지 않게. 산식은 `match()` 한 벌이다.
+    tp = fp = fn = 0
+    for im in imgs:
+        r = match([b for b in labels if str(b.get("image")) == im],
+                  [b for b in preds if str(b.get("image")) == im], thr)
+        tp, fp, fn = tp + r["tp"], fp + r["fp"], fn + r["fn"]
+    prec = tp / (tp + fp) if (tp + fp) else None
+    rec = tp / (tp + fn) if (tp + fn) else None
+    f1 = (2 * prec * rec / (prec + rec)) if (prec and rec) else None
+    say(f"  IoU {thr} 기준 TP {tp} FP {fp} FN {fn} — "
+        f"Precision {prec:.4f} · Recall {rec:.4f} · F1 {f1:.4f}"
+        if f1 is not None else f"  IoU {thr} 기준 TP {tp} FP {fp} FN {fn} — P/R/F1 계산 불가")
+    # 주입한 만큼 세어졌는가 — **여기서 차이가 나면 그것이 실측이다.** 맞추려고 고치지 않는다.
+    exp = (meta.get("주입") or {}).get(
+        "기대 혼동행렬(IoU 무관 · 박스가 동일좌표라 IoU=1.0)") or {}
+    seen: dict[tuple, int] = {}
+    for b in labels:
+        k = (str(b.get("image")), b["cls"], tuple(b["box"]))
+        seen[k] = seen.get(k, 0) + 1
+    coincident = sum(c - 1 for c in seen.values() if c > 1)
+    say(f"  주입 기대 TP/FP/FN {exp.get('TP')}/{exp.get('FP')}/{exp.get('FN')} ↔ "
+        f"실측 {tp}/{fp}/{fn} — 차이 {abs(int(exp.get('FP', 0)) - fp)}건")
+    say(f"     차이의 정체: 같은 도면 안에 **좌표가 겹치는 CIRCLE** 이 있어(라벨 중 중복 좌표 "
+        f"{coincident}개) 뺀 자리를 다른 박스가 대신 매칭한다. 탐욕 매칭(정답 1개 ↔ 예측 1개)의 "
+        "성질이고 숨기지 않는다 — 주입 자리는 `_meta.주입` 에 전부 적혀 있다")
+    say(f"  **{note}** — 라벨과 예측이 같은 DXF 파싱에서 나왔다. 이 수치는 채점 파이프라인이 "
+        "돈다는 증거일 뿐이고 AI 정확도의 증거가 **아니다**")
+    say(f"  참고: 목표 80% 대비 F1 {'≥' if (f1 or 0) >= 0.8 else '<'} 0.80 — "
+        "**순환 라벨이라 이 비교로는 게이트를 판정하지 않는다**")
+    verdict("G-14", UNDET,
+            f"{TARGETS['G-14']} / {note} · IoU {thr} TP {tp} FP {fp} FN {fn} "
+            f"P {prec:.4f} R {rec:.4f} F1 {f1:.4f} · 도면 {len(imgs)}건 · "
+            f"라벨·예측을 같은 DXF 파싱에서 파생(순환) — 정확도 증거 아님. "
+            f"실제 탐지기는 여전히 501 미구성(D-05)이고 EST_CAD_OBJECTS {objs}행이다"
+            if f1 is not None else
+            f"{TARGETS['G-14']} / {note} · TP {tp} FP {fp} FN {fn} — P/R/F1 계산 불가")
     say()
 
 
@@ -356,9 +420,21 @@ def gate_19(client: TestClient) -> None:
         found[path] = has_conf and has_why
         say(f"     {path} {r.status_code} — Confidence {has_conf} · 근거 {has_why}")
 
+    # ── 가정 답변 고지 (D-150) — **선언에서 읽는다.** 문구를 여기 박지 않는다 ────
+    # 3단계(Feature)에 가정 답변 ③ 에서 파생한 행이 섞여 있으면 판정 줄이 그 사실을 나른다.
+    note = assumed.circular_note()
+    n_feat = count("EST_CAD_FEATURES")
+    n_assumed = n1("select count(*) as n from EST_CAD_FEATURES "
+                   "where SOURCE_DESC like %s", ("%단위 가정 (%",))
+    say(f"  가정 선언 {assumed.declaration() or '없음 — ' + (assumed.mismatch() or '')}")
+    say(f"  3단계 Feature {n_feat} 행 중 **단위 가정 (D-150) 표지가 붙은 것 {n_assumed} 행** "
+        "— 표지 없이 단위만 바뀐 행이 있으면 그것이 거짓 실측이다")
+    head = f"{note} · 3단계 Feature {n_feat}행(단위 가정 표지 {n_assumed}행) · " if note else ""
     verdict("G-19", BLOCKED,
+            head +
             "5단계 종단 통과 0건 — 1단계(인식)가 501 CAD Parsing 미구성(D-05)에서 멈춘다. "
-            f"확정객체 0 → Feature 0 → 견적 0 → SHAP 0. 화면 Confidence·근거 표기 "
+            f"확정객체 0 → 견적 0 → SHAP 0. 가정 답변은 Autodesk API·YOLOv8 가중치를 주지 "
+            f"않으므로 1단계는 **가정으로 열리지 않는다**. 화면 Confidence·근거 표기 "
             f"{sum(found.values())}/{len(found)} 화면")
     say()
 

@@ -81,11 +81,17 @@ def rollback_after():
     for table, pk in TRACKED:
         conn.x(f"delete from {table} where {pk} > %s", (marks[table],))
     # 되돌림 확인 — **테스트가 만든 코드만** 지워졌는지.
-    #   · '재질' 은 여전히 0건이 정답이다 (D-47)
+    #   · '재질' 도 '품목' 과 같아졌다 — 개발3 시드가 가정 답변 ②(D-150)에서 채운다. 그래서
+    #     0건 단언을 **방향을 뒤집어** 유지한다: 테스트가 만든 값은 사라졌는지 + 시드가 넣은
+    #     가정(D-150) 행은 남았는지. 시드 행을 지우면 그게 결함이다.
     #   · '품목' 은 사용자 지시로 개발1 시드가 채운다(가설 D-131) → 0건이 아니라
     #     **테스트가 만든 값이 사라졌는지**를 본다. 시드 행을 지우면 그게 결함이다.
-    n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = '재질'")["n"])
-    assert n == 0, "테스트가 그룹 '재질' 을 남겼다 — D-47 단언이 깨진다"
+    assert conn.q1("select 1 as x from BAS_COMMON_CODES where CODE_GROUP = '재질' "
+                   "and CODE_VALUE = %s", (MATERIAL,)) is None, \
+        f"테스트가 만든 재질 코드 {MATERIAL} 가 남았다"
+    assert int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = '재질' "
+                       "and ATTR1 like '가정 답변 기준 %'")["n"]) > 0, \
+        "시드가 넣은 가정(D-150) 재질 코드까지 지웠다"
     assert conn.q1("select 1 as x from BAS_COMMON_CODES where CODE_GROUP = '품목' "
                    "and CODE_VALUE = %s", (ITEM,)) is None, \
         f"테스트가 만든 품목 코드 {ITEM} 가 남았다"

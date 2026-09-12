@@ -121,9 +121,11 @@ JOB_TARGET: dict[str, str] = {
 # 4. 시드하지 않는 표 — 근거를 함께 남긴다. 화면은 `미수집`/`미확정` 을 렌더해야 한다.
 # ─────────────────────────────────────────────────────────────────────────
 NOT_SEEDED: list[tuple[str, str]] = [
-    ("BAS_COMMON_CODES 그룹 '재질'",
-     "재질 코드 목록이 정본에 없다(D-47). 사용자가 확정한 것은 고객사(D-139)·품목(D-131) 둘뿐이라 "
-     "재질은 그대로 비운다 → INV_MATERIAL_LOTS.MATERIAL·EST_BOM_ITEMS.MATERIAL 을 NULL 로 둔다"),
+    ("INV_MATERIAL_LOTS.MATERIAL · EST_BOM_ITEMS.MATERIAL (값)",
+     "재질 **코드 그룹**은 개발3 이 가정 답변 ②(D-150)에서 채웠다 — 도면 표제란 실측 14종을 "
+     "8종으로 통합한 것이고 `ATTR1` 에 가정 표시가 붙어 있다. 그러나 그것은 **값의 검증표**이고 "
+     "합성 사슬의 자재LOT·BOM 항목에 어느 재질이 들어갔는지는 정본에도 가정 답변에도 없다 → "
+     "MATERIAL 은 NULL 로 둔다. 그래서 G-09 정합성 'BOM 자재 ↔ 자재LOT 재질' 분모는 여전히 0 이다"),
     ("BAS_COMMON_CODES 그룹 '보관위치'·'불량유형'·'클레임유형'·'원가대상'",
      "창고 레이아웃·불량 분류·클레임 분류·원가대상이 정본에 없다(D-47). 합성 사슬에도 필요하지 않아 "
      "비운 채로 둔다 → INV_STOCKS.LOCATION_CODE·PRC_PERFORMANCES.DEFECT_TYPE 은 NULL 이다"),

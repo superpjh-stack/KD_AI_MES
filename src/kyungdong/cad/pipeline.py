@@ -16,7 +16,7 @@ import conn
 
 from ..app import rbac
 from ..app.settings import settings
-from ..app.util import clock, http
+from ..app.util import assumed, clock, http
 from ..ingest import preprocess
 from . import archive
 from . import dwgconv
@@ -377,6 +377,10 @@ def store_dxf_features(drawing_id: int, *, allow_unconfirmed: bool = False) -> d
 
     `SOURCE_DESC` 접두는 **합성과 구분하려고** 형식별로 다르다 —
     `DXF 실측(dwg2dxf 변환) — <원본파일명>` / `DXF 실측 — <원본파일명>`.
+
+    `$INSUNITS` 가 없는 도면은 **단위 가정 (D-150)** 표지가 접두에 하나 더 붙고 `UOM` 이
+    `도면단위` → `mm` 로 바뀐다. 가정 선언(`SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')`)이
+    없으면 표지도 단위 변환도 **일어나지 않는다** — 표지 없이 단위만 바뀌면 그게 거짓 실측이다.
     """
     got = dxf_measure(drawing_id)
     if not got.get("measured"):
@@ -390,28 +394,45 @@ def store_dxf_features(drawing_id: int, *, allow_unconfirmed: bool = False) -> d
     name = Path(conn.q1("select FILE_PATH from EST_CAD_DRAWINGS where DRAWING_ID = %s",
                         (drawing_id,))["file_path"]).name
     tag = f"{dxf.SOURCE_TAG}(dwg2dxf 변환)" if got.get("converted") else dxf.SOURCE_TAG
+    # ── 단위 가정 (D-150) ─────────────────────────────────────────────
+    # `$INSUNITS` 가 없는 도면은 길이가 **도면 단위**다. 가정 답변 ③ 은 그것을 mm 로 보라고
+    # 했다 — 그러면 **그 도면의 Feature 전부**에 표지를 남긴다. 표지 없이 단위만 바꾸면
+    # 도면단위가 실측 mm 로 조용히 승격된다. `mm`·`inch` 가 이미 명시된 도면은 **건드리지 않는다**.
+    unit_assumed = str(got.get("uom") or "") == dxf.UNKNOWN_UOM
+    tgt = assumed.unit_target()
+    utag = assumed.unit_tag() if unit_assumed else ""
+    head = " · ".join([tag] + ([utag] if utag else []))
+    unit_marked = 0
     created = updated = text_rows = 0
     for f in got["features"]:
-        desc = f"{tag} — {name}"
+        uom = (f["uom"] or "")
+        if utag and tgt and uom.startswith(dxf.UNKNOWN_UOM):
+            uom = tgt + uom[len(dxf.UNKNOWN_UOM):]     # 도면단위² → mm²
+        body = name
         if f["value"] is None:                  # `재질` — 숫자 칸이 없다(D-122)
-            desc = (f"{desc} · 관측 재질={f['text']} · FEATURE_VALUE 는 NUMERIC(16,4) 이라 "
+            body = (f"{body} · 관측 재질={f['text']} · FEATURE_VALUE 는 NUMERIC(16,4) 이라 "
                     "NULL 로 둔다 (D-122 · 컬럼 추가 안 함 G-02)")
             text_rows += 1
+        # 표지(`head`)는 절대 자르지 않는다 — 자르면 고지가 사라진다. 본문만 자른다.
+        room = 300 - len(head) - 3
+        desc = f"{head} — {body if len(body) <= room else body[:max(room, 0)]}"
+        if utag:
+            unit_marked += 1
         hit = conn.q1("select FEATURE_ID from EST_CAD_FEATURES "
                       "where DRAWING_ID = %s and FEATURE_TYPE = %s", (drawing_id, f["type"]))
         if hit:
             conn.x("update EST_CAD_FEATURES set FEATURE_VALUE = %s, UOM = %s, "
                    "SOURCE_DESC = %s, UPDATED_DT = now() where FEATURE_ID = %s",
-                   (f["value"], (f["uom"] or "")[:20] or None, desc[:300], hit["feature_id"]))
+                   (f["value"], uom[:20] or None, desc[:300], hit["feature_id"]))
             updated += 1
             continue
         conn.x("insert into EST_CAD_FEATURES "
                "(DRAWING_ID, FEATURE_TYPE, FEATURE_VALUE, UOM, SOURCE_DESC, "
                " USED_IN_QUOTE_YN, TRAIN_USE_YN, CREATED_DT) values (%s,%s,%s,%s,%s,'N','N', now())",
-               (drawing_id, f["type"], f["value"], (f["uom"] or "")[:20] or None, desc[:300]))
+               (drawing_id, f["type"], f["value"], uom[:20] or None, desc[:300]))
         created += 1
     return {**got, "created": created, "updated": updated, "text_rows": text_rows,
-            "written": True}
+            "unit_assumed": unit_assumed, "unit_marked": unit_marked, "written": True}
 
 
 def stage_status() -> list[dict[str, Any]]:

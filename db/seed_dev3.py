@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-"""개발3 시드 — 수집 장비 2개소 · 전처리 규칙 · 학습 데이터셋 헤더 · 지식문서.
+"""개발3 시드 — 수집 장비 2개소 · 전처리 규칙 · 학습 데이터셋 헤더 · 지식문서
+· **가정 답변 선언(D-150)과 그 파생물**.
 
 **규칙**
   · 멱등이다(G-07). 두 번 돌려도 행 수 diff 0.
   · **지어내지 않는다.** 값은 사업계획서 2.7.1 · TD5 비고 · `docs/cad/` 실측에서만 온다.
+  · **가정 답변에서 파생한 것은 `docs/assumed/customer_answers.json` (D-150) 안의 값만이다.**
+    그 파일이 없으면 선언을 지우고 파생물도 **되돌린다** — 선언 없이 남은 파생물은 조작이다.
   · **런타임 전용 표는 비워 둔다**(G-11) —
     `AGT_QUERY_LOGS` `AGT_RECOMMENDATIONS` `EST_ML_*` `EST_SHAP_FACTORS` `EST_OBJECT_REVIEWS`
     `IF_CAD_IMPORT_LOGS` `IF_DOC_EMBED_LOGS` `IF_GATEWAY_BUFFER` 는 시드하지 않는다.
@@ -24,14 +27,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
+import json                                                   # noqa: E402
+
 import conn                                                   # noqa: E402
 from kyungdong.agent import docs as agent_docs                # noqa: E402
 from kyungdong.agent import retrieval                         # noqa: E402
 from kyungdong.app.settings import settings                   # noqa: E402
+from kyungdong.app.util import assumed                        # noqa: E402
 from kyungdong.cad import inventory as cad_inventory          # noqa: E402
 from kyungdong.ingest import preprocess, tags                 # noqa: E402
 
 SAMPLE_DIR = ROOT / "src" / "kyungdong" / "agent" / "sample_docs"
+
+# `tools/dwg_convert.py` 가 남긴 **실측** — 재질·두께·단위 분포의 유일한 출처다 (D-123).
+DWG_FEATURES = ROOT / "docs" / "cad" / "dwg_features.json"
 
 # ── 수집 장비 — 사업계획서 2.7.1 데이터 집계 포인트 **2개소뿐** (D-06) ─────
 # 모델명은 TD5 `IF_DEVICE_REGISTRY.MODEL_NAME` 비고가 적은 값이다. IP·설치 위치는 **미확인**이라 비운다.
@@ -80,6 +89,124 @@ KNOWLEDGE = [
     ("fat_safety_claim_manual.md", "매뉴얼", "클레임 매뉴얼"),
     ("quote_and_procurement_guide.md", "기준서", None),
 ]
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 가정 답변 선언 (D-150) — `SYNTHETIC_THREAD`(D-131) 와 같은 방식
+# ═════════════════════════════════════════════════════════════════════════
+def seed_assumed_flag() -> str | None:
+    """가정 선언 1행. **파일이 없으면 선언을 지운다** — 선언은 파일의 그림자다.
+
+    화면 배지·게이트 판정 줄·`SOURCE_DESC` 고지가 **이 한 곳**을 읽는다. 선언을 지우면
+    파생물의 고지가 함께 사라지므로, 파생물 자체도 같은 실행에서 되돌려야 한다
+    (`seed_material_codes`·`unmark_assumed_features`).
+    """
+    decl = assumed.file_decision()
+    if decl is None:
+        conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = %s and CONFIG_KEY = %s",
+               (assumed.CONFIG_TYPE, assumed.CONFIG_KEY))
+        return None
+    a = assumed.answers() or {}
+    meta = a.get("_meta") or {}
+    desc = (f"{meta.get('성격', '')} {meta.get('목적', '')} "
+            f"출처 {assumed.path_text()} · 갈아끼우는 법: {meta.get('갈아끼우는 법', '')}")
+    conn.x(
+        "insert into SYS_CONFIGS "
+        "(CONFIG_TYPE, CONFIG_KEY, CONFIG_VALUE, USE_YN, DESCRIPTION, CREATED_DT) "
+        "values (%s, %s, %s, 'Y', %s, now()) "
+        "on conflict (CONFIG_TYPE, CONFIG_KEY) do update set "
+        "CONFIG_VALUE = excluded.CONFIG_VALUE, DESCRIPTION = excluded.DESCRIPTION, "
+        "UPDATED_DT = now()",
+        (assumed.CONFIG_TYPE, assumed.CONFIG_KEY, decl, desc[:500]),
+    )
+    return decl
+
+
+def measured_materials() -> list[tuple[str, int]]:
+    """`docs/cad/dwg_features.json` 의 **재질 분포 실측**. 없으면 빈 목록이다."""
+    if not DWG_FEATURES.is_file():
+        return []
+    try:
+        d = json.loads(DWG_FEATURES.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    dist = ((d.get("요약") or {}).get("실측 합계") or {}).get("재질 분포") or []
+    return [(str(k), int(v)) for k, v in dist]
+
+
+def merged_materials() -> tuple[dict[str, dict], list[str]]:
+    """실측 표기를 ② `통합_제안` 으로 묶는다. **목록 밖의 재질은 만들지 않는다.**
+
+    돌려주는 것: `{정규표기: {"count": 실측건수, "from": [원표기 …]}}` 와
+    **통합 제안에 적혔지만 실측에 없는 표기** 목록(지어낸 것이 아니라 제안이 남는 것이다).
+    """
+    measured = dict(measured_materials())
+    merge = assumed.material_merge()
+    alias: dict[str, str] = {}
+    for canon, olds in merge.items():
+        for o in olds:
+            alias[o] = canon
+    out: dict[str, dict] = {}
+    for name, n in measured.items():
+        canon = alias.get(name, name)
+        slot = out.setdefault(canon, {"count": 0, "from": []})
+        slot["count"] += n
+        slot["from"].append(name)
+    unseen = sorted({c for c in merge} - set(measured)
+                    | {o for olds in merge.values() for o in olds} - set(measured))
+    return out, unseen
+
+
+def seed_material_codes(admin_id: int | None) -> dict[str, object]:
+    """`BAS_COMMON_CODES` 그룹 '재질' — **가정 답변 ②(D-150) 에서만** 파생한다.
+
+    · 값은 `docs/cad/dwg_features.json` 실측 표기뿐이다. **목록 밖의 이름을 만들지 않는다.**
+    · `ATTR1` 에 `가정 답변 기준 (D-150) — 도입기업 미확인`, `ATTR2` 에 실측 도면 건수.
+    · **두께는 코드가 아니다** — 수치이고 `EST_CAD_FEATURES` 에 있다. 코드 그룹을 만들지 않는다.
+    · 선언이 없으면 **표시가 붙은 행을 지운다** → 그룹이 다시 0건이 되고 D-47 차단으로 돌아간다.
+      화면(032 코드관리)이 손으로 넣은 행은 표시가 없으므로 건드리지 않는다.
+    """
+    mark = assumed.material_attr1()
+    if not mark:                                   # 선언 없음 → 파생물 회수
+        removed = conn.x("delete from BAS_COMMON_CODES where CODE_GROUP = '재질' "
+                         "and ATTR1 like '가정 답변 기준 %%'")
+        return {"declared": None, "before": len(measured_materials()), "after": 0,
+                "removed": removed, "codes": {}, "unseen": []}
+    measured = dict(measured_materials())
+    codes, unseen = merged_materials()
+    order = sorted(codes.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
+    for i, (canon, info) in enumerate(order, start=1):
+        froms = sorted(info["from"], key=lambda s: (-measured[s], s))
+        name = canon if froms == [canon] else f"{canon} (통합: {' · '.join(froms)})"
+        attr2 = (f"실측 도면 {info['count']}건 — "
+                 + " · ".join(f"{s} {measured[s]}" for s in froms))
+        conn.x(
+            "insert into BAS_COMMON_CODES "
+            "(CODE_GROUP, CODE_VALUE, CODE_NAME, SORT_ORDER, ATTR1, ATTR2, USE_YN, "
+            " CREATED_BY, CREATED_DT) values ('재질', %s, %s, %s, %s, %s, 'Y', %s, now()) "
+            "on conflict (CODE_GROUP, CODE_VALUE) do update set "
+            "CODE_NAME = excluded.CODE_NAME, SORT_ORDER = excluded.SORT_ORDER, "
+            "ATTR1 = excluded.ATTR1, ATTR2 = excluded.ATTR2, UPDATED_DT = now()",
+            (canon[:50], name[:200], i * 10, mark[:200], attr2[:200], admin_id),
+        )
+    keep = [c for c, _ in order]
+    removed = conn.x(
+        "delete from BAS_COMMON_CODES where CODE_GROUP = '재질' "
+        "and ATTR1 like '가정 답변 기준 %%' and not (CODE_VALUE = any(%s))", (keep,))
+    return {"declared": assumed.declaration(), "before": len(measured_materials()),
+            "after": len(order), "removed": removed, "codes": dict(order), "unseen": unseen}
+
+
+def unmark_assumed_features() -> int:
+    """선언이 없으면 `EST_CAD_FEATURES` 의 단위 가정 행도 되돌린다.
+
+    가정 표시를 달고 적재된 Feature 는 **가정이 선언된 동안만** 존재해야 한다. 선언을 지우면
+    표시만 사라져 값이 실측처럼 남는 일이 없도록 **행을 지운다**(적재는 옵션이었다 —
+    `tools/cad_ingest.py --dxf-features`).
+    """
+    if assumed.declaration() is not None:
+        return 0
+    return conn.x("delete from EST_CAD_FEATURES where SOURCE_DESC like '%%단위 가정 (%%'")
 
 
 def seed_devices() -> int:
@@ -188,11 +315,32 @@ def main() -> int:
         return 1
     admin_id = int(admin["user_id"])
 
+    decl = seed_assumed_flag()
+    mats = seed_material_codes(admin_id)
+    unmarked = unmark_assumed_features()
     devices = seed_devices()
     rules = seed_preprocess(admin_id)
     dataset_id, st = seed_dataset(admin_id)
     embedded, chunks, skipped = seed_knowledge()
 
+    print(f"가정 선언        SYS_CONFIGS('{assumed.CONFIG_TYPE}','{assumed.CONFIG_KEY}') = "
+          f"{decl or '없음 — ' + (assumed.mismatch() or '')}")
+    if decl:
+        print(f"  · 출처         {assumed.path_text()} — **도입기업 답변이 아니다.** "
+              "이 파일을 지우고 시드를 다시 돌리면 파생물이 회수되고 게이트는 차단으로 돌아간다")
+        print(f"  · 고지 문구     {assumed.base_note()} / {assumed.circular_note()}")
+        print(f"  · 채우지 않은 것 {len(assumed.not_given())} 건 (G-15·G-17·G-18 은 차단이 정답이다): "
+              + " · ".join(assumed.not_given()))
+    print(f"재질 코드        실측 표기 {mats['before']} 종 → 통합 후 {mats['after']} 종 "
+          f"(회수 {mats['removed']} 행) · 표시 {assumed.material_attr1() or '없음'}")
+    for canon, info in sorted(mats["codes"].items(), key=lambda kv: (-kv[1]["count"], kv[0])):
+        print(f"  · {canon:<10} 실측 {info['count']:>3} 건  ← {' · '.join(sorted(info['from']))}")
+    if mats["unseen"]:
+        print(f"  · 통합 제안에는 있으나 실측에 없는 표기 {mats['unseen']} — 만들지 않았다")
+    print("  · **두께는 코드 그룹을 만들지 않았다** — 수치이고 `EST_CAD_FEATURES` 에 있다. "
+          "실측 distinct 43종이고 요약 JSON 의 '두께 15종' 은 상위 15종 절단이다")
+    if unmarked:
+        print(f"  · 선언이 없어 단위 가정 Feature {unmarked} 행을 회수했다")
     print(f"수집 장비        {devices} 건  (사업계획서 2.7.1 데이터 집계 포인트 2개소뿐 — D-06)")
     print(f"전처리 규칙      {rules} 건")
     print(f"학습 데이터셋     #{dataset_id} — 총 {st['total']:,} / 제외 {st['excluded']:,} "

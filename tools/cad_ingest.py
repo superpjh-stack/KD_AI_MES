@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                          # noqa: E402
+from kyungdong.app.util import assumed               # noqa: E402
 from kyungdong.cad import archive                    # noqa: E402
 from kyungdong.cad import dxf                        # noqa: E402
 from kyungdong.cad import inventory as inv           # noqa: E402
@@ -264,30 +265,65 @@ def archive_report(*, dxf_limit: int | None, write_json: bool) -> dict:
     return payload
 
 
-def store_dxf(limit: int | None) -> None:
-    """DXF 실측 Feature 를 `EST_CAD_FEATURES` 에 적재한다 — **`--dxf-features` 를 준 때만.**"""
+def store_dxf(limit: int | None, *, include_dwg: bool = False, dry_run: bool = False) -> dict:
+    """DXF 실측 Feature 를 `EST_CAD_FEATURES` 에 적재한다 — **`--dxf-features` 를 준 때만.**
+
+    `--dxf-dwg` 를 주면 `.dwg` 도 `dwg2dxf` 로 변환해서 읽는다(D-123). `.cad` 는 DWG 서명이
+    아니라 대상이 아니다 — 늘리지 않는다.
+
+    `--dxf-dry-run` 은 **DB 에 쓰지 않고** 몇 건이 어떤 표지를 달게 되는지만 센다. 적재가
+    `tools/check_ingest.py` ⑤ 와 충돌하므로(확정 객체 0 + Feature N행 = 합성 판정) 기본은
+    적재이지만 판정을 재기 전에 dry-run 으로 규모를 먼저 본다.
+    """
+    types = ("DXF", "DWG") if include_dwg else ("DXF",)
     rows = conn.q("select DRAWING_ID, DRAWING_NO, FILE_PATH from EST_CAD_DRAWINGS "
-                  "where upper(FILE_TYPE) = 'DXF' order by DRAWING_ID")
+                  "where upper(FILE_TYPE) = any(%s) order by DRAWING_ID", (list(types),))
     if limit is not None:
         rows = rows[:limit]
-    print(f"  DXF 도면 {len(rows)} 건 (EST_CAD_DRAWINGS 기준)")
-    created = updated = skipped = missing = 0
+    print(f"  대상 도면 {len(rows)} 건 (EST_CAD_DRAWINGS · FILE_TYPE {types})"
+          + ("  **dry-run — DB 에 쓰지 않는다**" if dry_run else ""))
+    st = {"drawings": len(rows), "measured": 0, "created": 0, "updated": 0, "text_rows": 0,
+          "missing": 0, "unit_assumed_drawings": 0, "unit_marked_features": 0,
+          "unit_known_drawings": 0, "uom": {}}
     for r in rows:
-        got = pipeline.store_dxf_features(int(r["drawing_id"]), allow_unconfirmed=True)
+        did = int(r["drawing_id"])
+        if dry_run:
+            got = pipeline.dxf_measure(did)
+            got = {**got, "created": len(got.get("features") or []), "updated": 0,
+                   "text_rows": sum(1 for f in (got.get("features") or []) if f["value"] is None),
+                   "unit_assumed": str(got.get("uom") or "") == dxf.UNKNOWN_UOM,
+                   "unit_marked": (len(got.get("features") or [])
+                                   if str(got.get("uom") or "") == dxf.UNKNOWN_UOM
+                                   and assumed.unit_tag() else 0)}
+        else:
+            got = pipeline.store_dxf_features(did, allow_unconfirmed=True)
         if not got.get("measured"):
-            missing += 1
+            st["missing"] += 1
             print(f"     - {r['drawing_no'][:44]:46} {got.get('note', got.get('error'))}"[:150])
             continue
-        created += got["created"]
-        updated += got["updated"]
-        skipped += got["skipped_text"]
-        print(f"     + {r['drawing_no'][:44]:46} 신규 {got['created']} · 갱신 {got['updated']} "
-              f"· 문자형 제외 {got['skipped_text']}")
-    print(f"  EST_CAD_FEATURES 신규 {created} · 갱신 {updated} · "
-          f"문자형(재질) 제외 {skipped} · 원본 없음 {missing}")
-    print("  `SOURCE_DESC` 는 전부 'DXF 실측 —' 로 시작한다 — 합성 Feature 와 구분된다")
+        st["measured"] += 1
+        uom = str(got.get("uom") or "?")
+        st["uom"][uom] = st["uom"].get(uom, 0) + 1
+        for k in ("created", "updated", "text_rows"):
+            st[k] += int(got.get(k) or 0)
+        if got.get("unit_assumed"):
+            st["unit_assumed_drawings"] += 1
+            st["unit_marked_features"] += int(got.get("unit_marked") or 0)
+        else:
+            st["unit_known_drawings"] += 1
+        print(f"     + {r['drawing_no'][:44]:46} 단위 {uom:<8} 신규 {got['created']} "
+              f"· 갱신 {got['updated']} · 문자형(재질) {got['text_rows']} "
+              f"· 단위가정 표지 {got.get('unit_marked', 0)}")
+    print(f"  EST_CAD_FEATURES 신규 {st['created']} · 갱신 {st['updated']} · "
+          f"문자형(재질·값 NULL) {st['text_rows']} · 원본/변환 실패 {st['missing']}")
+    print(f"  단위 분포 {st['uom']}")
+    print(f"  단위 미상 도면 {st['unit_assumed_drawings']} 건 → 그 Feature "
+          f"{st['unit_marked_features']} 행에 `{assumed.unit_tag() or '표지 없음 — 가정 선언이 없다'}`")
+    print(f"  단위가 이미 명시된 도면 {st['unit_known_drawings']} 건은 **건드리지 않았다**")
+    print("  `SOURCE_DESC` 는 전부 'DXF 실측' 으로 시작한다 — 합성 Feature 와 구분된다")
     print("  ⚠ 이 적재는 `tools/check_ingest.py` ⑤(확정 객체 0건 + Feature N행 = 합성)를 "
-          "건드린다. G-13 판정을 다시 재라")
+          "건드린다. G-13 판정을 다시 재라 — 규칙을 우회하지 않는다")
+    return st
 
 
 def main() -> int:
@@ -304,6 +340,11 @@ def main() -> int:
                    help="DXF 실측 Feature 를 EST_CAD_FEATURES 에 적재한다 "
                         "(기본은 적재하지 않는다 — check_ingest ⑤ 가 합성으로 판정한다)")
     p.add_argument("--dxf-limit", type=int, default=None, help="DXF 실측을 앞 N건만 (시험용)")
+    p.add_argument("--dxf-dwg", action="store_true",
+                   help="`.dwg` 도 dwg2dxf 로 변환해 함께 적재한다 (D-123). "
+                        "`.cad` 는 DWG 서명이 아니라 대상이 아니다")
+    p.add_argument("--dxf-dry-run", action="store_true",
+                   help="DB 에 쓰지 않고 적재 규모·단위 가정 표지 건수만 센다")
     a = p.parse_args()
 
     if a.source == "archive":
@@ -356,7 +397,7 @@ def main() -> int:
     if a.dxf_features:
         print()
         print("═══ DXF 실측 Feature 적재 (`--dxf-features`) ═══════════════════")
-        store_dxf(a.dxf_limit)
+        store_dxf(a.dxf_limit, include_dwg=a.dxf_dwg, dry_run=a.dxf_dry_run)
     return 0
 
 

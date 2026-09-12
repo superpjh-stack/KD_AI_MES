@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
 from kyungdong.app.settings import settings              # noqa: E402
+from kyungdong.app.util import assumed                   # noqa: E402
 from kyungdong.cad import inventory as inv               # noqa: E402
 from kyungdong.ml import datasets as ml_datasets         # noqa: E402
 from kyungdong.ml import registry as ml_registry         # noqa: E402
@@ -135,3 +136,78 @@ def test_임베딩_미구성이면_벡터가_비어_있다():
     n = int(conn.q1("select count(*) as n from AGT_VECTOR_DOCS where EMBEDDING is not null")["n"])
     if not settings().embed_configured:
         assert n == 0, "임베딩 공급자가 없는데 벡터가 있다 — 0벡터를 채웠는지 확인한다 (D-08)"
+
+
+# ══ 가정 답변 선언 (D-150) 과 그 파생물 ═══════════════════════════════════
+# **0건 단언을 지우지 않고 방향을 뒤집었다** — '재질' 그룹이 0건이던 동안은
+# `tests/test_dev1_seed.py` 가 비었는지를 단언했다. 가정 답변에서 채운 뒤에는 여기가
+# **표지가 붙었는지·목록 밖 이름이 없는지**를 단언한다.
+def test_가정_선언이_DB_에_박혀_있고_파일과_같은_결정번호다():
+    decl = conn.q1("select CONFIG_VALUE, DESCRIPTION from SYS_CONFIGS "
+                   "where CONFIG_TYPE = %s and CONFIG_KEY = %s and USE_YN = 'Y'",
+                   (assumed.CONFIG_TYPE, assumed.CONFIG_KEY))
+    assert decl is not None, (
+        "가정 선언이 없다 — 이 선언이 없으면 재질 코드·단위 가정·G-14 라벨이 전부 차단이다")
+    assert decl["config_value"] == assumed.file_decision() == "D-150"
+    assert assumed.path_text() in (decl["description"] or ""), "선언에 출처 파일이 없다"
+    assert assumed.declaration() == "D-150"
+
+
+def test_고지_문구는_선언_파일에서_읽는다():
+    """검사기·화면이 문구를 박아 두면 선언을 지워도 문구가 남아 거짓 증거가 된다."""
+    assert assumed.base_note() == "가정 답변 기준 (D-150)"
+    assert assumed.circular_note() == "가정 답변 기준 (D-150) · 순환 라벨 — 정확도 증거 아님"
+    assert "25.4" in assumed.unit_tag() and "단위 가정 (D-150)" in assumed.unit_tag()
+    assert assumed.material_attr1() == "가정 답변 기준 (D-150) — 도입기업 미확인"
+
+
+def test_재질_코드는_실측_목록_밖의_이름을_만들지_않는다():
+    """**목록 밖 이름이 하나라도 있으면 FAIL** — 가정 답변 ② 는 실측 표기만 확인했다."""
+    import seed_dev3
+
+    measured = {k for k, _ in seed_dev3.measured_materials()}
+    assert len(measured) == 14, f"실측 표기가 14종이 아니다: {sorted(measured)}"
+    merge = assumed.material_merge()
+    allowed = measured | set(merge)          # 실측 표기 + 통합 정규 표기
+    rows = conn.q("select CODE_VALUE, CODE_NAME, ATTR1, ATTR2 from BAS_COMMON_CODES "
+                  "where CODE_GROUP = '재질' order by SORT_ORDER")
+    assert rows, "재질 코드가 비었다 — `make db-seed`"
+    seeded = {r["code_value"] for r in rows if (r["attr1"] or "").startswith("가정 답변 기준")}
+    assert seeded <= allowed, f"실측·통합 목록 밖의 재질을 만들었다: {sorted(seeded - allowed)}"
+    assert len(seeded) == 8, f"통합 후 8종이어야 한다: {sorted(seeded)}"
+    for r in rows:
+        if r["code_value"] not in seeded:
+            continue
+        assert r["attr1"] == assumed.material_attr1(), r["attr1"]
+        assert "실측 도면" in (r["attr2"] or ""), f"{r['code_value']} 에 실측 건수가 없다"
+
+
+def test_두께는_코드_그룹이_아니다():
+    """두께는 수치다 — `EST_CAD_FEATURES` 에 있다. 코드 그룹으로 만들면 값이 코드로 굳는다."""
+    n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES "
+                    "where CODE_GROUP in ('두께','THICKNESS')")["n"])
+    assert n == 0, "두께를 코드 그룹으로 만들었다 — 수치를 코드로 굳히면 새 두께가 422 가 된다"
+
+
+def test_선언을_지우면_재질_코드가_회수된다():
+    """**선언이 없으면 파생물도 없다.** 되돌림 시험 — 끝나고 원상복구한다."""
+    import seed_dev3
+
+    admin = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'admin'")
+    admin_id = int(admin["user_id"])
+    before = int(conn.q1("select count(*) as n from BAS_COMMON_CODES "
+                         "where CODE_GROUP = '재질'")["n"])
+    conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = %s and CONFIG_KEY = %s",
+           (assumed.CONFIG_TYPE, assumed.CONFIG_KEY))
+    try:
+        assert assumed.declaration() is None
+        assert assumed.material_attr1() == "", "선언이 없는데 표시 문구가 나온다"
+        seed_dev3.seed_material_codes(admin_id)
+        after = int(conn.q1("select count(*) as n from BAS_COMMON_CODES "
+                            "where CODE_GROUP = '재질'")["n"])
+        assert after == 0, f"선언을 지웠는데 재질 코드가 {after}건 남았다"
+    finally:
+        seed_dev3.seed_assumed_flag()
+        seed_dev3.seed_material_codes(admin_id)
+    assert int(conn.q1("select count(*) as n from BAS_COMMON_CODES "
+                       "where CODE_GROUP = '재질'")["n"]) == before
