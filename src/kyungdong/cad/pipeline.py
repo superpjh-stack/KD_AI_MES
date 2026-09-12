@@ -19,6 +19,7 @@ from ..app.settings import settings
 from ..app.util import clock, http
 from ..ingest import preprocess
 from . import archive
+from . import dwgconv
 from . import dxf
 from . import inventory as inv
 from . import provider
@@ -41,46 +42,82 @@ DERIVABLE: dict[str, tuple[str, str, str]] = {
     "홀 수량": ("홀", "ea", "확정(CONFIRM_YN='Y') 객체 중 유형='홀' 건수 집계"),
 }
 
-# ── 파일 형식별 산출 가능 여부 (D-110-b — D-05 판정 정정) ──────────────────────
-# **D-05 를 5종 전부 차단이라고 적은 것은 `.dwg` 에는 맞고 `.dxf` 에는 틀렸다.**
-# `.dxf` 는 순수 텍스트라 group code 파싱만으로 형상이 나온다(`cad/dxf.py`). 그래서
-# 차단은 **Feature 별**이 아니라 **파일 형식 × Feature** 로 갈린다.
+# ── 파일 형식별 산출 가능 여부 (D-110-b · **D-123 으로 DWG 판정이 또 바뀐다**) ──────
+# **D-05 를 "5종 전부 차단" 이라 적은 것은 두 번 틀렸다.**
+#   ① `.dxf` 는 순수 텍스트라 group code 파싱만으로 형상이 나온다 (D-110-b).
+#   ② `.dwg` 도 `dwg2dxf`(GNU libredwg 0.14)로 변환하면 그 파서가 **그대로** 돈다 (D-123).
+# 그래서 DWG 는 더 이상 **구조적 불가가 아니다** — **"변환되면 산출, 변환 실패분은 차단"** 이다.
+# 변환율이 100% 가 아니므로 **차단이 사라진 것도 아니다.** 모집단이 줄었을 뿐이다.
 #
-# **표본을 숨기지 않는다.** 원본 아카이브 CAD 3,299건 중 dxf 는 **29건(0.9%)** 이고,
-# 내용 해시로 복사본을 걷어내면 **서로 다른 도면 9건**이다. 이 숫자로 G-14(80%)를 주장하지 않는다.
+# **전량 실측** (`tools/dwg_convert.py` → `docs/cad/dwg_features.json`)
+#   파일 3,288건 → 내용 해시로 **서로 다른 도면 1,136건** (복사본 2,152 — 파일 수는 표본 수가 아니다)
+#   · `.dwg` 802건 → 변환 성공 **772건(96.3%)** · 실패 30건은 전부 `AC1009`(R11/R12)
+#   · `.cad` 325건 → 변환 성공 **0건(0%)**. 앞 6바이트가 `V10.00`/`V15.00` 로 **DWG 서명(AC1xxx)이
+#     아니다** — AutoCAD DWG 가 아닌 독자 포맷이라 libredwg 가 읽을 대상 자체가 아니다.
+#     어느 CAD 의 포맷인지는 확인되지 않았다(도입기업 확인 필요) — 여기서 단정하지 않는다.
+#   · 변환 성공분 + 원본 DXF 9건 → 파싱 **781/781(100%)**
+# 이 숫자로 **G-14(CAD 객체 인식 80%)를 주장하지 않는다.** 우리가 뽑은 것은 **기하 집계**이고
+# G-14 는 **정답 라벨 대비 탐지 정확도**다. 라벨은 여전히 0건이다(`work/cad_labelset.json`).
 DXF_SUPPORTED = "DXF 실측 가능 — group code 파싱 (D-110-b)"
+CONV_SUPPORTED = ("dwg2dxf 변환 후 DXF 실측 가능 (D-123 — 변환 성공 772/802 = 96.3%). "
+                  "**변환 실패분은 차단이다**")
+_GEOM_NOTE = {
+    "홀 수량": " · CIRCLE 전량(지름 필터 기준 없음)",
+    "총 절단장": " · LINE+ARC+POLYLINE 길이합. BLOCK 미전개로 과소 계상",
+    "판재 면적": " · 닫힌 POLYLINE shoelace",
+    "두께": " · TEXT 표제란 정규식",
+}
+_MATERIAL_NOTE = ("값은 읽히나 `EST_CAD_FEATURES.FEATURE_VALUE` 가 NUMERIC 이라 문자 재질을 "
+                  "적재할 자리가 없다 — 관측값은 `SOURCE_DESC` 에 증거로만 남긴다 "
+                  "(D-110-b · D-122)")
+_WELD_NOTE = "용접선 레이어·객체 표준이 도면에 없다 — DXF 로도 못 가른다 (D-05)"
+
 FORMAT_FEATURE_SUPPORT: dict[str, dict[str, str]] = {
-    "DXF": {
-        "홀 수량": DXF_SUPPORTED + " · CIRCLE 전량(지름 필터 기준 없음)",
-        "총 절단장": DXF_SUPPORTED + " · LINE+ARC+POLYLINE 길이합. BLOCK 미전개로 과소 계상",
-        "판재 면적": DXF_SUPPORTED + " · 닫힌 POLYLINE shoelace",
-        "두께": DXF_SUPPORTED + " · TEXT 표제란 정규식",
-        "재질": "DXF 에서 값은 읽히나 `EST_CAD_FEATURES.FEATURE_VALUE` 가 NUMERIC 이라 "
-                "문자 재질을 적재할 자리가 없다 (D-110-b)",
-        "용접장": "용접선 레이어·객체 표준이 도면에 없다 — DXF 로도 못 가른다 (D-05)",
-    },
-    "DWG": {},      # 전 항목 차단 — 아래 BLOCKED_FEATURES 와 같다
+    "DXF": {**{k: DXF_SUPPORTED + v for k, v in _GEOM_NOTE.items()},
+            "재질": _MATERIAL_NOTE, "용접장": _WELD_NOTE},
+    # **변환기가 실제로 있을 때만** 산출 가능이다 — `support_for()` 가 `dwgconv.available()` 로
+    # 재서 없으면 빈 표(= D-05 그대로 전량 차단)를 돌려준다. 있는 척하지 않는다.
+    "DWG": {**{k: CONV_SUPPORTED + v for k, v in _GEOM_NOTE.items()},
+            "재질": _MATERIAL_NOTE, "용접장": _WELD_NOTE},
+    # `.cad` 는 변환기가 있어도 **0%** 다 — DWG 서명이 아니어서 libredwg 의 대상이 아니다.
     "CAD": {},
 }
 
 BLOCKED_FEATURES: dict[str, str] = {
-    # `.dwg`(2,240) · `.cad`(1,030) 기준의 차단 사유다. `.dxf`(29) 는 위 표를 본다.
-    # 키 집합·사유 문자열의 결정번호(D-NN)는 `tools/check_ingest.py` ⑤ 가 읽는다 — 빼지 않는다.
-    "총 절단장": "DWG·CAD 는 바이너리라 변환기 없이 못 읽는다 — Parsing 미구성 (D-05). "
-                 "DXF 29건은 LINE·ARC·POLYLINE 길이합으로 산출 가능 (D-110-b)",
-    "판재 면적": "DWG·CAD 외곽 형상 좌표를 못 읽는다 — Parsing 미구성 (D-05). "
-                 "DXF 29건은 닫힌 POLYLINE shoelace 로 산출 가능 (D-110-b)",
+    # **차단의 뜻이 바뀌었다** (D-123). 이전에는 "DWG·CAD 는 구조적으로 못 읽는다" 였고,
+    # 지금은 **"변환 후 산출 가능 · 변환 실패분만 차단"** 이다. 남은 차단 모집단은
+    # `.cad` 325건(전량 · DWG 서명 아님) + `.dwg` 30건(AC1009 R11/R12) = **서로 다른 도면 355건**.
+    # 키 집합·사유 문자열의 결정번호(D-NN)는 `tools/check_ingest.py` ⑤ 와 QA 시험이 읽는다 —
+    # **D-05 를 지우지 않는다**: 그 결정이 무효가 된 것이 아니라 모집단이 줄었다는 기록이다.
+    "총 절단장": "**변환 후 산출 가능** — dwg2dxf 로 바꾸면 LINE·ARC·POLYLINE 길이합이 나온다 "
+                 "(D-123: 서로 다른 도면 1,136 중 777건 실측). 차단은 **변환 실패분 355건** — "
+                 "`.cad` 325(DWG 서명 아님) + `.dwg` 30(AC1009 R11/R12). "
+                 "변환기가 없는 장비에서는 D-05 그대로 전량 차단이다",
+    "판재 면적": "**변환 후 산출 가능** — 닫힌 POLYLINE shoelace (D-123: 564건 실측). 차단은 "
+                 "변환 실패분 355건 + 외곽이 닫힌 POLYLINE 으로 안 그려진 217건(781-564)이다. "
+                 "변환기가 없는 장비에서는 D-05 그대로 전량 차단이다",
     "용접장": "용접선 객체 유형이 TD5 어휘에 없고 도면에 용접 레이어 표준도 없다 — "
-              "DXF 를 읽어도 못 가른다 (D-05)",
-    "재질": "DWG·CAD 는 표제란 OCR 미구성 (D-05). DXF 는 TEXT 로 읽히지만 "
-            "`FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)",
-    "두께": "DWG·CAD 는 표제란 OCR 미구성 (D-05). DXF 29건은 TEXT 표제란에서 산출 가능 (D-110-b)",
+              "**변환해도 못 가른다.** DXF 781건에서 용접장 산출 **0건** (D-05 · D-123)",
+    "재질": "**변환 후 값은 읽힌다** — TEXT 표제란에서 586건 실측(STS304 200 · STS316L 199 …, "
+            "D-123). 그래도 차단이다: `FEATURE_VALUE` 가 NUMERIC(16,4) 이라 문자 재질을 담을 칸이 "
+            "없어 `SOURCE_DESC` 에 증거로만 남긴다 (D-122). 컬럼은 추가하지 않는다(G-02 762 고정). "
+            "변환기가 없는 장비에서는 D-05 그대로 읽지도 못한다",
+    "두께": "**변환 후 산출 가능** — TEXT 표제란 정규식 (D-123: 591건 실측, 최빈 3.0mm 92건). "
+            "차단은 변환 실패분 355건 + 표제란 표기가 정규식에 없는 190건(781-591)이다. "
+            "변환기가 없는 장비에서는 D-05 그대로 전량 차단이다",
 }
 
 
 def support_for(file_type: str | None) -> dict[str, str]:
-    """파일 형식별 Feature 산출 가능 표. 모르는 형식은 **전부 차단**으로 본다."""
-    return FORMAT_FEATURE_SUPPORT.get((file_type or "").upper(), {})
+    """파일 형식별 Feature 산출 가능 표. 모르는 형식은 **전부 차단**으로 본다.
+
+    `DWG` 는 **변환기가 실제로 있을 때만** 산출 가능이다(D-123). `dwg2dxf` 가 없는 장비에서는
+    D-05 그대로 전량 차단이고, 그것을 `shutil.which` 로 재서 판정한다 — 있는 척하지 않는다.
+    """
+    ft = (file_type or "").upper()
+    if ft == "DWG" and not dwgconv.available():
+        return {}
+    return FORMAT_FEATURE_SUPPORT.get(ft, {})
 
 
 def blocked_for(file_type: str | None) -> dict[str, str]:
@@ -278,33 +315,50 @@ def build_features(drawing_id: int) -> dict[str, Any]:
 
 
 def dxf_measure(drawing_id: int) -> dict[str, Any]:
-    """`.dxf` 도면 하나를 **실측**한다. DB 에 쓰지 않는다 — 재는 것과 확정은 다른 일이다.
+    """도면 하나를 **실측**한다. DB 에 쓰지 않는다 — 재는 것과 확정은 다른 일이다.
 
-    `.dwg` · `.cad` 는 여전히 **차단**이다(변환기 없음 — D-05). 형식이 맞지 않으면 그렇게 적는다.
+    `.dxf` 는 그대로 읽고, **`.dwg` 는 `dwg2dxf` 로 변환해서 읽는다**(D-123). 변환된 DXF 는
+    읽자마자 지운다 — 전량을 남기면 팽창률 약 3배로 8.5GB 다.
+
+    **변환이 되는 것과 전량이 되는 것은 다르다.** 변환 실패는 실패로 돌려준다(`measured=False`
+    + `convert_error`). `.cad` 는 DWG 서명(AC1xxx)이 아니어서 실측 **0%** 다 — 차단 그대로다.
     """
     row = conn.q1("select DRAWING_ID, DRAWING_NO, FILE_TYPE, FILE_PATH "
                   "from EST_CAD_DRAWINGS where DRAWING_ID = %s", (drawing_id,))
     if row is None:
         raise http.fail("validation", f"도면 {drawing_id} 가 없다")
     ftype = (row["file_type"] or "").upper()
-    if ftype != "DXF":
-        return {"drawing_id": drawing_id, "file_type": ftype, "measured": False,
-                "blocked": blocked_for(ftype),
-                "note": f"{ftype} 는 바이너리라 변환기 없이 못 읽는다 — Parsing 미구성 (D-05)"}
+    base = {"drawing_id": drawing_id, "file_type": ftype, "blocked": blocked_for(ftype)}
+    if ftype not in ("DXF", "DWG"):
+        return {**base, "measured": False,
+                "note": f"{ftype} 는 DWG 서명(AC1xxx)이 아니라 dwg2dxf 의 대상이 아니다 — "
+                        f"실측 0% (D-05 · D-123). `.cad` 325건은 앞 6바이트가 `V10.00`/`V15.00` 다"}
     # 통계 xlsx 의 `파일경로` 는 **아카이브 루트 기준 상대경로**다(D-03). 원본이 있는 장비에서만
     # 절대경로로 풀린다 — 없으면 "없다" 고 적는다. 조용히 0 을 돌려주지 않는다.
     path = Path(row["file_path"])
     if not path.is_file():
         path = archive.archive_root() / row["file_path"]
     if not path.is_file():
-        return {"drawing_id": drawing_id, "file_type": ftype, "measured": False,
-                "blocked": blocked_for(ftype),
+        return {**base, "measured": False,
                 "note": f"원본 파일이 없다: {row['file_path']} "
                         f"(아카이브 루트 {archive.archive_root()} 기준으로도 못 찾았다 — D-109)"}
-    m = dxf.parse(path)
-    return {"drawing_id": drawing_id, "file_type": ftype, "measured": m.error is None,
-            "error": m.error, "entities": m.entities, "features": m.features(),
-            "blocked": blocked_for(ftype), "uom": m.uom, "inserts": m.inserts}
+    if ftype == "DXF":
+        m, conv = dxf.parse(path), None
+    else:
+        if not dwgconv.available():
+            return {**base, "measured": False, "note": dwgconv.NOT_INSTALLED}
+        m, conv = dwgconv.measured(path)
+        if m is None:
+            return {**base, "measured": False, "convert_error": conv.reason,
+                    "dwg_signature": conv.sig,
+                    "note": f"dwg2dxf 변환 실패 — 실패는 실패로 센다 (D-123): {conv.reason}"}
+    out = {**base, "measured": m.error is None, "error": m.error, "entities": m.entities,
+           "features": m.features(), "uom": m.uom, "inserts": m.inserts}
+    if conv is not None:
+        out["converted"] = True
+        out["dwg_signature"] = conv.sig
+        out["convert_warn"] = conv.reason if conv.rc_nonzero else None
+    return out
 
 
 def store_dxf_features(drawing_id: int, *, allow_unconfirmed: bool = False) -> dict[str, Any]:
@@ -317,36 +371,46 @@ def store_dxf_features(drawing_id: int, *, allow_unconfirmed: bool = False) -> d
     제품 쪽에서는 `allow_unconfirmed=True` 를 **명시로 요구**하고, 그러지 않으면 안 쓴다.
     이것은 값을 숨기는 것이 아니라 **판정 규칙이 아직 한 가지 원천만 안다**는 사실의 기록이다.
 
-    `재질` 은 `FEATURE_VALUE NUMERIC(16,4)` 에 담을 자리가 없어 **적재하지 않는다**(차단).
+    `재질` 은 `FEATURE_VALUE NUMERIC(16,4)` 에 담을 자리가 없다(D-122). **행 자체는 남기되**
+    `FEATURE_VALUE` 는 NULL 이고 관측값은 `SOURCE_DESC` 에 증거로 적는다 — 숫자 칸에 코드를
+    만들어 넣지 않고, 컬럼도 추가하지 않는다(G-02 762 고정).
+
+    `SOURCE_DESC` 접두는 **합성과 구분하려고** 형식별로 다르다 —
+    `DXF 실측(dwg2dxf 변환) — <원본파일명>` / `DXF 실측 — <원본파일명>`.
     """
     got = dxf_measure(drawing_id)
     if not got.get("measured"):
-        return {**got, "created": 0, "updated": 0, "skipped_text": 0, "written": False}
+        return {**got, "created": 0, "updated": 0, "text_rows": 0, "written": False}
     confirmed = conn.q1("select count(*) as n from EST_CAD_OBJECTS "
                         "where DRAWING_ID = %s and CONFIRM_YN = 'Y'", (drawing_id,))["n"]
     if not int(confirmed) and not allow_unconfirmed:
-        return {**got, "created": 0, "updated": 0, "skipped_text": 0, "written": False,
+        return {**got, "created": 0, "updated": 0, "text_rows": 0, "written": False,
                 "note": "확정 객체 0건 — `allow_unconfirmed=True` 없이는 적재하지 않는다 "
                         "(check_ingest ⑤ 가 합성으로 판정한다). 실측값은 위 features 에 있다"}
-    created = updated = skipped = 0
+    name = Path(conn.q1("select FILE_PATH from EST_CAD_DRAWINGS where DRAWING_ID = %s",
+                        (drawing_id,))["file_path"]).name
+    tag = f"{dxf.SOURCE_TAG}(dwg2dxf 변환)" if got.get("converted") else dxf.SOURCE_TAG
+    created = updated = text_rows = 0
     for f in got["features"]:
-        if f["value"] is None:                  # `재질` — 숫자 컬럼에 담을 자리가 없다
-            skipped += 1
-            continue
+        desc = f"{tag} — {name}"
+        if f["value"] is None:                  # `재질` — 숫자 칸이 없다(D-122)
+            desc = (f"{desc} · 관측 재질={f['text']} · FEATURE_VALUE 는 NUMERIC(16,4) 이라 "
+                    "NULL 로 둔다 (D-122 · 컬럼 추가 안 함 G-02)")
+            text_rows += 1
         hit = conn.q1("select FEATURE_ID from EST_CAD_FEATURES "
                       "where DRAWING_ID = %s and FEATURE_TYPE = %s", (drawing_id, f["type"]))
         if hit:
             conn.x("update EST_CAD_FEATURES set FEATURE_VALUE = %s, UOM = %s, "
                    "SOURCE_DESC = %s, UPDATED_DT = now() where FEATURE_ID = %s",
-                   (f["value"], (f["uom"] or "")[:20], str(f["source"])[:300], hit["feature_id"]))
+                   (f["value"], (f["uom"] or "")[:20] or None, desc[:300], hit["feature_id"]))
             updated += 1
             continue
         conn.x("insert into EST_CAD_FEATURES "
                "(DRAWING_ID, FEATURE_TYPE, FEATURE_VALUE, UOM, SOURCE_DESC, "
                " USED_IN_QUOTE_YN, TRAIN_USE_YN, CREATED_DT) values (%s,%s,%s,%s,%s,'N','N', now())",
-               (drawing_id, f["type"], f["value"], (f["uom"] or "")[:20], str(f["source"])[:300]))
+               (drawing_id, f["type"], f["value"], (f["uom"] or "")[:20] or None, desc[:300]))
         created += 1
-    return {**got, "created": created, "updated": updated, "skipped_text": skipped,
+    return {**got, "created": created, "updated": updated, "text_rows": text_rows,
             "written": True}
 
 
@@ -369,8 +433,10 @@ def stage_status() -> list[dict[str, Any]]:
          "count": one("select count(*) as n from EST_CAD_FEATURES"),
          "blocked": True,
          "note": "확정 객체 집계로 만드는 Feature 는 '홀 수량' 1종뿐 (D-05). "
-                 "DXF 는 group code 실측으로 4종이 나오지만 표본이 도면 3,299건 중 "
-                 "29건(0.9%)뿐이고 DWG·CAD 는 변환기가 없다 (D-110-b)"},
+                 "**DWG 는 dwg2dxf 변환으로 풀렸다** — 서로 다른 도면 1,136건 중 781건 파싱 성공, "
+                 "절단장 777 · 홀 708 · 두께 591 · 재질 586 · 판재면적 564 실측 (D-123). "
+                 "남은 차단은 `.cad` 325건(DWG 서명 아님) + `.dwg` 30건(R11/R12) + 용접장 0건, "
+                 "그리고 재질은 `FEATURE_VALUE` 가 NUMERIC 이라 적재 자리가 없다 (D-122)"},
         {"no": 4, "name": "견적", "table": "EST_QUOTATIONS / EST_COST_RATES",
          "count": one("select count(*) as n from EST_QUOTATIONS"),
          "blocked": True,

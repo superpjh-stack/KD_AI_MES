@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
 from kyungdong.app.util import http                      # noqa: E402
+from kyungdong.cad import dwgconv                        # noqa: E402
 from kyungdong.cad import inventory as inv               # noqa: E402
 from kyungdong.cad import pipeline, provider             # noqa: E402
 
@@ -112,24 +113,62 @@ def test_집계_불가_Feature_는_차단으로_남는다():
     assert set(pipeline.BLOCKED_FEATURES) == set(pipeline.FEATURE_TYPES) - {"홀 수량"}
     for why in pipeline.BLOCKED_FEATURES.values():
         # 차단 사유에는 **결정번호**가 있어야 한다 — 없으면 차단이 아니라 누락이다.
-        # `.dwg`·`.cad` 는 D-05, `.dxf` 로는 되는 항목은 D-110-b 가 함께 적혀 있다.
-        assert "D-05" in why or "D-110-b" in why
+        # D-05(원천 미구성) 는 지우지 않는다. 변환으로 풀린 항목은 D-123 이 함께 적혀 있다.
+        assert "D-05" in why, "QA 시험(test_qa2_ingest)이 D-05 를 읽는다 — 빼면 깨진다"
+        assert "D-110-b" in why or "D-122" in why or "D-123" in why
 
 
-def test_차단은_파일_형식별로_갈린다_DXF_는_예외다():
-    """D-05 를 '5종 전부 차단' 이라 적은 것은 `.dwg` 에는 맞고 `.dxf` 에는 틀리다 (D-110-b).
+def test_변환되면_차단이_아니다_변환_실패분만_차단이다():
+    """**D-123 으로 DWG 판정이 바뀌었다.** '구조적 불가' → '변환 후 산출, 실패분은 차단'.
 
-    **표본을 숨기지 않는다** — 원본 CAD 3,299건 중 dxf 는 29건(0.9%)이고 서로 다른 도면은 9건이다.
+    `.cad` 는 변환기가 있어도 **0%** 다 — 앞 6바이트가 `V10.00` 으로 DWG 서명(AC1xxx)이 아니다.
+    **변환이 되는 것과 전량이 되는 것은 다르다** — 사유 문자열이 그 둘을 갈라 적는지 못박는다.
     """
     dxf_ok = [k for k, v in pipeline.support_for("DXF").items() if "없다" not in v]
     assert set(dxf_ok) == {"홀 수량", "총 절단장", "판재 면적", "두께"}
     # `재질` 은 값이 읽혀도 `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 → 여전히 차단
     assert "재질" in pipeline.blocked_for("DXF")
     assert "용접장" in pipeline.blocked_for("DXF")
-    for ft in ("DWG", "CAD"):
-        assert pipeline.support_for(ft) == {}, f"{ft} 는 변환기가 없다 — 산출 가능이라고 적으면 거짓이다"
-        assert set(pipeline.blocked_for(ft)) == set(pipeline.BLOCKED_FEATURES)
+
+    # DWG — 변환기가 있으면 DXF 와 같은 4종이 산출 가능이다 (D-123)
+    if dwgconv.available():
+        dwg_ok = [k for k, v in pipeline.support_for("DWG").items() if "없다" not in v]
+        assert set(dwg_ok) == {"홀 수량", "총 절단장", "판재 면적", "두께"}
+        assert set(pipeline.blocked_for("DWG")) == {"재질", "용접장"}
+        for k in dwg_ok:
+            assert "변환" in pipeline.support_for("DWG")[k]
+    else:
+        # 변환기가 없는 장비에서는 D-05 그대로 전량 차단이다 — 있는 척하지 않는다
+        assert pipeline.support_for("DWG") == {}
+        assert set(pipeline.blocked_for("DWG")) == set(pipeline.BLOCKED_FEATURES)
+
+    # `.cad` 는 변환기 유무와 무관하게 전량 차단이다
+    assert pipeline.support_for("CAD") == {}, "`.cad` 는 변환 성공 0건이다 (D-123)"
+    assert set(pipeline.blocked_for("CAD")) == set(pipeline.BLOCKED_FEATURES)
     assert pipeline.support_for(None) == {} and pipeline.support_for("PDF") == {}
+    # 용접장은 **변환해도** 못 가른다 — 변환으로 풀렸다고 적으면 거짓이다
+    assert "0건" in pipeline.BLOCKED_FEATURES["용접장"]
+
+
+def test_변환기_껍데기는_실패를_실패로_돌려준다(tmp_path):
+    """**없는 성공을 만들지 않는다.** DWG 가 아닌 파일을 넣으면 `ok=False` 와 사유가 나온다."""
+    bogus = tmp_path / "not-a-dwg.dwg"
+    bogus.write_bytes(b"V10.00" + b"\x00" * 64)      # `.cad` 들의 실제 서명 (D-123)
+    assert dwgconv.signature(bogus) == "아님:'V10.00'"
+    if not dwgconv.available():
+        pytest.skip(f"{dwgconv.BINARY} 미설치 — 이 장비에서는 D-05 그대로다")
+    m, got = dwgconv.measured(bogus, work_dir=tmp_path)
+    assert m is None and got.ok is False and got.reason
+    assert not list(tmp_path.glob("dwgconv-*.dxf")), "중간 DXF 를 남기면 전량에서 8.5GB 가 쌓인다"
+
+
+def test_변환_실패_사유는_변환기가_뱉은_말을_정규화한다():
+    """분류 바구니를 지어내지 않는다 — 경로·숫자만 지운다."""
+    got = dwgconv.normalize_error(
+        "Warning: something\nERROR: Invalid DWG, magic: V10.00 at /tmp/a/b.dwg 0x1f\n", 1)
+    # `V10` 의 10 은 앞이 `V` 라 단어 경계가 없어 남는다 — 실제 동작을 그대로 못박는다
+    assert got == "ERROR: Invalid DWG, magic: V10.N at <path> <hex>"
+    assert "신호 11" in dwgconv.normalize_error("", -11)
 
 
 def test_확정_객체가_없으면_Feature_도_0건이다():
