@@ -111,7 +111,25 @@ def test_집계_불가_Feature_는_차단으로_남는다():
     assert set(pipeline.DERIVABLE) == {"홀 수량"}
     assert set(pipeline.BLOCKED_FEATURES) == set(pipeline.FEATURE_TYPES) - {"홀 수량"}
     for why in pipeline.BLOCKED_FEATURES.values():
-        assert "D-05" in why
+        # 차단 사유에는 **결정번호**가 있어야 한다 — 없으면 차단이 아니라 누락이다.
+        # `.dwg`·`.cad` 는 D-05, `.dxf` 로는 되는 항목은 D-110-b 가 함께 적혀 있다.
+        assert "D-05" in why or "D-110-b" in why
+
+
+def test_차단은_파일_형식별로_갈린다_DXF_는_예외다():
+    """D-05 를 '5종 전부 차단' 이라 적은 것은 `.dwg` 에는 맞고 `.dxf` 에는 틀리다 (D-110-b).
+
+    **표본을 숨기지 않는다** — 원본 CAD 3,299건 중 dxf 는 29건(0.9%)이고 서로 다른 도면은 9건이다.
+    """
+    dxf_ok = [k for k, v in pipeline.support_for("DXF").items() if "없다" not in v]
+    assert set(dxf_ok) == {"홀 수량", "총 절단장", "판재 면적", "두께"}
+    # `재질` 은 값이 읽혀도 `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 → 여전히 차단
+    assert "재질" in pipeline.blocked_for("DXF")
+    assert "용접장" in pipeline.blocked_for("DXF")
+    for ft in ("DWG", "CAD"):
+        assert pipeline.support_for(ft) == {}, f"{ft} 는 변환기가 없다 — 산출 가능이라고 적으면 거짓이다"
+        assert set(pipeline.blocked_for(ft)) == set(pipeline.BLOCKED_FEATURES)
+    assert pipeline.support_for(None) == {} and pipeline.support_for("PDF") == {}
 
 
 def test_확정_객체가_없으면_Feature_도_0건이다():

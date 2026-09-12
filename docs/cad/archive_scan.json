@@ -1,0 +1,2710 @@
+{
+ "archive": {
+  "root": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data",
+  "files": 6038,
+  "ext": {
+   "dwg": 2240,
+   "cad": 1030,
+   "pdf": 730,
+   "jpg": 728,
+   "bak": 565,
+   "log": 170,
+   "xls": 164,
+   "db": 146,
+   "docx": 56,
+   "zip": 39,
+   "doc": 36,
+   "dxf": 29,
+   "xlsx": 15,
+   "dwl": 15,
+   "dwl2": 14,
+   "aaf": 10,
+   "hwp": 8,
+   "": 7,
+   "ppt": 7,
+   "tif": 6,
+   "tmp": 5,
+   "shx": 4,
+   "pptx": 3,
+   "png": 2,
+   "html": 2,
+   "txt": 2,
+   "dmp": 2,
+   "dib": 1,
+   "kpr": 1,
+   "err": 1
+  },
+  "cad_files": 3299,
+  "cad_by_ext": {
+   "cad": 1030,
+   "dwg": 2240,
+   "dxf": 29
+  },
+  "pdf_files": 730,
+  "quote_files": 73,
+  "quote_by_ext": {
+   "pdf": 29,
+   "docx": 8,
+   "jpg": 2,
+   "xls": 31,
+   "pptx": 3
+  },
+  "project_dirs": 99,
+  "projects_parsed": 99,
+  "project_parse_failed": 0,
+  "unique_project_no": 34,
+  "product_group_hit": 40,
+  "customer_hit": 40,
+  "by_product_group": {
+   "진공건조기": 8,
+   "반응기": 5,
+   "누체필터": 10,
+   "미상": 59,
+   "저장탱크": 11,
+   "교반기": 6
+  },
+  "projects_with_drawing_and_quote": 8,
+  "top_joined_projects": [
+   {
+    "project_dir": "GD160805-누체필터50L",
+    "drawings": 102,
+    "quotes": 4
+   },
+   {
+    "project_dir": "GD1906-저장탱크-대한열기",
+    "drawings": 102,
+    "quotes": 2
+   },
+   {
+    "project_dir": "GD2005-00 한모루",
+    "drawings": 90,
+    "quotes": 4
+   },
+   {
+    "project_dir": "GD160804-진공건조기200L",
+    "drawings": 84,
+    "quotes": 2
+   },
+   {
+    "project_dir": "GD1904-00-01-리시버탱크",
+    "drawings": 62,
+    "quotes": 2
+   },
+   {
+    "project_dir": "GD2003-02-에니젠-누체필터 100L",
+    "drawings": 58,
+    "quotes": 2
+   },
+   {
+    "project_dir": "GD2007-01-00-압력텡크(70L) 추가작업",
+    "drawings": 44,
+    "quotes": 6
+   },
+   {
+    "project_dir": "GD170402-샌딩탱크",
+    "drawings": 44,
+    "quotes": 2
+   }
+  ]
+ },
+ "joins": {
+  "same_folder": 21,
+  "same_folder_top": [
+   {
+    "folder": "16 경동도면함/GD160805-누체필터50L",
+    "drawings": 34,
+    "quotes": 2
+   },
+   {
+    "folder": "20 경동도면함/16 경동도면함/GD160805-누체필터50L",
+    "drawings": 34,
+    "quotes": 2
+   },
+   {
+    "folder": "REACTOR",
+    "drawings": 27,
+    "quotes": 6
+   },
+   {
+    "folder": "20 경동도면함/19 경동도면함/GD1904-웰이엔씨/GD1904-00-01-리시버탱크",
+    "drawings": 31,
+    "quotes": 1
+   },
+   {
+    "folder": "19 경동도면함/GD1904-웰이엔씨/GD1904-00-01-리시버탱크",
+    "drawings": 31,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-02-에니젠-누체필터 100L",
+    "drawings": 29,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-02-에니젠-누체필터 100L",
+    "drawings": 29,
+    "quotes": 1
+   },
+   {
+    "folder": "16 경동도면함/GD160804-진공건조기200L",
+    "drawings": 28,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/16 경동도면함/GD160804-진공건조기200L",
+    "drawings": 28,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/17 경동도면함/GD1704-두루텍/GD170402-샌딩탱크",
+    "drawings": 22,
+    "quotes": 1
+   }
+  ],
+  "subtree": 46,
+  "subtree_top": [
+   {
+    "folder": "20 경동도면함",
+    "drawings": 1066,
+    "quotes": 26
+   },
+   {
+    "folder": "REACTOR",
+    "drawings": 448,
+    "quotes": 38
+   },
+   {
+    "folder": "20 경동도면함/20 경동도면함",
+    "drawings": 333,
+    "quotes": 10
+   },
+   {
+    "folder": "REACTOR/반응기",
+    "drawings": 304,
+    "quotes": 32
+   },
+   {
+    "folder": "20 경동도면함/16 경동도면함",
+    "drawings": 189,
+    "quotes": 3
+   },
+   {
+    "folder": "16 경동도면함",
+    "drawings": 189,
+    "quotes": 3
+   },
+   {
+    "folder": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨",
+    "drawings": 184,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/GD2003-00 웰이엔씨",
+    "drawings": 184,
+    "quotes": 1
+   },
+   {
+    "folder": "20 경동도면함/19 경동도면함",
+    "drawings": 116,
+    "quotes": 2
+   },
+   {
+    "folder": "19 경동도면함",
+    "drawings": 116,
+    "quotes": 2
+   }
+  ]
+ },
+ "projects": [
+  {
+   "folder": "GD160801-진공건조기",
+   "rel": "16 경동도면함/GD160801-진공건조기",
+   "project_no": "GD160801",
+   "yymm": "1608",
+   "seq": "01",
+   "label": "진공건조기",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160801-진공건조기",
+   "rel": "20 경동도면함/16 경동도면함/GD160801-진공건조기",
+   "project_no": "GD160801",
+   "yymm": "1608",
+   "seq": "01",
+   "label": "진공건조기",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160801-진공건조기",
+   "rel": "CAD도면_제품별정리(신규)/GD160801-진공건조기",
+   "project_no": "GD160801",
+   "yymm": "1608",
+   "seq": "01",
+   "label": "진공건조기",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160802-반응기30L",
+   "rel": "16 경동도면함/GD160802-반응기30L",
+   "project_no": "GD160802",
+   "yymm": "1608",
+   "seq": "02",
+   "label": "반응기30L",
+   "product_group": "반응기",
+   "customer": null
+  },
+  {
+   "folder": "GD160802-반응기30L",
+   "rel": "20 경동도면함/16 경동도면함/GD160802-반응기30L",
+   "project_no": "GD160802",
+   "yymm": "1608",
+   "seq": "02",
+   "label": "반응기30L",
+   "product_group": "반응기",
+   "customer": null
+  },
+  {
+   "folder": "GD160802-반응기30L",
+   "rel": "CAD도면_제품별정리(신규)/GD160802-반응기30L",
+   "project_no": "GD160802",
+   "yymm": "1608",
+   "seq": "02",
+   "label": "반응기30L",
+   "product_group": "반응기",
+   "customer": null
+  },
+  {
+   "folder": "GD160803-누체필터10L",
+   "rel": "16 경동도면함/GD160803-누체필터10L",
+   "project_no": "GD160803",
+   "yymm": "1608",
+   "seq": "03",
+   "label": "누체필터10L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD160803-누체필터10L",
+   "rel": "20 경동도면함/16 경동도면함/GD160803-누체필터10L",
+   "project_no": "GD160803",
+   "yymm": "1608",
+   "seq": "03",
+   "label": "누체필터10L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD160803-누체필터10L",
+   "rel": "CAD도면_제품별정리(신규)/GD160803-누체필터10L",
+   "project_no": "GD160803",
+   "yymm": "1608",
+   "seq": "03",
+   "label": "누체필터10L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD160804-진공건조기200L",
+   "rel": "16 경동도면함/GD160804-진공건조기200L",
+   "project_no": "GD160804",
+   "yymm": "1608",
+   "seq": "04",
+   "label": "진공건조기200L",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160804-진공건조기200L",
+   "rel": "20 경동도면함/16 경동도면함/GD160804-진공건조기200L",
+   "project_no": "GD160804",
+   "yymm": "1608",
+   "seq": "04",
+   "label": "진공건조기200L",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160804-진공건조기200L",
+   "rel": "CAD도면_제품별정리(신규)/GD160804-진공건조기200L",
+   "project_no": "GD160804",
+   "yymm": "1608",
+   "seq": "04",
+   "label": "진공건조기200L",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD160805-누체필터50L",
+   "rel": "16 경동도면함/GD160805-누체필터50L",
+   "project_no": "GD160805",
+   "yymm": "1608",
+   "seq": "05",
+   "label": "누체필터50L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD160805-누체필터50L",
+   "rel": "20 경동도면함/16 경동도면함/GD160805-누체필터50L",
+   "project_no": "GD160805",
+   "yymm": "1608",
+   "seq": "05",
+   "label": "누체필터50L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD160805-누체필터50L",
+   "rel": "CAD도면_제품별정리(신규)/GD160805-누체필터50L",
+   "project_no": "GD160805",
+   "yymm": "1608",
+   "seq": "05",
+   "label": "누체필터50L",
+   "product_group": "누체필터",
+   "customer": null
+  },
+  {
+   "folder": "GD1704-두루텍",
+   "rel": "17 경동도면함/GD1704-두루텍",
+   "project_no": "GD1704",
+   "yymm": "1704",
+   "seq": null,
+   "label": "두루텍",
+   "product_group": null,
+   "customer": "두루텍"
+  },
+  {
+   "folder": "GD1704-두루텍",
+   "rel": "20 경동도면함/17 경동도면함/GD1704-두루텍",
+   "project_no": "GD1704",
+   "yymm": "1704",
+   "seq": null,
+   "label": "두루텍",
+   "product_group": null,
+   "customer": "두루텍"
+  },
+  {
+   "folder": "GD1704-두루텍",
+   "rel": "CAD도면_제품별정리(신규)/GD1704-두루텍",
+   "project_no": "GD1704",
+   "yymm": "1704",
+   "seq": null,
+   "label": "두루텍",
+   "product_group": null,
+   "customer": "두루텍"
+  },
+  {
+   "folder": "GD170402-샌딩탱크",
+   "rel": "17 경동도면함/GD1704-두루텍/GD170402-샌딩탱크",
+   "project_no": "GD170402",
+   "yymm": "1704",
+   "seq": "02",
+   "label": "샌딩탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD170402-샌딩탱크",
+   "rel": "20 경동도면함/17 경동도면함/GD1704-두루텍/GD170402-샌딩탱크",
+   "project_no": "GD170402",
+   "yymm": "1704",
+   "seq": "02",
+   "label": "샌딩탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD1706-웰이엔시",
+   "rel": "17 경동도면함/GD1706-웰이엔시",
+   "project_no": "GD1706",
+   "yymm": "1706",
+   "seq": null,
+   "label": "웰이엔시",
+   "product_group": null,
+   "customer": "웰이엔시"
+  },
+  {
+   "folder": "GD1706-웰이엔시",
+   "rel": "20 경동도면함/17 경동도면함/GD1706-웰이엔시",
+   "project_no": "GD1706",
+   "yymm": "1706",
+   "seq": null,
+   "label": "웰이엔시",
+   "product_group": null,
+   "customer": "웰이엔시"
+  },
+  {
+   "folder": "GD1706-웰이엔시",
+   "rel": "CAD도면_제품별정리(신규)/GD1706-웰이엔시",
+   "project_no": "GD1706",
+   "yymm": "1706",
+   "seq": null,
+   "label": "웰이엔시",
+   "product_group": null,
+   "customer": "웰이엔시"
+  },
+  {
+   "folder": "GD170601-리시버탱크",
+   "rel": "17 경동도면함/GD1706-웰이엔시/GD170601-리시버탱크",
+   "project_no": "GD170601",
+   "yymm": "1706",
+   "seq": "01",
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD170601-리시버탱크",
+   "rel": "20 경동도면함/17 경동도면함/GD1706-웰이엔시/GD170601-리시버탱크",
+   "project_no": "GD170601",
+   "yymm": "1706",
+   "seq": "01",
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD170602-리시버탱크",
+   "rel": "17 경동도면함/GD1706-웰이엔시/GD170602-리시버탱크",
+   "project_no": "GD170602",
+   "yymm": "1706",
+   "seq": "02",
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD170602-리시버탱크",
+   "rel": "20 경동도면함/17 경동도면함/GD1706-웰이엔시/GD170602-리시버탱크",
+   "project_no": "GD170602",
+   "yymm": "1706",
+   "seq": "02",
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD1802-웰이엔씨",
+   "rel": "18 경동도면함/GD1802-웰이엔씨",
+   "project_no": "GD1802",
+   "yymm": "1802",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1802-웰이엔씨",
+   "rel": "20 경동도면함/18 경동도면함/GD1802-웰이엔씨",
+   "project_no": "GD1802",
+   "yymm": "1802",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1802-웰이엔씨",
+   "rel": "CAD도면_제품별정리(신규)/GD1802-웰이엔씨",
+   "project_no": "GD1802",
+   "yymm": "1802",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1802-01-진공건조기",
+   "rel": "18 경동도면함/GD1802-웰이엔씨/GD1802-01-진공건조기",
+   "project_no": "GD1802-01",
+   "yymm": "1802",
+   "seq": null,
+   "label": "진공건조기",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD1802-01-진공건조기",
+   "rel": "20 경동도면함/18 경동도면함/GD1802-웰이엔씨/GD1802-01-진공건조기",
+   "project_no": "GD1802-01",
+   "yymm": "1802",
+   "seq": null,
+   "label": "진공건조기",
+   "product_group": "진공건조기",
+   "customer": null
+  },
+  {
+   "folder": "GD1802-02-교반기",
+   "rel": "18 경동도면함/GD1802-웰이엔씨/GD1802-02-교반기",
+   "project_no": "GD1802-02",
+   "yymm": "1802",
+   "seq": null,
+   "label": "교반기",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD1802-02-교반기",
+   "rel": "20 경동도면함/18 경동도면함/GD1802-웰이엔씨/GD1802-02-교반기",
+   "project_no": "GD1802-02",
+   "yymm": "1802",
+   "seq": null,
+   "label": "교반기",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD1806-최성배",
+   "rel": "18 경동도면함/GD1806-최성배",
+   "project_no": "GD1806",
+   "yymm": "1806",
+   "seq": null,
+   "label": "최성배",
+   "product_group": null,
+   "customer": "최성배"
+  },
+  {
+   "folder": "GD1806-최성배",
+   "rel": "20 경동도면함/18 경동도면함/GD1806-최성배",
+   "project_no": "GD1806",
+   "yymm": "1806",
+   "seq": null,
+   "label": "최성배",
+   "product_group": null,
+   "customer": "최성배"
+  },
+  {
+   "folder": "GD1806-최성배",
+   "rel": "CAD도면_제품별정리(신규)/GD1806-최성배",
+   "project_no": "GD1806",
+   "yymm": "1806",
+   "seq": null,
+   "label": "최성배",
+   "product_group": null,
+   "customer": "최성배"
+  },
+  {
+   "folder": "GD1904-웰이엔씨",
+   "rel": "19 경동도면함/GD1904-웰이엔씨",
+   "project_no": "GD1904",
+   "yymm": "1904",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1904-웰이엔씨",
+   "rel": "20 경동도면함/19 경동도면함/GD1904-웰이엔씨",
+   "project_no": "GD1904",
+   "yymm": "1904",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1904-웰이엔씨",
+   "rel": "CAD도면_제품별정리(신규)/GD1904-웰이엔씨",
+   "project_no": "GD1904",
+   "yymm": "1904",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD1904-00-01-리시버탱크",
+   "rel": "19 경동도면함/GD1904-웰이엔씨/GD1904-00-01-리시버탱크",
+   "project_no": "GD1904-00-01",
+   "yymm": "1904",
+   "seq": null,
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD1904-00-01-리시버탱크",
+   "rel": "20 경동도면함/19 경동도면함/GD1904-웰이엔씨/GD1904-00-01-리시버탱크",
+   "project_no": "GD1904-00-01",
+   "yymm": "1904",
+   "seq": null,
+   "label": "리시버탱크",
+   "product_group": "저장탱크",
+   "customer": null
+  },
+  {
+   "folder": "GD1904-00-02-교반기",
+   "rel": "19 경동도면함/GD1904-웰이엔씨/GD1904-00-02-교반기",
+   "project_no": "GD1904-00-02",
+   "yymm": "1904",
+   "seq": null,
+   "label": "교반기",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD1904-00-02-교반기",
+   "rel": "20 경동도면함/19 경동도면함/GD1904-웰이엔씨/GD1904-00-02-교반기",
+   "project_no": "GD1904-00-02",
+   "yymm": "1904",
+   "seq": null,
+   "label": "교반기",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 2차 도면",
+   "rel": "19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 2차 도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "2차 도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 3차도면",
+   "rel": "19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 3차도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "3차도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 4차도면",
+   "rel": "19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 4차도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "4차도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 2차 도면",
+   "rel": "20 경동도면함/19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 2차 도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "2차 도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 3차도면",
+   "rel": "20 경동도면함/19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 3차도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "3차도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1905-01-02 4차도면",
+   "rel": "20 경동도면함/19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 4차도면",
+   "project_no": "GD1905-01-02",
+   "yymm": "1905",
+   "seq": null,
+   "label": "4차도면",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD1906-저장탱크-대한열기",
+   "rel": "19 경동도면함/GD1906-저장탱크-대한열기",
+   "project_no": "GD1906",
+   "yymm": "1906",
+   "seq": null,
+   "label": "저장탱크-대한열기",
+   "product_group": "저장탱크",
+   "customer": "대한열기"
+  },
+  {
+   "folder": "GD1906-저장탱크-대한열기",
+   "rel": "20 경동도면함/19 경동도면함/GD1906-저장탱크-대한열기",
+   "project_no": "GD1906",
+   "yymm": "1906",
+   "seq": null,
+   "label": "저장탱크-대한열기",
+   "product_group": "저장탱크",
+   "customer": "대한열기"
+  },
+  {
+   "folder": "GD1906-저장탱크-대한열기",
+   "rel": "CAD도면_제품별정리(신규)/GD1906-저장탱크-대한열기",
+   "project_no": "GD1906",
+   "yymm": "1906",
+   "seq": null,
+   "label": "저장탱크-대한열기",
+   "product_group": "저장탱크",
+   "customer": "대한열기"
+  },
+  {
+   "folder": "GD2003-00 웰이엔씨",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨",
+   "project_no": "GD2003-00",
+   "yymm": "2003",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD2003-00 웰이엔씨",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨",
+   "project_no": "GD2003-00",
+   "yymm": "2003",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD2003-00 웰이엔씨",
+   "rel": "CAD도면_제품별정리(신규)/GD2003-00 웰이엔씨",
+   "project_no": "GD2003-00",
+   "yymm": "2003",
+   "seq": null,
+   "label": "웰이엔씨",
+   "product_group": null,
+   "customer": "웰이엔씨"
+  },
+  {
+   "folder": "GD2003-01-VESSEL 160L",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-VESSEL 160L",
+   "project_no": "GD2003-01",
+   "yymm": "2003",
+   "seq": null,
+   "label": "VESSEL 160L",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-01-썬바이오-VESSEL 160L",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-썬바이오-VESSEL 160L",
+   "project_no": "GD2003-01",
+   "yymm": "2003",
+   "seq": null,
+   "label": "썬바이오-VESSEL 160L",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-01-VESSEL 160L",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-VESSEL 160L",
+   "project_no": "GD2003-01",
+   "yymm": "2003",
+   "seq": null,
+   "label": "VESSEL 160L",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-01-썬바이오-VESSEL 160L",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-썬바이오-VESSEL 160L",
+   "project_no": "GD2003-01",
+   "yymm": "2003",
+   "seq": null,
+   "label": "썬바이오-VESSEL 160L",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-02 제작도",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-VESSEL 160L/GD2003-02 제작도",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "제작도",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-02 제작도",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-썬바이오-VESSEL 160L/GD2003-02 제작도",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "제작도",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-02-에니젠-누체필터 100L",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-02-에니젠-누체필터 100L",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "에니젠-누체필터 100L",
+   "product_group": "누체필터",
+   "customer": "에니젠"
+  },
+  {
+   "folder": "GD2003-02 제작도",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-VESSEL 160L/GD2003-02 제작도",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "제작도",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-02 제작도",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-01-썬바이오-VESSEL 160L/GD2003-02 제작도",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "제작도",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-02-에니젠-누체필터 100L",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-02-에니젠-누체필터 100L",
+   "project_no": "GD2003-02",
+   "yymm": "2003",
+   "seq": null,
+   "label": "에니젠-누체필터 100L",
+   "product_group": "누체필터",
+   "customer": "에니젠"
+  },
+  {
+   "folder": "GD2003-03-비나텍 누체필터 40L",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-03-비나텍 누체필터 40L",
+   "project_no": "GD2003-03",
+   "yymm": "2003",
+   "seq": null,
+   "label": "비나텍 누체필터 40L",
+   "product_group": "누체필터",
+   "customer": "비나텍"
+  },
+  {
+   "folder": "GD2003-03-비나텍 누체필터 40L",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-03-비나텍 누체필터 40L",
+   "project_no": "GD2003-03",
+   "yymm": "2003",
+   "seq": null,
+   "label": "비나텍 누체필터 40L",
+   "product_group": "누체필터",
+   "customer": "비나텍"
+  },
+  {
+   "folder": "GD2003-04-개조건",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-04-개조건",
+   "project_no": "GD2003-04",
+   "yymm": "2003",
+   "seq": null,
+   "label": "개조건",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-04-개조건",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-04-개조건",
+   "project_no": "GD2003-04",
+   "yymm": "2003",
+   "seq": null,
+   "label": "개조건",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2003-06-고상반응기 30L",
+   "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-06-고상반응기 30L",
+   "project_no": "GD2003-06",
+   "yymm": "2003",
+   "seq": null,
+   "label": "고상반응기 30L",
+   "product_group": "반응기",
+   "customer": null
+  },
+  {
+   "folder": "GD2003-06-고상반응기 30L",
+   "rel": "20 경동도면함/GD2003-00 웰이엔씨/GD2003-06-고상반응기 30L",
+   "project_no": "GD2003-06",
+   "yymm": "2003",
+   "seq": null,
+   "label": "고상반응기 30L",
+   "product_group": "반응기",
+   "customer": null
+  },
+  {
+   "folder": "GD2005-00 한모루",
+   "rel": "20 경동도면함/20 경동도면함/GD2005-00 한모루",
+   "project_no": "GD2005-00",
+   "yymm": "2005",
+   "seq": null,
+   "label": "한모루",
+   "product_group": null,
+   "customer": "한모루"
+  },
+  {
+   "folder": "GD2005-00 한모루",
+   "rel": "20 경동도면함/GD2005-00 한모루",
+   "project_no": "GD2005-00",
+   "yymm": "2005",
+   "seq": null,
+   "label": "한모루",
+   "product_group": null,
+   "customer": "한모루"
+  },
+  {
+   "folder": "GD2005-00 한모루",
+   "rel": "CAD도면_제품별정리(신규)/GD2005-00 한모루",
+   "project_no": "GD2005-00",
+   "yymm": "2005",
+   "seq": null,
+   "label": "한모루",
+   "product_group": null,
+   "customer": "한모루"
+  },
+  {
+   "folder": "GD2005-02 추출라인",
+   "rel": "20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-02 추출라인",
+   "project_no": "GD2005-02",
+   "yymm": "2005",
+   "seq": null,
+   "label": "추출라인",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2005-02 추출라인",
+   "rel": "20 경동도면함/GD2005-00 한모루/GD2005-02 추출라인",
+   "project_no": "GD2005-02",
+   "yymm": "2005",
+   "seq": null,
+   "label": "추출라인",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2005-04-00 진공리본믹서",
+   "rel": "20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-04-00 진공리본믹서",
+   "project_no": "GD2005-04-00",
+   "yymm": "2005",
+   "seq": null,
+   "label": "진공리본믹서",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD2005-04-00 진공리본믹서",
+   "rel": "20 경동도면함/GD2005-00 한모루/GD2005-04-00 진공리본믹서",
+   "project_no": "GD2005-04-00",
+   "yymm": "2005",
+   "seq": null,
+   "label": "진공리본믹서",
+   "product_group": "교반기",
+   "customer": null
+  },
+  {
+   "folder": "GD2007-00 동광제약",
+   "rel": "20 경동도면함/20 경동도면함/GD2007-00 동광제약",
+   "project_no": "GD2007-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "동광제약",
+   "product_group": null,
+   "customer": "동광제약"
+  },
+  {
+   "folder": "GD2007-00 동광제약",
+   "rel": "20 경동도면함/GD2007-00 동광제약",
+   "project_no": "GD2007-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "동광제약",
+   "product_group": null,
+   "customer": "동광제약"
+  },
+  {
+   "folder": "GD2007-00 동광제약",
+   "rel": "CAD도면_제품별정리(신규)/GD2007-00 동광제약",
+   "project_no": "GD2007-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "동광제약",
+   "product_group": null,
+   "customer": "동광제약"
+  },
+  {
+   "folder": "GD2007-01-00-압력텡크(70L)",
+   "rel": "20 경동도면함/20 경동도면함/GD2007-00 동광제약/GD2007-01-00-압력텡크(70L)",
+   "project_no": "GD2007-01-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력텡크(70L)",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2007-01-00-압력텡크(70L) 추가작업",
+   "rel": "20 경동도면함/20 경동도면함/GD2007-00 동광제약/GD2007-01-00-압력텡크(70L) 추가작업",
+   "project_no": "GD2007-01-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력텡크(70L) 추가작업",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2007-01-00-압력텡크(70L)",
+   "rel": "20 경동도면함/GD2007-00 동광제약/GD2007-01-00-압력텡크(70L)",
+   "project_no": "GD2007-01-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력텡크(70L)",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2007-01-00-압력텡크(70L) 추가작업",
+   "rel": "20 경동도면함/GD2007-00 동광제약/GD2007-01-00-압력텡크(70L) 추가작업",
+   "project_no": "GD2007-01-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력텡크(70L) 추가작업",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2007-02-00 압력용기(30L)",
+   "rel": "20 경동도면함/20 경동도면함/GD2007-00 동광제약/GD2007-02-00 압력용기(30L)",
+   "project_no": "GD2007-02-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력용기(30L)",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2007-02-00 압력용기(30L)",
+   "rel": "20 경동도면함/GD2007-00 동광제약/GD2007-02-00 압력용기(30L)",
+   "project_no": "GD2007-02-00",
+   "yymm": "2007",
+   "seq": null,
+   "label": "압력용기(30L)",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2011-00 엔에프테크",
+   "rel": "20 경동도면함/20 경동도면함/GD2011-00 엔에프테크",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-00 엔에프테크 조범주",
+   "rel": "20 경동도면함/20 경동도면함/GD2011-00 엔에프테크 조범주",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크 조범주",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-00 엔에프테크",
+   "rel": "20 경동도면함/GD2011-00 엔에프테크",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-00 엔에프테크 조범주",
+   "rel": "20 경동도면함/GD2011-00 엔에프테크 조범주",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크 조범주",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-00 엔에프테크",
+   "rel": "CAD도면_제품별정리(신규)/GD2011-00 엔에프테크",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-00 엔에프테크 조범주",
+   "rel": "CAD도면_제품별정리(신규)/GD2011-00 엔에프테크 조범주",
+   "project_no": "GD2011-00",
+   "yymm": "2011",
+   "seq": null,
+   "label": "엔에프테크 조범주",
+   "product_group": null,
+   "customer": "엔에프테크"
+  },
+  {
+   "folder": "GD2011-01-01-ELTRO. NIZZLE",
+   "rel": "20 경동도면함/20 경동도면함/GD2011-00 엔에프테크 조범주/GD2011-01-01-ELTRO. NIZZLE",
+   "project_no": "GD2011-01-01",
+   "yymm": "2011",
+   "seq": null,
+   "label": "ELTRO. NIZZLE",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2011-01-01-ELTRO. NIZZLE",
+   "rel": "20 경동도면함/GD2011-00 엔에프테크 조범주/GD2011-01-01-ELTRO. NIZZLE",
+   "project_no": "GD2011-01-01",
+   "yymm": "2011",
+   "seq": null,
+   "label": "ELTRO. NIZZLE",
+   "product_group": null,
+   "customer": null
+  },
+  {
+   "folder": "GD2012-00 대호테크",
+   "rel": "20 경동도면함/20 경동도면함/GD2012-00 대호테크",
+   "project_no": "GD2012-00",
+   "yymm": "2012",
+   "seq": null,
+   "label": "대호테크",
+   "product_group": null,
+   "customer": "대호테크"
+  },
+  {
+   "folder": "GD2012-00 대호테크",
+   "rel": "20 경동도면함/GD2012-00 대호테크",
+   "project_no": "GD2012-00",
+   "yymm": "2012",
+   "seq": null,
+   "label": "대호테크",
+   "product_group": null,
+   "customer": "대호테크"
+  },
+  {
+   "folder": "GD2012-00 대호테크",
+   "rel": "CAD도면_제품별정리(신규)/GD2012-00 대호테크",
+   "project_no": "GD2012-00",
+   "yymm": "2012",
+   "seq": null,
+   "label": "대호테크",
+   "product_group": null,
+   "customer": "대호테크"
+  }
+ ],
+ "dxf": {
+  "population_cad_files": 3299,
+  "dxf_files": 29,
+  "distinct_drawings": 9,
+  "hit_rates": {
+   "files": 9,
+   "parsed": 9,
+   "failed": 0,
+   "홀 수량": 7,
+   "총 절단장": 9,
+   "판재 면적": 5,
+   "재질": 5,
+   "두께": 5
+  },
+  "measures": [
+   {
+    "file": "건조기 20170822.dxf",
+    "rel": "17 경동도면함/GD1704-두루텍/GD170402-샌딩탱크/건조기 20170822.dxf",
+    "size": 3544088,
+    "encoding": "cp949",
+    "entities": {
+     "LINE": 8604,
+     "CIRCLE": 1443,
+     "ARC": 2562,
+     "DIMENSION": 216,
+     "TEXT": 221
+    },
+    "holes": 1443,
+    "cut_len": 1892440.204137637,
+    "closed_area": 0.0,
+    "closed_polys": 0,
+    "material": null,
+    "material_hits": {},
+    "thickness": 3.0,
+    "thickness_hits": {
+     "5": 5,
+     "2": 2,
+     "3": 7,
+     "1": 3,
+     "8": 1
+    },
+    "uom": "도면단위",
+    "inserts": 0,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 1443.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 1443개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 1892440.2041,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 1850785.5 + ARC 41654.7 + POLYLINE 0.0. BLOCK 내부 형상 미전개(INSERT 0회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "두께",
+      "value": 3.0,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'5': 5, '2': 2, '3': 7, '1': 3, '8': 1} 중 최빈값 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "D-Tank Main Page-200123B.dxf",
+    "rel": "19 경동도면함/GD1906-저장탱크-대한열기/D-Tank Main Page-200123B.dxf",
+    "size": 36177370,
+    "encoding": "cp1252",
+    "entities": {
+     "LINE": 7129,
+     "TEXT": 854,
+     "POLYLINE": 2458,
+     "VERTEX": 205420,
+     "SEQEND": 2458,
+     "ATTDEF": 16,
+     "CIRCLE": 113,
+     "INSERT": 168,
+     "ARC": 293
+    },
+    "holes": 113,
+    "cut_len": 727640.933608809,
+    "closed_area": 98450.73716416227,
+    "closed_polys": 219,
+    "material": "A240316L",
+    "material_hits": {
+     "A240304": 1,
+     "A240316L": 1
+    },
+    "thickness": null,
+    "thickness_hits": {},
+    "uom": "도면단위",
+    "inserts": 168,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 113.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 113개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 727640.9336,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 600053.5 + ARC 22474.3 + POLYLINE 105113.1. BLOCK 내부 형상 미전개(INSERT 168회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "판재 면적",
+      "value": 98450.7372,
+      "uom": "도면단위²",
+      "text": null,
+      "source": "DXF 실측 — 닫힌 POLYLINE 219개 shoelace 면적합 (D-110-b)"
+     },
+     {
+      "type": "재질",
+      "value": null,
+      "uom": null,
+      "text": "A240316L",
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'A240304': 1, 'A240316L': 1} 중 최빈값. `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "[DOOSAN-PID_ALL-ADDITIVE-2019.12.07.dxf",
+    "rel": "19 경동도면함/GD1906-저장탱크-대한열기/GD1905-01-02 2차 도면/[DOOSAN-PID_ALL-ADDITIVE-2019.12.07.dxf",
+    "size": 145930288,
+    "encoding": "cp949",
+    "entities": {
+     "LINE": 81484,
+     "TEXT": 3914,
+     "INSERT": 2050,
+     "CIRCLE": 387,
+     "POLYLINE": 7466,
+     "VERTEX": 916533,
+     "SEQEND": 7466,
+     "ARC": 4843,
+     "SOLID": 120,
+     "ATTDEF": 187,
+     "VIEWPORT": 1
+    },
+    "holes": 387,
+    "cut_len": 466613.5805886938,
+    "closed_area": 5607038.123083656,
+    "closed_polys": 77,
+    "material": "SUS316",
+    "material_hits": {
+     "STS316": 6,
+     "SUS316": 7
+    },
+    "thickness": 20.0,
+    "thickness_hits": {
+     "20": 3,
+     "30": 1
+    },
+    "uom": "도면단위",
+    "inserts": 2050,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 387.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 387개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 466613.5806,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 396568.9 + ARC 25825.8 + POLYLINE 44218.9. BLOCK 내부 형상 미전개(INSERT 2050회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "판재 면적",
+      "value": 5607038.1231,
+      "uom": "도면단위²",
+      "text": null,
+      "source": "DXF 실측 — 닫힌 POLYLINE 77개 shoelace 면적합 (D-110-b)"
+     },
+     {
+      "type": "두께",
+      "value": 20.0,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'20': 3, '30': 1} 중 최빈값 (D-110-b)"
+     },
+     {
+      "type": "재질",
+      "value": null,
+      "uom": null,
+      "text": "SUS316",
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'STS316': 6, 'SUS316': 7} 중 최빈값. `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "명판.dxf",
+    "rel": "19 경동도면함/GD1906-저장탱크-대한열기/명판.dxf",
+    "size": 471333,
+    "encoding": "utf-8",
+    "entities": {
+     "LINE": 458,
+     "ARC": 28,
+     "TEXT": 290,
+     "CIRCLE": 28,
+     "INSERT": 5
+    },
+    "holes": 28,
+    "cut_len": 8684.687642837967,
+    "closed_area": 0.0,
+    "closed_polys": 0,
+    "material": null,
+    "material_hits": {},
+    "thickness": null,
+    "thickness_hits": {},
+    "uom": "mm",
+    "inserts": 5,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 28.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 28개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 8684.6876,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — LINE 8475.0 + ARC 209.7 + POLYLINE 0.0. BLOCK 내부 형상 미전개(INSERT 5회) — 과소 계상 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "GD2003-02-03-100L-D.dxf",
+    "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-02-에니젠-누체필터 100L/GD2003-02-03-100L-D.dxf",
+    "size": 21473,
+    "encoding": "utf-8",
+    "entities": {
+     "DIMENSION": 4,
+     "TEXT": 2,
+     "LINE": 10
+    },
+    "holes": 0,
+    "cut_len": 8244.0,
+    "closed_area": 0.0,
+    "closed_polys": 0,
+    "material": "STS304",
+    "material_hits": {
+     "STS304": 2
+    },
+    "thickness": 3.0,
+    "thickness_hits": {
+     "11": 1,
+     "3": 1
+    },
+    "uom": "도면단위",
+    "inserts": 0,
+    "error": null,
+    "features": [
+     {
+      "type": "총 절단장",
+      "value": 8244.0,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 8244.0 + ARC 0.0 + POLYLINE 0.0. BLOCK 내부 형상 미전개(INSERT 0회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "두께",
+      "value": 3.0,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'11': 1, '3': 1} 중 최빈값 (D-110-b)"
+     },
+     {
+      "type": "재질",
+      "value": null,
+      "uom": null,
+      "text": "STS304",
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'STS304': 2} 중 최빈값. `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "GD2003-03-비나텍 40L-M.dxf",
+    "rel": "20 경동도면함/20 경동도면함/GD2003-00 웰이엔씨/GD2003-03-비나텍 누체필터 40L/GD2003-03-비나텍 40L-M.dxf",
+    "size": 413383,
+    "encoding": "cp1252",
+    "entities": {
+     "DIMENSION": 40,
+     "LINE": 330,
+     "CIRCLE": 1349,
+     "ARC": 47,
+     "TEXT": 12,
+     "POLYLINE": 6,
+     "VERTEX": 18,
+     "SEQEND": 6
+    },
+    "holes": 1349,
+    "cut_len": 47437.71899213034,
+    "closed_area": 129.15565842296928,
+    "closed_polys": 3,
+    "material": "STS304",
+    "material_hits": {
+     "STS304": 4
+    },
+    "thickness": 20.0,
+    "thickness_hits": {
+     "20": 3,
+     "10": 1
+    },
+    "uom": "도면단위",
+    "inserts": 0,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 1349.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 1349개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 47437.719,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 46527.5 + ARC 561.6 + POLYLINE 348.7. BLOCK 내부 형상 미전개(INSERT 0회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "판재 면적",
+      "value": 129.1557,
+      "uom": "도면단위²",
+      "text": null,
+      "source": "DXF 실측 — 닫힌 POLYLINE 3개 shoelace 면적합 (D-110-b)"
+     },
+     {
+      "type": "두께",
+      "value": 20.0,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'20': 3, '10': 1} 중 최빈값 (D-110-b)"
+     },
+     {
+      "type": "재질",
+      "value": null,
+      "uom": null,
+      "text": "STS304",
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'STS304': 4} 중 최빈값. `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "리본믹서용 감속기 MX155WB000NNB-001-R0.dxf",
+    "rel": "20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-04-00 진공리본믹서/리본믹서용 감속기 MX155WB000NNB-001-R0.dxf",
+    "size": 378835,
+    "encoding": "cp1252",
+    "entities": {
+     "CIRCLE": 40,
+     "TEXT": 61,
+     "LINE": 546,
+     "ARC": 503,
+     "DIMENSION": 38,
+     "POLYLINE": 36,
+     "VERTEX": 313,
+     "SEQEND": 36,
+     "INSERT": 6,
+     "POINT": 1
+    },
+    "holes": 40,
+    "cut_len": 39458.2608213749,
+    "closed_area": 1774.432220193965,
+    "closed_polys": 11,
+    "material": null,
+    "material_hits": {},
+    "thickness": null,
+    "thickness_hits": {},
+    "uom": "도면단위",
+    "inserts": 6,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 40.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 40개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 39458.2608,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 28412.1 + ARC 9883.9 + POLYLINE 1162.2. BLOCK 내부 형상 미전개(INSERT 6회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "판재 면적",
+      "value": 1774.4322,
+      "uom": "도면단위²",
+      "text": null,
+      "source": "DXF 실측 — 닫힌 POLYLINE 11개 shoelace 면적합 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "SPOON.dxf",
+    "rel": "20 경동도면함/20 경동도면함/GD2005-00 한모루/SPOON.dxf",
+    "size": 33850,
+    "encoding": "utf-8",
+    "entities": {
+     "ARC": 13,
+     "LINE": 15,
+     "POLYLINE": 3,
+     "VERTEX": 102,
+     "SEQEND": 3,
+     "DIMENSION": 2,
+     "TEXT": 1
+    },
+    "holes": 0,
+    "cut_len": 1988.1930980861441,
+    "closed_area": 0.0,
+    "closed_polys": 0,
+    "material": "STS304",
+    "material_hits": {
+     "STS304": 1
+    },
+    "thickness": 0.3,
+    "thickness_hits": {
+     "0.3": 1
+    },
+    "uom": "도면단위",
+    "inserts": 0,
+    "error": null,
+    "features": [
+     {
+      "type": "총 절단장",
+      "value": 1988.1931,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 1784.1 + ARC 68.0 + POLYLINE 136.1. BLOCK 내부 형상 미전개(INSERT 0회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "두께",
+      "value": 0.3,
+      "uom": "mm",
+      "text": null,
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'0.3': 1} 중 최빈값 (D-110-b)"
+     },
+     {
+      "type": "재질",
+      "value": null,
+      "uom": null,
+      "text": "STS304",
+      "source": "DXF 실측 — TEXT/MTEXT 표제란 정규식 적중 {'STS304': 1} 중 최빈값. `FEATURE_VALUE` 가 NUMERIC 이라 적재할 자리가 없다 (D-110-b)"
+     }
+    ]
+   },
+   {
+    "file": "005_2007-11-27_23-M451KL-D20-65.dxf",
+    "rel": "CAD도면_제품별정리(신규)/REACTOR - 반응기 - 반응기/005_2007-11-27_23-M451KL-D20-65.dxf",
+    "size": 619233,
+    "encoding": "utf-8",
+    "entities": {
+     "LINE": 594,
+     "TEXT": 80,
+     "SOLID": 38,
+     "ARC": 41,
+     "INSERT": 48,
+     "POLYLINE": 46,
+     "VERTEX": 219,
+     "SEQEND": 46,
+     "CIRCLE": 28,
+     "POINT": 2
+    },
+    "holes": 28,
+    "cut_len": 9658.506717358334,
+    "closed_area": 17.023334870078543,
+    "closed_polys": 2,
+    "material": null,
+    "material_hits": {},
+    "thickness": null,
+    "thickness_hits": {},
+    "uom": "도면단위",
+    "inserts": 48,
+    "error": null,
+    "features": [
+     {
+      "type": "홀 수량",
+      "value": 28.0,
+      "uom": "ea",
+      "text": null,
+      "source": "DXF 실측 — CIRCLE 엔티티 28개 전량. 지름 필터 기준이 도입기업 자료에 없어 걸지 않았다 (D-110-b)"
+     },
+     {
+      "type": "총 절단장",
+      "value": 9658.5067,
+      "uom": "도면단위",
+      "text": null,
+      "source": "DXF 실측 — LINE 9010.4 + ARC 359.6 + POLYLINE 288.5. BLOCK 내부 형상 미전개(INSERT 48회) — 과소 계상 (D-110-b)"
+     },
+     {
+      "type": "판재 면적",
+      "value": 17.0233,
+      "uom": "도면단위²",
+      "text": null,
+      "source": "DXF 실측 — 닫힌 POLYLINE 2개 shoelace 면적합 (D-110-b)"
+     }
+    ]
+   }
+  ]
+ },
+ "quotes": {
+  "summary": {
+   "files": 26,
+   "opened": 26,
+   "open_failed": 0,
+   "total_extracted": 22,
+   "total_by_method": {
+    "숫자셀": 6,
+    "한자금액": 8,
+    "괄호숫자": 5,
+    "통화기호": 3
+   },
+   "sheet_totals": 90,
+   "multi_quote_files": 8,
+   "items": 462,
+   "files_with_items": 19,
+   "lead_extracted": 8,
+   "project_name_extracted": 16,
+   "amount_min": 5200000.0,
+   "amount_max": 997422000.0,
+   "lead_days": [
+    40,
+    45,
+    50,
+    70
+   ]
+  },
+  "docs": [
+   {
+    "file": "GD2005-02-추출기 견적-200207.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-02 추출라인/GD2005-02-추출기 견적-200207.xls",
+    "total": 997422000.0,
+    "method": "숫자셀",
+    "cell": "견적집계표 (2)!23",
+    "lead_days": 70,
+    "project_name": "견 적 집 계 표",
+    "sheet_totals": [
+     {
+      "sheet": "견적집계표 (2)",
+      "cell": "견적집계표 (2)!23",
+      "amount": 997422000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기8.0",
+      "cell": "반응기8.0!23",
+      "amount": 236650000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기4.0",
+      "cell": "반응기4.0!23",
+      "amount": 439064000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기3.0-190218",
+      "cell": "반응기3.0-190218!23",
+      "amount": 194562000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기0.5",
+      "cell": "반응기0.5!23",
+      "amount": 127146000.0,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 8,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "GD2005-02-추출기 견적-200207A.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-02 추출라인/GD2005-02-추출기 견적-200207A.xls",
+    "total": 899916000.0,
+    "method": "숫자셀",
+    "cell": "견적집계표 (2)!23",
+    "lead_days": 70,
+    "project_name": "견 적 집 계 표",
+    "sheet_totals": [
+     {
+      "sheet": "견적집계표 (2)",
+      "cell": "견적집계표 (2)!23",
+      "amount": 899916000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "추출기 농축기",
+      "cell": "추출기 농축기!23",
+      "amount": 646455000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "추출기 농축기 (2)",
+      "cell": "추출기 농축기 (2)!23",
+      "amount": 422794000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "추출기 농축기 (4)",
+      "cell": "추출기 농축기 (4)!23",
+      "amount": 443795000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "추출기 농축기 (3)",
+      "cell": "추출기 농축기 (3)!23",
+      "amount": 446819000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기8.0",
+      "cell": "반응기8.0!23",
+      "amount": 221150000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기4.0",
+      "cell": "반응기4.0!23",
+      "amount": 398064000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기3.0",
+      "cell": "반응기3.0!23",
+      "amount": 180862000.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "반응기0.5",
+      "cell": "반응기0.5!23",
+      "amount": 99840000.0,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 8,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "리시버&콘덴샤 (현대 타견적).xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/20 경동도면함/20 경동도면함/GD2005-00 한모루/GD2005-02 추출라인/리시버&콘덴샤 (현대 타견적).xls",
+    "total": 11708400.0,
+    "method": "숫자셀",
+    "cell": ".xls)콘덴샤!12",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": ".xls)콘덴샤",
+      "cell": ".xls)콘덴샤!12",
+      "amount": 11708400.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": ".xls).xls 리시버",
+      "cell": ".xls).xls 리시버!12",
+      "amount": 8980000.0,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 17,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "Reactor-견적.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/Reactor-견적.xls",
+    "total": 142465000.0,
+    "method": "한자금액",
+    "cell": "AR-1402!16",
+    "lead_days": null,
+    "project_name": "AR-1402",
+    "sheet_totals": [
+     {
+      "sheet": "AR-1402",
+      "cell": "AR-1402!16",
+      "amount": 142465000.0,
+      "method": "한자금액"
+     },
+     {
+      "sheet": "AR-3401",
+      "cell": "AR-3401!16",
+      "amount": 123802000.0,
+      "method": "한자금액"
+     },
+     {
+      "sheet": "AR-4401",
+      "cell": "AR-4401!16",
+      "amount": 183116000.0,
+      "method": "한자금액"
+     },
+     {
+      "sheet": "PR-1401",
+      "cell": "PR-1401!16",
+      "amount": 142465000.0,
+      "method": "한자금액"
+     },
+     {
+      "sheet": "PR-1404",
+      "cell": "PR-1404!16",
+      "amount": 253325000.0,
+      "method": "한자금액"
+     },
+     {
+      "sheet": "PR-2402",
+      "cell": "PR-2402!16",
+      "amount": 184063000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 41,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "견적서-REACTOR FULL SET(10,000L).xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/견적서-REACTOR FULL SET(10,000L).xls",
+    "total": 160423000.0,
+    "method": "한자금액",
+    "cell": "REACTOR FULL SET(10,000)!16",
+    "lead_days": 50,
+    "project_name": "REACTOR FULL SET",
+    "sheet_totals": [
+     {
+      "sheet": "REACTOR FULL SET(10,000)",
+      "cell": "REACTOR FULL SET(10,000)!16",
+      "amount": 160423000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 68,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "total": 261231000.0,
+    "method": "한자금액",
+    "cell": "REACTOR FULL SET!16",
+    "lead_days": 50,
+    "project_name": "REACTOR(CONDENSER포함)",
+    "sheet_totals": [
+     {
+      "sheet": "REACTOR FULL SET",
+      "cell": "REACTOR FULL SET!16",
+      "amount": 261231000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 58,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "견적서-REACTOR FULL SET(7,400L).xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/견적서-REACTOR FULL SET(7,400L).xls",
+    "total": 258931000.0,
+    "method": "한자금액",
+    "cell": "REACTOR FULL SET!16",
+    "lead_days": 50,
+    "project_name": "REACTOR(CONDENSER포함)",
+    "sheet_totals": [
+     {
+      "sheet": "REACTOR FULL SET",
+      "cell": "REACTOR FULL SET!16",
+      "amount": 258931000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 58,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "견적서-REACTOR 일성.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/견적서-REACTOR 일성.xls",
+    "total": 67026000.0,
+    "method": "한자금액",
+    "cell": "REACTOR 2000!16",
+    "lead_days": 50,
+    "project_name": "REACTOR",
+    "sheet_totals": [
+     {
+      "sheet": "REACTOR 2000",
+      "cell": "REACTOR 2000!16",
+      "amount": 67026000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 37,
+    "failures": [],
+    "error": null
+   },
+   {
+    "file": "발주,견적의뢰.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/121-017반응기(3.0m3)/발주,견적의뢰.xls",
+    "total": null,
+    "method": null,
+    "cell": null,
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [],
+    "items": 0,
+    "failures": [
+     "총액 라벨 옆에서 금액을 찾지 못했다 — 견적요청서·부품 계산시트처럼 갑지가 없는 파일일 수 있다",
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "신성 G.L 반응기 타견적.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/G.L반응기/신성 G.L 반응기 타견적.xls",
+    "total": 45365000.0,
+    "method": "괄호숫자",
+    "cell": "갑지!13",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": "갑지",
+      "cell": "갑지!13",
+      "amount": 45365000.0,
+      "method": "괄호숫자"
+     }
+    ],
+    "items": 16,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "반응기2000-타견적.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/고압 반응기 2.0/반응기2000-타견적.xls",
+    "total": 158044960.0,
+    "method": "숫자셀",
+    "cell": "견적서 갑지!12",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": "견적서 갑지",
+      "cell": "견적서 갑지!12",
+      "amount": 158044960.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "견적서 갑지 (2)",
+      "cell": "견적서 갑지 (2)!12",
+      "amount": 180880389.8,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 36,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "반응기8000-타견적.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기 8000리터/반응기8000-타견적.xls",
+    "total": 158044960.0,
+    "method": "숫자셀",
+    "cell": "견적서 갑지!12",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": "견적서 갑지",
+      "cell": "견적서 갑지!12",
+      "amount": 158044960.0,
+      "method": "숫자셀"
+     },
+     {
+      "sheet": "견적서 갑지 (2)",
+      "cell": "견적서 갑지 (2)!12",
+      "amount": 169459354.0,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 36,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "반응기-1차견적080222.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기(신설및교체)/반응기-1차견적080222.xls",
+    "total": 547375000.0,
+    "method": "한자금액",
+    "cell": "갑지(1차02.27)!16",
+    "lead_days": null,
+    "project_name": "합성부 반응기 신설및교체",
+    "sheet_totals": [
+     {
+      "sheet": "갑지(1차02.27)",
+      "cell": "갑지(1차02.27)!16",
+      "amount": 547375000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 17,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "반응기-2차견적080325.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기(신설및교체)/반응기-2차견적080325.xls",
+    "total": 237251000.0,
+    "method": "한자금액",
+    "cell": "갑지(2차03.25)!16",
+    "lead_days": null,
+    "project_name": "합성부 반응기 신설및교체",
+    "sheet_totals": [
+     {
+      "sheet": "갑지(2차03.25)",
+      "cell": "갑지(2차03.25)!16",
+      "amount": 237251000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 7,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "전기견적-석광.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기(신설및교체)/전기견적-석광.xls",
+    "total": 5200000.0,
+    "method": "통화기호",
+    "cell": "반응기!11",
+    "lead_days": 45,
+    "project_name": "반응기 CONTROL",
+    "sheet_totals": [
+     {
+      "sheet": "반응기",
+      "cell": "반응기!11",
+      "amount": 5200000.0,
+      "method": "통화기호"
+     }
+    ],
+    "items": 2,
+    "failures": [
+     "반응기!11 '金    額 :일금\\1,759,443' 행에 금액 후보가 2개(1,759,443, 5,200,000) — 어느 것이 총액인지 정본이 말해 주지 않아 고르지 않는다"
+    ],
+    "error": null
+   },
+   {
+    "file": "(신풍)반응기0.5-견적적용-KT120127-00.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-500L/(신풍)반응기0.5-견적적용-KT120127-00.xls",
+    "total": null,
+    "method": null,
+    "cell": null,
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [],
+    "items": 0,
+    "failures": [
+     "총액 라벨 옆에서 금액을 찾지 못했다 — 견적요청서·부품 계산시트처럼 갑지가 없는 파일일 수 있다",
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "(신풍)반응기0.5-견적적용-KT120206-00.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-500L/(신풍)반응기0.5-견적적용-KT120206-00.xls",
+    "total": null,
+    "method": null,
+    "cell": null,
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [],
+    "items": 0,
+    "failures": [
+     "총액 라벨 옆에서 금액을 찾지 못했다 — 견적요청서·부품 계산시트처럼 갑지가 없는 파일일 수 있다",
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "견적(반응기)-석광.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-500L/견적(반응기)-석광.xls",
+    "total": 5914098.0,
+    "method": "통화기호",
+    "cell": "조제탱크!11",
+    "lead_days": 40,
+    "project_name": "조제탱크(반응기)",
+    "sheet_totals": [
+     {
+      "sheet": "조제탱크",
+      "cell": "조제탱크!11",
+      "amount": 5914098.0,
+      "method": "통화기호"
+     }
+    ],
+    "items": 11,
+    "failures": [
+     "조제탱크!11 '金    額 :일금\\1,759,443' 행에 금액 후보가 2개(1,759,443, 5,914,098) — 어느 것이 총액인지 정본이 말해 주지 않아 고르지 않는다"
+    ],
+    "error": null
+   },
+   {
+    "file": "신성 304 아미노 아세탈 저장조3000리터 타견적.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-합성/암모니아/아미노 아세탈 저장조 3.0/신성 304 아미노 아세탈 저장조3000리터 타견적.xls",
+    "total": 27167000.0,
+    "method": "괄호숫자",
+    "cell": "갑지!13",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": "갑지",
+      "cell": "갑지!13",
+      "amount": 27167000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "갑지 (계약 타견적)",
+      "cell": "갑지 (계약 타견적)!13",
+      "amount": 27167000.0,
+      "method": "괄호숫자"
+     }
+    ],
+    "items": 0,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "견적가로-제출용.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-합성/암모니아/암모니아 배관 업체/견적가로-제출용.xls",
+    "total": 58948000.0,
+    "method": "괄호숫자",
+    "cell": "갑지!19",
+    "lead_days": null,
+    "project_name": "암모니아 회수 설비공사",
+    "sheet_totals": [
+     {
+      "sheet": "갑지",
+      "cell": "갑지!19",
+      "amount": 58948000.0,
+      "method": "괄호숫자"
+     }
+    ],
+    "items": 10,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "견적가로.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-합성/암모니아/암모니아 배관 업체/견적가로.xls",
+    "total": 128500000.0,
+    "method": "괄호숫자",
+    "cell": "갑지!19",
+    "lead_days": null,
+    "project_name": "서초동 근생 설비공사",
+    "sheet_totals": [
+     {
+      "sheet": "갑지",
+      "cell": "갑지!19",
+      "amount": 128500000.0,
+      "method": "괄호숫자"
+     }
+    ],
+    "items": 9,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "견적서갑지세로.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기-합성/암모니아/암모니아 배관 업체/견적서갑지세로.xls",
+    "total": 130000000.0,
+    "method": "괄호숫자",
+    "cell": "횡갑지 (2)!19",
+    "lead_days": null,
+    "project_name": "계산동 솔밭 웨딩홀 신축 기계설비공사",
+    "sheet_totals": [
+     {
+      "sheet": "횡갑지 (2)",
+      "cell": "횡갑지 (2)!19",
+      "amount": 130000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "견적서(새남)",
+      "cell": "견적서(새남)!6",
+      "amount": 215000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "횡갑지",
+      "cell": "횡갑지!19",
+      "amount": 31000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한국코아,서부문화예술관",
+      "cell": "한국코아,서부문화예술관!19",
+      "amount": 31000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "설렁탕집",
+      "cell": "설렁탕집!19",
+      "amount": 7500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한대백남음악관",
+      "cell": "한대백남음악관!19",
+      "amount": 22000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한국코아펌프",
+      "cell": "한국코아펌프!19",
+      "amount": 4500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "00도서관",
+      "cell": "00도서관!19",
+      "amount": 77900000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "삼해수산",
+      "cell": "삼해수산!19",
+      "amount": 17000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "신동아00지역",
+      "cell": "신동아00지역!19",
+      "amount": 77900000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "광주00지역",
+      "cell": "광주00지역!19",
+      "amount": 26000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "마포평생학습관",
+      "cell": "마포평생학습관!19",
+      "amount": 13600000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "메탄가스공사",
+      "cell": "메탄가스공사!19",
+      "amount": 7500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "대치동업무시설",
+      "cell": "대치동업무시설!19",
+      "amount": 10000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "VIPS 4호점",
+      "cell": "VIPS 4호점!19",
+      "amount": 19000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "희성전선",
+      "cell": "희성전선!19",
+      "amount": 15000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "화신안마시술소",
+      "cell": "화신안마시술소!19",
+      "amount": 18000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "샤넬파크인입관",
+      "cell": "샤넬파크인입관!19",
+      "amount": 279000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "샤넬내역서갑지",
+      "cell": "샤넬내역서갑지!19",
+      "amount": 279000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "일산E마트",
+      "cell": "일산E마트!19",
+      "amount": 865000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "오창공장",
+      "cell": "오창공장!19",
+      "amount": 43000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "top본관연구동",
+      "cell": "top본관연구동!19",
+      "amount": 17500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "TOP(주)MCVD동",
+      "cell": "TOP(주)MCVD동!19",
+      "amount": 40000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "여의도CBF",
+      "cell": "여의도CBF!19",
+      "amount": 22000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "98-P-교",
+      "cell": "98-P-교!19",
+      "amount": 36950000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "정신병원",
+      "cell": "정신병원!19",
+      "amount": 17000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "E-MART",
+      "cell": "E-MART!19",
+      "amount": 2500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "방이동",
+      "cell": "방이동!19",
+      "amount": 115000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "광복교회",
+      "cell": "광복교회!19",
+      "amount": 61000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "하나병원",
+      "cell": "하나병원!19",
+      "amount": 24000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한양대(안산)",
+      "cell": "한양대(안산)!19",
+      "amount": 7000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "경희중학교",
+      "cell": "경희중학교!19",
+      "amount": 28000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "방배동복합빌딩",
+      "cell": "방배동복합빌딩!19",
+      "amount": 13500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "당진 RTTN",
+      "cell": "당진 RTTN!19",
+      "amount": 235000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "역삼동연립주택",
+      "cell": "역삼동연립주택!19",
+      "amount": 11000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "상록수변경(식당)",
+      "cell": "상록수변경(식당)!19",
+      "amount": 13500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "노본청(실행)",
+      "cell": "노본청(실행)!19",
+      "amount": 75500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한대 학생회관",
+      "cell": "한대 학생회관!19",
+      "amount": 9000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "신한병원",
+      "cell": "신한병원!19",
+      "amount": 30000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "한스바이오메드",
+      "cell": "한스바이오메드!19",
+      "amount": 42000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "비산동 다세대",
+      "cell": "비산동 다세대!19",
+      "amount": 57000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "스카이모텔",
+      "cell": "스카이모텔!19",
+      "amount": 18000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "라성호텔",
+      "cell": "라성호텔!19",
+      "amount": 15700000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "라성롯데",
+      "cell": "라성롯데!19",
+      "amount": 4500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "라성나이트",
+      "cell": "라성나이트!19",
+      "amount": 8000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "라성사우나",
+      "cell": "라성사우나!19",
+      "amount": 32500000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "평택압연공장",
+      "cell": "평택압연공장!19",
+      "amount": 75000000.0,
+      "method": "괄호숫자"
+     },
+     {
+      "sheet": "인천신선식품",
+      "cell": "인천신선식품!19",
+      "amount": 38400000.0,
+      "method": "괄호숫자"
+     }
+    ],
+    "items": 15,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "일진S[1].R(전기)견적(2008.01.18).xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기/일진S[1].R(전기)견적(2008.01.18).xls",
+    "total": 54845344.4,
+    "method": "숫자셀",
+    "cell": "견적서(장비)!32",
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [
+     {
+      "sheet": "견적서(장비)",
+      "cell": "견적서(장비)!32",
+      "amount": 54845344.4,
+      "method": "숫자셀"
+     }
+    ],
+    "items": 0,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "(견적)반응기1.0&3.0-KT09012001.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기1000,3000/(견적)반응기1.0&3.0-KT09012001.xls",
+    "total": 600807000.0,
+    "method": "한자금액",
+    "cell": "갑지(1)!16",
+    "lead_days": null,
+    "project_name": "REACTOR 2 종",
+    "sheet_totals": [
+     {
+      "sheet": "갑지(1)",
+      "cell": "갑지(1)!16",
+      "amount": 600807000.0,
+      "method": "한자금액"
+     }
+    ],
+    "items": 8,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "반응기견적참조용-090119.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/반응기/반응기1000,3000/반응기견적참조용-090119.xls",
+    "total": null,
+    "method": null,
+    "cell": null,
+    "lead_days": null,
+    "project_name": null,
+    "sheet_totals": [],
+    "items": 0,
+    "failures": [
+     "총액 라벨 옆에서 금액을 찾지 못했다 — 견적요청서·부품 계산시트처럼 갑지가 없는 파일일 수 있다",
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   },
+   {
+    "file": "창대견적서-Reactor 7000lts.xls",
+    "rel": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data/REACTOR/창대견적서-Reactor 7000lts.xls",
+    "total": 58244480.0,
+    "method": "통화기호",
+    "cell": "갑!15",
+    "lead_days": null,
+    "project_name": "REACTOR 5,000LTS 제작",
+    "sheet_totals": [
+     {
+      "sheet": "갑",
+      "cell": "갑!15",
+      "amount": 58244480.0,
+      "method": "통화기호"
+     }
+    ],
+    "items": 0,
+    "failures": [
+     "납기 일수를 숫자로 적은 표기가 없다 (예: '신속납기')"
+    ],
+    "error": null
+   }
+  ]
+ },
+ "blocked": {
+  "EST_PROJECTS": "`CUSTOMER_CODE` 가 NOT NULL 이고 `BAS_COMMON_CODES` '고객사' 그룹이 **0건**이다(D-47·D-56). `util/codes.require_code()` 가 422 를 던진다. 폴더명에서 읽은 고객사는 **파일시스템 파생 후보이지 도입기업 마스터가 아니다**(D-114) — 마스터로 승격하면 그게 합성이다",
+  "EST_QUOTATIONS": "`PROJECT_ID` 가 NOT NULL FK → `EST_PROJECTS` 다. 위가 0건이면 **구조적으로 한 행도 못 넣는다**. 견적 총액·납기는 실측했고 값은 이 리포트에 있다 — 적재만 막혀 있다",
+  "EST_CAD_DRAWINGS(원본 3,299건)": "기본 경로가 통계 xlsx 1,283행으로 이미 채워져 있다. 원본 3,299건으로 갈아끼우면 `DAT_TRAIN_DATASETS.TOTAL_CNT` · 기존 회귀·진행률 실측이 전부 어긋난다 — 원천 교체는 정본(D-03) 개정이 먼저다. 여기서는 **재기만** 한다",
+  "EST_CAD_FEATURES(DXF 실측)": "`tools/check_ingest.py` ⑤ 가 '확정 객체 0건 + Feature N행 = 합성' 으로 판정한다(G-13). DXF 실측은 합성이 아니지만 그 검사기는 객체 집계만을 Feature 원천으로 안다 — `--dxf-features` 로 **명시 요구**할 때만 쓴다"
+ }
+}

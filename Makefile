@@ -1,5 +1,5 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
-.PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest test \
+.PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
 
@@ -35,6 +35,9 @@ simulate:                       ## 레이저커팅기 1대 → 수집 API (수�
 
 cad-ingest:                     ## 도면 수집·정제(중복 183·0KB 4 제거) → EST_CAD_DRAWINGS
 	uv run python tools/cad_ingest.py
+
+cad-archive:                    ## 원본 아카이브 6,038파일 실측 — 프로젝트·도면·견적·DXF (읽기 전용 · DB 미적재)
+	uv run python tools/cad_ingest.py --source archive
 
 test:
 	uv run pytest -q
