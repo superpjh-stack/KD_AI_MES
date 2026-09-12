@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import design, nav
@@ -65,6 +66,16 @@ async def attach_role(request: Request, call_next):
         new_csrf_cookie = csrf.new_cookie_value()
     request.state.csrf_cookie = new_csrf_cookie
 
+    # ── 인증 가드 (D-204) — **권한보다 먼저** 본다 ────────────────────
+    # 권한은 "누구인지" 를 안 뒤에 따지는 것이다. 미인증에 403 을 주면 사용자는
+    # 자기 권한이 부족한 줄 알고 관리자에게 문의한다 — 실제로는 로그인을 안 한 것이다.
+    anon = _login_redirect(request)
+    if anon is not None:
+        if new_csrf_cookie:
+            anon.set_cookie(csrf.COOKIE, new_csrf_cookie, httponly=True, samesite="lax",
+                            secure=settings().is_prod)
+        return anon
+
     # ── 권한 가드 (D-78) — **폼 파싱보다 먼저** 본다 ──────────────────
     # FastAPI 의 `Form(...)` 은 핸들러 본문보다 앞서 파싱된다. 핸들러 안에서만 권한을 보면
     # 권한 없는 역할이 403 이 아니라 **422** 를 받는다(실측 재현). 계약 §4.0 검사 순서를 지킨다.
@@ -86,6 +97,43 @@ async def attach_role(request: Request, call_next):
 
 # 업무 화면 경로만 가드한다. `/api/*` 는 자체 검사를 하고, 공통 화면은 권한 영역이 없다.
 _SKIP_PREFIXES = ("/api", "/static", "/health", "/login", "/popup", "/error", "/board")
+
+# ── 운영계 인증 흐름 (D-204) ─────────────────────────────────────────────
+# **로그인 없이는 아무 화면도 열리지 않고, 미인증이면 로그인으로 보낸다.**
+# 전에는 prod 에서 업무화면이 그냥 **403** 이었다 — 로그인 페이지는 있는데 **갈 길이 없었다.**
+# 게다가 `/` 는 인증 없이 **200** 이라 메뉴·화면 구성이 그대로 보였다.
+#
+# 기계 경로(`/api/*`)는 **리다이렉트하지 않는다** — PLC·Gateway 는 302 를 따라가지 않고,
+# 따라간다 해도 로그인 HTML 을 받아 파싱 오류를 낸다. 그쪽은 401/403 이 맞다.
+_ANON_OK = ("/static", "/health", "/login", "/error")
+
+
+def _wants_html(request: Request) -> bool:
+    """브라우저 화면 요청인가. `Accept` 가 HTML 을 원하고 GET 일 때만 참."""
+    return (request.method == "GET"
+            and "text/html" in (request.headers.get("accept") or ""))
+
+
+def _login_redirect(request: Request) -> RedirectResponse | None:
+    """미인증 화면 요청 → `/login?next=…`. 아니면 `None`.
+
+    **dev 에서는 동작하지 않는다** — dev 는 세션 없이 `x-kyungdong-role` 헤더로 역할을
+    주므로(개발용 전환) 여기서 막으면 개발·테스트가 전부 멈춘다. 그 분기 자체가
+    `settings().is_prod` 로 갈린다(위 미들웨어).
+    """
+    if getattr(request.state, "session", None) is not None:
+        return None
+    if not settings().is_prod:
+        return None
+    path = request.url.path
+    if path.startswith(_ANON_OK):
+        return None
+    if path.startswith("/api"):
+        return None                       # 기계 경로 — 401/403 으로 답한다
+    if not _wants_html(request):
+        return None                       # fetch·XHR 은 리다이렉트로 답하지 않는다
+    nxt = path + (("?" + request.url.query) if request.url.query else "")
+    return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
 
 
 def _screen_for(path: str):

@@ -201,8 +201,11 @@ def gate_26(client: TestClient) -> None:
     # `tools/` 는 개발 도구라 통신이 있을 수 있지만, **루프백에만 닿는 것이 증명돼야** 한다.
     # 규칙을 느슨하게 하는 것이 아니라 **더 정밀하게** 만든 것이다: 전에는 import 만 보고
     # 잡았고, 그러면 "우리 앱에 POST 하는 시뮬레이터"와 "외부 API 호출"이 구분되지 않았다.
+    # **`urllib.parse` 는 네트워크가 아니다** (D-209) — URL 문자열을 쪼갤 뿐 소켓을
+    # 열지 않는다(네트워크는 `urllib.request`·`urllib.error`). 이것까지 막으면 URL
+    # 파싱을 손으로 짜게 되고, **열린 리다이렉트 같은 결함이 정확히 그 자리에서** 나온다.
     net_re = re.compile(
-        r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|boto3|openai)\b", re.M)
+        r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|boto3|openai|socket|urllib\.(?:request|error)|urllib\s*$)", re.M)
     # 루프백이 아닌 목적지 리터럴. `localhost`·`127.0.0.1`·`::1` 만 빼고 전부 외부로 본다.
     ext_url_re = re.compile(r"https?://(?!localhost|127\.0\.0\.1|\[?::1\]?)[A-Za-z0-9.\-]+")
     net_product, net_tool_ext, net_tool_ok = [], [], []

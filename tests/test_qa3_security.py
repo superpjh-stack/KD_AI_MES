@@ -774,7 +774,10 @@ def test_제품_코드에는_통신_모듈이_없다():
     잡아서 '우리 앱에 POST 하는 시뮬레이터' 와 '외부 API 호출' 이 구분되지 않았다.
     제품 코드 쪽 기준은 그대로 **0건**이다.
     """
-    net = re.compile(r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|boto3|openai)\b", re.M)
+    # **`urllib.parse` 는 네트워크가 아니다** (D-209) — URL 문자열을 쪼갤 뿐 소켓을
+    # 열지 않는다(네트워크는 `urllib.request`·`urllib.error`). 이것까지 막으면 URL
+    # 파싱을 손으로 짜게 되고, **열린 리다이렉트 같은 결함이 정확히 그 자리에서** 나온다.
+    net = re.compile(r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|boto3|openai|socket|urllib\.(?:request|error)|urllib\s*$)", re.M)
     hits = [p.relative_to(ROOT).as_posix()
             for p in (ROOT / "src").rglob("*.py")
             if "__pycache__" not in p.parts and net.search(p.read_text())]

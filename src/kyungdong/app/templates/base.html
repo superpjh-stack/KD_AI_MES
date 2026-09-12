@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+{% from "_macros.html" import csrf_field with context %}
 <header class="top">
   <span class="sys">{{ system_name }}</span>
   <span class="env">{{ env }}</span>
@@ -15,7 +16,21 @@
   <span class="badge notice">검색 모드 {{ search_mode }}</span>
   {% if not csrf_enforced %}<span class="badge bad">CSRF 미적용 (D-60)</span>{% endif %}
   {% if synthetic_note %}<span class="badge bad">{{ synthetic_note }}</span>{% endif %}
-  <span style="margin-left:auto" class="meta">{% if role %}{{ role.name }}{% endif %}</span>
+{# ── 로그인 상태 (D-206) — 운영 화면은 **누가 보고 있는지**와 **나가는 길**이 필요하다. #}
+  <span style="margin-left:auto" class="meta">
+    {% if signed_in_id %}
+      <b>{{ signed_in_id }}</b>{% if role %} · {{ role.name }}{% endif %}
+    {% else %}
+      {% if role %}{{ role.name }}{% endif %}
+      <span class="badge bad">로그인 아님 — 개발 전환 ({{ env }})</span>
+    {% endif %}
+  </span>
+  {% if signed_in_id %}
+  <form method="post" action="/logout" style="display:inline;margin-left:.5rem">
+    {{ csrf_field() }}
+    <button type="submit">로그아웃</button>
+  </form>
+  {% endif %}
 </header>
 <div class="layout">
   <nav class="side">

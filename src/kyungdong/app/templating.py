@@ -94,6 +94,10 @@ def _followups(request: Request) -> list:
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
     role = getattr(request.state, "role_code", None) or "SYSADMIN"
     s = settings()
+    # 로그인한 계정 (D-206). 운영 화면은 **누가 보고 있는지**와 **나가는 길**이 있어야 한다.
+    # 세션이 없으면 `None` 이고, dev 에서는 그 사실을 배지로 드러낸다 — 자동 로그인을
+    # 로그인한 것처럼 보이게 하지 않는다.
+    sess = getattr(request.state, "session", None)
     tpl = _env.get_template(name)
     html = tpl.render(
         request=request,
@@ -108,6 +112,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         cad_configured=s.cad_configured,
         synthetic_note=_synthetic_note(),
         sample_note=_sample_note(),
+        signed_in_id=getattr(sess, "login_id", None),
         followups=_followups(request),
         **ctx,
     )

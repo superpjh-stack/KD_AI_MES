@@ -32,6 +32,9 @@
   {% else %}
   <form method="post" action="/login">
     {{ csrf_field() }}
+{# 로그인 뒤 돌아갈 곳 — 미인증으로 막혔던 경로다(D-205). 서버가 `safe_next()` 로
+   **우리 앱 안의 경로인지 다시 검증한다** — 여기 값을 그대로 믿지 않는다. #}
+    <input type="hidden" name="next" value="{{ request.query_params.get('next', '') }}">
     {% for label in common.mockup.search_fields %}
     <label>{{ label }}
       {% if loop.first %}

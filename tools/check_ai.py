@@ -461,7 +461,10 @@ class _Spy:
 def _closed_loop_static() -> list[str]:
     """폐쇄형 정적 검사 — 외부 호출 라이브러리·URL 이 있으면 결함이다."""
     bad: list[str] = []
-    net = re.compile(r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|socket|boto3|openai)\b",
+    # **`urllib.parse` 는 네트워크가 아니다** (D-209) — URL 문자열을 쪼갤 뿐 소켓을
+    # 열지 않는다(네트워크는 `urllib.request`·`urllib.error`). 이것까지 막으면 URL
+    # 파싱을 손으로 짜게 되고, **열린 리다이렉트 같은 결함이 정확히 그 자리에서** 나온다.
+    net = re.compile(r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|boto3|openai|socket|urllib\.(?:request|error)|urllib\s*$)",
                      re.M)
     url = re.compile(r"https?://(?!localhost|127\.0\.0\.1)")
     for p in sorted((ROOT / "src" / "kyungdong").rglob("*.py")):

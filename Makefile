@@ -1,6 +1,7 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
 	plc-scan plc-poll plc-status plc-register plc-unregister check-decisions \
+	run-prod ops-accounts ops-password \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
 
@@ -36,6 +37,22 @@ simulate:                       ## 레이저커팅기 1대 → 수집 API (수�
 
 check-decisions:                ## 결정 대장 정합성 — 해소됐는데 안 닫힌 항목을 찍는다 (D-181)
 	uv run python tools/check_decisions.py
+
+run-prod:                       ## 운영 기동 — HTTPS 종단 뒤에서 돈다 (D-208)
+	@test -n "$$KYUNGDONG_SESSION_SECRET" || { \
+		echo "KYUNGDONG_SESSION_SECRET 이 없다 — 운영에서는 앱이 기동을 거부한다."; \
+		echo "  예:  export KYUNGDONG_SESSION_SECRET=\"$$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')\""; \
+		exit 1; }
+	KYUNGDONG_ENV=prod uv run uvicorn kyungdong.app.main:app \
+		--app-dir src --host $(or $(HOST),127.0.0.1) --port $(PORT) \
+		--proxy-headers --forwarded-allow-ips="$(or $(PROXY_IPS),127.0.0.1)"
+
+ops-accounts:                   ## 계정·역할·잠금 상태 (비밀번호는 안 나온다)
+	uv run python tools/ops_password.py --list
+
+ops-password:                   ## 비밀번호 재발급 — `make ops-password LOGIN=admin` (1회 출력)
+	@test -n "$(LOGIN)" || { echo "LOGIN 을 준다:  make ops-password LOGIN=admin"; exit 1; }
+	uv run python tools/ops_password.py --login $(LOGIN) $(if $(UNLOCK),--unlock,)
 
 plc-scan:                       ## ① PLC 스캔만 — work/plc_device.db 레지스터에 쌓는다 (D-174)
 	uv run python tools/plc_simulator.py --plc-reset --cycles $(or $(CYCLES),20) --scan-only

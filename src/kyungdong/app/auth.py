@@ -22,9 +22,10 @@ import string
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "db"))
 
@@ -140,6 +141,26 @@ def _user(login_id: str) -> dict | None:
         "where u.LOGIN_ID = %s", (login_id,))
 
 
+def safe_next(raw: str | None) -> str:
+    """로그인 뒤 갈 곳. **우리 앱 안의 경로만** 허용한다 (D-205).
+
+    `next` 를 그대로 믿으면 **열린 리다이렉트**가 된다 — `?next=` 에 **외부 절대주소**를 넣어 로그인
+    직후 외부로 튕겨 보낼 수 있고, 사용자는 방금 우리 화면에서 로그인했으니 그 페이지를
+    믿는다. 그래서 **`/` 로 시작하고 `//` 가 아닌 경로**만 통과시키고 나머지는 `/` 로 보낸다.
+    """
+    raw = (raw or "").strip()
+    # **역슬래시를 먼저 막는다.** 브라우저에 따라 `/\evil` 을 `//evil`(프로토콜 상대)로
+    # 읽어 외부로 나간다 — `urlparse` 는 이것을 경로로 보기 때문에 그것만 믿으면 뚫린다.
+    if "\\" in raw:
+        return "/"
+    if not raw.startswith("/") or raw.startswith("//"):
+        return "/"
+    u = urlparse(raw)
+    if u.scheme or u.netloc:
+        return "/"
+    return raw
+
+
 def login_page(request: Request, *, status_code: int = 200, error: str = "",
                notice: str = "", signed_in: dict | None = None) -> HTMLResponse:
     """공통화면 `login` 을 렌더한다. 문구·버튼은 정본(SF-TD3 common)에서 온다."""
@@ -205,9 +226,16 @@ async def login(request: Request):
     ratelimit.clear(login_id, ip)
     cookie, sess = session.create(int(row["user_id"]), row["login_id"], row["role_code"])
     _log(request, "로그인", ok=True, user_id=int(row["user_id"]))
-    resp = login_page(request, notice=password_age_notice(row["pwd_changed_dt"]),
-                      signed_in={"login_id": row["login_id"], "role_code": row["role_code"],
-                                 "sid": sess.sid[:6] + "…"})
+    # **로그인했으면 업무 화면으로 보낸다** (D-205). 전에는 로그인 페이지를 다시 렌더해
+    # `signed_in` 만 보여 줬다 — 운영에서는 로그인하고도 **어디로 가야 할지 모른다.**
+    # 비밀번호 주기 경고는 목적지에서 배지로 보이므로 여기서 붙들지 않는다.
+    nxt = safe_next(form.get("next") or request.query_params.get("next"))
+    resp: Response = RedirectResponse(nxt, status_code=303)
+    if not settings().is_prod:
+        # dev 에서는 **화면을 그대로 보여 준다** — 세션 발급이 눈에 보여야 시험이 된다.
+        resp = login_page(request, notice=password_age_notice(row["pwd_changed_dt"]),
+                          signed_in={"login_id": row["login_id"], "role_code": row["role_code"],
+                                     "sid": sess.sid[:6] + "…"})
     resp.set_cookie(session.COOKIE, cookie, httponly=True, samesite="lax",
                     secure=settings().is_prod)
     return resp
