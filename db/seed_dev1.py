@@ -207,15 +207,79 @@ NO_REMARK_COLUMN: dict[str, str] = {
     "SHP_SHIPMENTS": "전 컬럼이 일시·어휘·FK 다",
 }
 
+# ── 표본 크기 (D-199) ────────────────────────────────────────────────────
+# 기본 **40** 은 실측에 묶여 있다 — 선정 프로젝트 12종 × `BOMS_PER_PROJECT` 4(견적 갑지
+# 2~5장 실측 근거) 를 도면 보유 수로 자른 값이다. **그 40 은 근거가 있는 수라 함부로 안 바꾼다.**
+# 화면을 굴려 보려고 표본을 늘릴 때는 `KYUNGDONG_SAMPLE_LOTS` 로 **명시해서** 올린다.
+# 그러면 `SYS_CONFIGS('시스템설정','SAMPLE_SCALE')` 선언이 붙고 게이트 줄이 표본 수를 달고 나간다 —
+# **늘린 표본에서 나온 수치를 기본 실측처럼 인용하지 못하게** 하려는 것이다.
+SAMPLE_LOTS_DEFAULT = 40
+
 # 의도적 단절 — **전부 완벽하게 이으면 100% 가 나오고 그건 검사기를 시험하지 못한다.**
 # 제품LOT 전역 순번(프로젝트번호·BOM번호 오름차순, 0부터)에 고정으로 박는다. 무작위가 아니다.
-BREAKS: dict[int, str] = {
-    3:  "BOM 미연결 — SHP_LOT_TRACES.BOM_ID 를 비운다 (사슬 3단계 끊김)",
-    9:  "도면 미연결 BOM — EST_BOM_HEADERS.DRAWING_ID 를 비운다 (사슬 2단계 끊김)",
-    16: "자재LOT 미투입 — SHP_LOT_TRACES.MATERIAL_LOT_ID 를 비운다 (사슬 4단계 끊김)",
-    24: "공정실적 누락 — PRC_PERFORMANCES 를 만들지 않는다 (사슬 6단계 끊김)",
-    33: "검사·출하 누락 — SHP_INSPECTIONS·SHP_SHIPMENTS 를 만들지 않는다 (사슬 8·9단계 끊김)",
-}
+#
+# **비율로 박는다.** 5건을 고정해 두고 표본만 40 → 100 으로 늘리면 단절이 12.5% → 5% 로
+# 묽어져 **LOT 매핑률이 87.5% → 95% 로 좋아 보인다.** 실제로 나아진 것은 하나도 없는데
+# 수치만 오른다 — 표본을 늘려서 게이트를 통과시키는 짓이 된다. 그래서 단절도 같이 늘린다.
+BREAK_RATIO = 5 / 40                  # 12.5% — 기본 표본에서 실제로 쓰던 비율
+BREAK_KINDS: tuple[str, ...] = (
+    "BOM 미연결 — SHP_LOT_TRACES.BOM_ID 를 비운다 (사슬 3단계 끊김)",
+    "도면 미연결 BOM — EST_BOM_HEADERS.DRAWING_ID 를 비운다 (사슬 2단계 끊김)",
+    "자재LOT 미투입 — SHP_LOT_TRACES.MATERIAL_LOT_ID 를 비운다 (사슬 4단계 끊김)",
+    "공정실적 누락 — PRC_PERFORMANCES 를 만들지 않는다 (사슬 6단계 끊김)",
+    "검사·출하 누락 — SHP_INSPECTIONS·SHP_SHIPMENTS 를 만들지 않는다 (사슬 8·9단계 끊김)",
+)
+# 기본 표본 40 에서 쓰던 자리. 비율 계산이 이 자리를 그대로 재현하는지 테스트가 대조한다.
+BREAK_SEATS_40 = (3, 9, 16, 24, 33)
+
+
+def sample_lots() -> int:
+    """표본 제품LOT 수.
+
+    우선순위: **① 환경변수 → ② 이 DB 가 이미 깔린 크기 → ③ 기본 40.**
+
+    ②가 핵심이다. 환경변수 없이 다시 시드하는 경로가 많다(멱등 시험·테스트·검사기). 그때
+    무조건 40 으로 돌아가면 **표본 100 인 DB 를 40 으로 덮어써 사슬이 조용히 깨진다**(D-200).
+    이미 깔린 크기를 따라가면 재시드는 언제나 안전하고, 크기를 **바꾸려는 의도**만
+    `KYUNGDONG_SAMPLE_LOTS` 로 드러난다 — 그때는 `guard_sample_size()` 가 막아 세운다.
+    """
+    import os
+
+    raw = (os.environ.get("KYUNGDONG_SAMPLE_LOTS") or "").strip()
+    if not raw:
+        try:
+            prev = recorded_sample()
+        except Exception:                      # noqa: BLE001 — DB 가 아직 없을 수 있다
+            prev = None
+        return prev if prev else SAMPLE_LOTS_DEFAULT
+    try:
+        n = int(raw)
+    except ValueError as e:
+        raise SystemExit(f"KYUNGDONG_SAMPLE_LOTS 가 정수가 아니다: {raw!r}") from e
+    if n < 5:
+        raise SystemExit(f"표본이 {n} 이면 단절 5종을 다 넣을 수 없다 — 5 이상으로 준다")
+    return n
+
+
+def breaks_for(total: int) -> dict[int, str]:
+    """표본 `total` 에 맞춘 단절 자리. **비율(12.5%)이 표본과 무관하게 유지된다.**
+
+    자리는 균등 간격이고 종류는 5종을 돌려 쓴다 — 무작위가 아니라 재실행하면 같은 자리다.
+    표본 40 에서는 `BREAK_SEATS_40` 과 같은 자리가 나와야 한다(테스트가 대조한다).
+    """
+    n = max(1, round(total * BREAK_RATIO))
+    out: dict[int, str] = {}
+    for k in range(n):
+        seat = BREAK_SEATS_40[k] if total == 40 and k < len(BREAK_SEATS_40) else \
+            int(round((k + 0.5) * total / n))
+        seat = min(max(seat, 0), total - 1)
+        while seat in out:                       # 자리가 겹치면 뒤로 민다 — 개수를 줄이지 않는다
+            seat += 1
+        out[seat] = BREAK_KINDS[k % len(BREAK_KINDS)]
+    return out
+
+
+BREAKS: dict[int, str] = breaks_for(SAMPLE_LOTS_DEFAULT)
 
 # 제품군 코드 ↔ 폴더명 표기. 공통 시드의 '제품군' 5종이 정본이고 여기서 늘리지 않는다.
 PRODUCT_GROUP_CODE: dict[str, str] = {
@@ -327,6 +391,59 @@ def seed_items(admin_id: int | None) -> tuple[int, dict]:
     return len(items), measured
 
 
+def recorded_sample() -> int | None:
+    """직전 시드가 쓴 표본 수. 없으면 `None`."""
+    try:
+        row = conn.q1("select CONFIG_VALUE from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+                      "and CONFIG_KEY = 'SAMPLE_LOTS'")
+    except Exception:                          # noqa: BLE001
+        return None
+    if not row or not row["config_value"]:
+        return None
+    try:
+        return int(row["config_value"])
+    except ValueError:
+        return None
+
+
+def _remember_sample(n: int) -> None:
+    conn.x(
+        "insert into SYS_CONFIGS "
+        "(CONFIG_TYPE, CONFIG_KEY, CONFIG_VALUE, USE_YN, DESCRIPTION, CREATED_DT) "
+        "values ('시스템설정', 'SAMPLE_LOTS', %s, 'Y', %s, now()) "
+        "on conflict (CONFIG_TYPE, CONFIG_KEY) do update set "
+        "CONFIG_VALUE = excluded.CONFIG_VALUE, UPDATED_DT = now()",
+        (str(n), "이 DB 를 깐 표본 제품LOT 수 (D-199). 다른 크기로 다시 시드하면 "
+                 "자재LOT 번호가 어긋나 사슬이 조용히 깨진다 — `make db-reset` 이 먼저다"))
+
+
+def guard_sample_size(n: int) -> None:
+    """**표본 크기를 섞으면 사슬이 조용히 깨진다** (D-200).
+
+    자재LOT 번호는 `LOT-{날짜}-{그날의 일련번호}` 이고 그 일련번호는 **계획 순서**로 매겨진다.
+    표본 100 으로 깐 DB 에 표본 40 으로 다시 시드하면 같은 날짜의 앞 번호들이 **다른 BOM 을
+    가리키도록 덮어써지고** 뒤 번호는 그대로 남는다 → 같은 BOM 을 두 자재LOT 이 가리키고
+    어떤 BOM 은 자재LOT 을 잃는다.
+
+    **실측으로 겪었다**: 표본 100 DB 에 테스트가 40 으로 재시드하자 BOM 키 100 → **89**,
+    LOT 매핑 88.0% → **82.0%** 로 떨어져 G-08 이 FAIL 했다. 데이터가 깨졌다는 신호는
+    **어디에도 없었다** — 숫자만 나빠졌다. 그래서 막는다: 크기가 다르면 시드하지 않는다.
+    """
+    prev = recorded_sample()
+    if prev is None or prev == n:
+        _remember_sample(n)
+        return
+    have = int(conn.q1("select count(*) as n from EST_BOM_HEADERS")["n"])
+    if have == 0:                               # 데이터가 없으면 섞일 것도 없다
+        _remember_sample(n)
+        return
+    raise SystemExit(
+        f"표본 크기를 섞을 수 없다 — 이 DB 는 표본 {prev} 로 깔렸는데 지금 {n} 으로 시드하려 한다.\n"
+        f"  자재LOT 번호가 계획 순서로 매겨져서, 크기가 다르면 앞 번호들이 **다른 BOM 을 가리키도록**\n"
+        f"  덮어써진다. 실측으로 BOM 키 100 → 89, LOT 매핑 88.0% → 82.0% 로 떨어진 적이 있다.\n"
+        f"  먼저 비운다:  KYUNGDONG_SAMPLE_LOTS={n} make db-reset db-schema db-seed")
+
+
 def seed_synthetic_flag() -> str:
     """합성 선언 1행 — 화면 배지와 게이트 판정 줄이 **이 한 곳**을 읽는다."""
     desc = (f"{SYNTH_NOTE} — BOM·자재LOT·입고·재고·작업지시·공정실적·LOT추적·검사·출하는 "
@@ -340,6 +457,31 @@ def seed_synthetic_flag() -> str:
         "UPDATED_DT = now()",
         (desc,),
     )
+    # ── 표본 확대 선언 (D-199) ───────────────────────────────────────────
+    # 기본 40 은 **실측에 묶인 수**다(프로젝트 12 × 갑지 2~5장 근거의 BOM 4). 그보다 키우면
+    # 그 사실을 남긴다 — 남기지 않으면 `표본 100 · LOT 매핑 88.0%` 가 **근거 있는 실측처럼**
+    # 인용된다. 기본으로 되돌리면 선언도 사라진다(데이터만 줄고 표시가 남지 않게).
+    n = sample_lots()
+    guard_sample_size(n)
+    if n == SAMPLE_LOTS_DEFAULT:
+        conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+               "and CONFIG_KEY = 'SAMPLE_SCALE'")
+    else:
+        conn.x(
+            "insert into SYS_CONFIGS "
+            "(CONFIG_TYPE, CONFIG_KEY, CONFIG_VALUE, USE_YN, DESCRIPTION, CREATED_DT) "
+            "values ('시스템설정', 'SAMPLE_SCALE', 'D-199', 'Y', %s, now()) "
+            "on conflict (CONFIG_TYPE, CONFIG_KEY) do update set "
+            "CONFIG_VALUE = excluded.CONFIG_VALUE, DESCRIPTION = excluded.DESCRIPTION, "
+            "UPDATED_DT = now()",
+            (f"표본을 기본 {SAMPLE_LOTS_DEFAULT} 에서 **{n}** 으로 키웠다 "
+             f"(KYUNGDONG_SAMPLE_LOTS). 기본 {SAMPLE_LOTS_DEFAULT} 는 선정 프로젝트 12종 × "
+             f"BOMS_PER_PROJECT {BOMS_PER_PROJECT}(견적 갑지 2~5장 실측)를 도면 수로 자른 "
+             f"**근거 있는 수**이고, 키운 표본은 **화면을 굴려 보려고 늘린 것**이라 "
+             f"그 근거가 없다. 여기서 나온 수치를 기본 실측처럼 인용할 수 없다. "
+             f"의도적 단절은 비율 {round(BREAK_RATIO * 100, 1)}% 로 함께 늘어난다 — "
+             f"안 늘리면 매핑률이 좋아 보이기만 한다",),
+        )
     return desc
 
 
@@ -481,19 +623,47 @@ def seed_boms(admin_id: int | None, pids: dict[str, int],
             "실제 소요 관계·규격의 원천이 없다(D-05)")
     routing_remark = (f"{MARK_SYNTH} — 사업계획서 1.3 의 10공정 중 제조 7공정을 폈다. "
                       "표준 공수는 정본에 없어 비운다(D-203)")
+    # ── 표본 만들기 (D-199) ──────────────────────────────────────────────
+    # 기본(40)은 프로젝트마다 `BOMS_PER_PROJECT` 4 를 도면 수로 자른 값이다 — 그 4 는
+    # 견적 갑지 2~5장 실측에 묶여 있다. 표본을 명시적으로 키울 때만 **라운드로빈**으로
+    # 목표 수를 채운다: 도면이 많은 프로젝트에 몰아주지 않고 고르게 편다.
+    # 도면이 모자라면 **거기서 멈춘다** — 없는 도면을 지어내 BOM 을 만들지 않는다.
+    target = sample_lots()
+    projects = list(thread_projects()["projects"])
+    quota = {p["project_no"]: min(BOMS_PER_PROJECT, len(drawings[p["project_no"]]))
+             for p in projects}
+    if target != SAMPLE_LOTS_DEFAULT:
+        quota = {p["project_no"]: 0 for p in projects}
+        while sum(quota.values()) < target:
+            grew = False
+            for p in projects:
+                pno = p["project_no"]
+                if sum(quota.values()) >= target:
+                    break
+                if quota[pno] < len(drawings[pno]):
+                    quota[pno] += 1
+                    grew = True
+            if not grew:                      # 모든 프로젝트가 도면을 다 썼다
+                break
+
     plan: list[dict[str, Any]] = []
-    for p in thread_projects()["projects"]:
-        n_bom = min(BOMS_PER_PROJECT, len(drawings[p["project_no"]]))
-        for k in range(1, n_bom + 1):
+    for p in projects:
+        for k in range(1, quota[p["project_no"]] + 1):
             plan.append({"project_no": p["project_no"], "bom_no": f"BOM-{p['project_no']}-{k:02d}",
                          "project_id": pids[p["project_no"]], "product_group": p["product_group"],
                          "yymm": p["yymm"], "drawing_id": drawings[p["project_no"]][k - 1]})
     plan.sort(key=lambda r: (r["project_no"], r["bom_no"]))
 
+    # 단절은 **실제 표본 수**로 다시 계산한다 — 목표에 못 미쳐도 비율이 유지된다.
+    breaks = breaks_for(len(plan))
+    if len(plan) < target:
+        print(f"  ⚠ 표본 {target} 를 요청했으나 도면이 모자라 {len(plan)} 건이다 — "
+              f"없는 도면으로 BOM 을 만들지 않았다")
+
     for idx, b in enumerate(plan):
         b["index"] = idx
-        b["break"] = BREAKS.get(idx)
-        drawing_id = None if idx in BREAKS and "도면 미연결" in BREAKS[idx] else b["drawing_id"]
+        b["break"] = breaks.get(idx)
+        drawing_id = None if idx in breaks and "도면 미연결" in breaks[idx] else b["drawing_id"]
         conn.x(
             "insert into EST_BOM_HEADERS "
             "(BOM_NO, PROJECT_ID, DRAWING_ID, GEN_METHOD, BOM_VERSION, ACCURACY_RATE, "
@@ -655,9 +825,13 @@ def thread_rows() -> list[dict[str, Any]]:
             "material_lot_id": lots.get(r["bom_no"]),
             "item_code": top.get(int(r["bom_id"])),
         })
+    # **전역 `BREAKS` 를 읽지 않는다.** 개발2 시드는 **별도 프로세스**라 개발1 이 표본을
+    # 키우며 바꾼 전역이 보이지 않는다 — 표본 100 인 DB 를 40 기준 단절표로 읽으면
+    # 자리가 어긋나 사슬이 엉뚱한 곳에서 끊긴 것처럼 보인다. 실제 행 수에서 다시 만든다.
+    breaks = breaks_for(len(out))
     for i, r in enumerate(out):
         r["index"] = i
-        r["break"] = BREAKS.get(i)
+        r["break"] = breaks.get(i)
     return out
 
 
@@ -854,9 +1028,11 @@ def main() -> int:
     print(f"  자재 LOT         {flow['lots']} 건  · 입고 {flow['receipts']} · 재고 {flow['stocks']}"
           f"  (SPEC_TEXT 에 합성 표시 + 투입 BOM 번호)")
     print()
-    print(f"  의도적 단절       {len(BREAKS)} / {len(plan)} 건"
-          f" = {round(len(BREAKS) / len(plan) * 100, 1)}%  — 전역 순번(프로젝트번호·BOM번호 오름차순)에 고정")
-    for i, why in sorted(BREAKS.items()):
+    _brk = breaks_for(len(plan))
+    print(f"  의도적 단절       {len(_brk)} / {len(plan)} 건"
+          f" = {round(len(_brk) / len(plan) * 100, 1)}%  — 전역 순번(프로젝트번호·BOM번호 오름차순)에 고정"
+          f"  (표본과 무관하게 비율 {round(BREAK_RATIO * 100, 1)}% 유지 — D-199)")
+    for i, why in sorted(_brk.items()):
         hit = plan[i] if i < len(plan) else None
         where = f"{hit['project_no']} / {hit['bom_no']}" if hit else "**범위 밖 — 표본이 줄었다**"
         print(f"    #{i:<3} {where:<28} {why}")

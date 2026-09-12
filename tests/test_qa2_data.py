@@ -544,3 +544,99 @@ def test_71_시드여부_미정_6건의_판정이_실제_데이터와_맞는다(
                     f"{tid} {n}건이 제품LOT 수보다 적다 — 공정이력이 LOT 당 1건 이상이어야 한다"
         else:
             assert n == expect, f"{tid} 판정({expect}건)과 실제({n}건)가 다르다"
+
+
+# ══ 표본 크기 (D-199~D-203) ═══════════════════════════════════════════════
+def test_단절_비율은_표본_크기와_무관하다():
+    """**표본만 늘리면 게이트가 좋아 보인다** (D-200).
+
+    단절 5건을 고정해 두고 표본을 40 → 100 으로 늘리면 단절이 12.5% → 5% 로 묽어져
+    **LOT 매핑률이 87.5% → 95%** 가 된다. 나아진 것은 하나도 없는데 수치만 오른다 —
+    표본을 키워 게이트를 통과시키는 짓이다.
+    """
+    import seed_dev1 as sd
+
+    for n in (40, 60, 100, 200):
+        b = sd.breaks_for(n)
+        ratio = len(b) / n
+        assert abs(ratio - sd.BREAK_RATIO) < 0.02, f"표본 {n}: 단절 {len(b)}건 = {ratio:.1%}"
+        assert len(set(b)) == len(b), "단절 자리가 겹쳤다"
+        assert all(0 <= i < n for i in b), "단절 자리가 표본 밖이다"
+    # 기본 표본에서는 **원래 쓰던 자리를 그대로** 재현해야 한다 — 바뀌면 기존 실측과 못 잇는다.
+    assert sorted(sd.breaks_for(40)) == list(sd.BREAK_SEATS_40)
+
+
+def test_표본_크기를_섞으면_시드가_막는다():
+    """**조용히 깨지던 것을 막는다** (D-201).
+
+    자재LOT 번호가 계획 순서로 매겨져서, 표본 100 DB 에 40 으로 재시드하면 같은 날짜의
+    앞 번호가 **다른 BOM 을 가리키도록 덮어써진다.** 실측으로 BOM 키 100 → 89,
+    LOT 매핑 88.0% → 82.0% 로 떨어졌고 **깨졌다는 신호는 어디에도 없었다.**
+    """
+    import pytest as _pytest
+
+    import seed_dev1 as sd
+
+    now = sd.recorded_sample()
+    assert now, "이 DB 의 표본 크기가 기록돼 있지 않다"
+    with _pytest.raises(SystemExit, match="표본 크기를 섞을 수 없다"):
+        sd.guard_sample_size(now + 7)
+    sd.guard_sample_size(now)            # 같은 크기는 통과해야 한다(멱등)
+
+
+def test_환경변수가_없으면_DB_에_기록된_표본을_따른다():
+    """재시드 경로가 많다(멱등 시험·테스트·검사기). 무조건 기본 40 으로 돌아가면
+    **표본 100 인 DB 를 40 으로 덮어쓴다** — 그래서 기록된 크기를 따른다 (D-201).
+    """
+    import os
+
+    import seed_dev1 as sd
+
+    assert not os.environ.get("KYUNGDONG_SAMPLE_LOTS"), "이 시험은 환경변수 없이 돈다"
+    assert sd.sample_lots() == sd.recorded_sample()
+
+
+def test_만들지_않는_단절은_남은_행까지_지운다():
+    """**"만들지 않는다" 는 단절은 멱등이 아니었다** (D-203).
+
+    그 자리가 한 번이라도 단절이 아닌 적이 있으면 그때 만든 행이 남아 **단절을 치유한다** —
+    실측으로 4자리가 살아나 LOT 매핑이 88.0% → **92.0%** 로 올랐다. 나아진 것이 없는데
+    숫자만 오르는 것이라, 단절 자리에는 행이 **하나도 없어야** 한다.
+    """
+    import subprocess
+    import sys as _sys
+
+    import seed_dev1 as sd
+
+    # **시드 직후 상태를 잰다.** 다른 테스트가 사슬에 행을 더하므로(픽스처가 PLOT-2026-* 를
+    # 만든다) 그대로 재면 그 잔여를 단절 실패로 오인한다. 시드를 다시 돌려 기준을 맞춘다 —
+    # 시드는 멱등이므로(G-07) 이 호출이 다른 값을 만들지 않는다.
+    for script in ("seed.py", "seed_dev1.py", "seed_dev2.py", "seed_dev3.py"):
+        r = subprocess.run([_sys.executable, str(ROOT / "db" / script)],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, f"{script}: " + (r.stdout[-600:] + r.stderr[-600:])
+
+    rows = sd.thread_rows()
+    lots = sorted(r["product_lot_no"] for r in conn.q(
+        "select PRODUCT_LOT_NO from SHP_LOT_TRACES"))
+    checked = 0
+    for r in rows:
+        broke, idx = r["break"], r["index"]
+        if not broke or idx >= len(lots):
+            continue
+        tid = conn.q1("select LOT_TRACE_ID from SHP_LOT_TRACES where PRODUCT_LOT_NO = %s",
+                      (lots[idx],))
+        if tid is None:
+            continue
+        tid = int(tid["lot_trace_id"])
+        if "공정실적 누락" in broke:
+            n = int(conn.q1("select count(*) as n from PRC_PERFORMANCES "
+                            "where LOT_TRACE_ID = %s", (tid,))["n"])
+            assert n == 0, f"#{idx} 공정실적 단절인데 {n} 행이 남아 있다"
+            checked += 1
+        if "검사·출하 누락" in broke:
+            n = int(conn.q1("select count(*) as n from SHP_INSPECTIONS "
+                            "where LOT_TRACE_ID = %s", (tid,))["n"])
+            assert n == 0, f"#{idx} 검사 단절인데 {n} 행이 남아 있다"
+            checked += 1
+    assert checked >= 2, f"검사한 단절 자리가 {checked} 개뿐이다"

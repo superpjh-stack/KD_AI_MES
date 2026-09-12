@@ -285,6 +285,14 @@ def seed_chain(anchor: datetime, procs: dict[str, str],
             continue
         counts["lot_traces"] += 1
 
+        # ── 단절은 **지우는 것까지**가 단절이다 (D-203) ─────────────────
+        # "만들지 않는다" 는 단절은 **멱등이 아니었다.** 그 자리가 한 번이라도 단절이 아닌
+        # 적이 있으면(표본 크기가 달랐다거나) 그때 만든 행이 남아 **단절을 치유한다** —
+        # 실측으로 4자리가 그렇게 살아나 LOT 매핑이 88.0% → 92.0% 로 **올랐다.**
+        # 나아진 것이 없는데 숫자만 오르는 것이라 반드시 지운다.
+        if broke:
+            _clear_broken(lot_id, broke)
+
         if broke and "공정실적 누락" in broke:
             # **의도적 단절** — 공정실적을 만들지 않는다. 이력은 남기되 PERF_ID 가 빈다.
             counts["histories"] += _seed_histories(lot_id, wo_ids, wo_confirm, mfg_h, anchor)
@@ -313,6 +321,36 @@ def seed_chain(anchor: datetime, procs: dict[str, str],
 
     _restate_mapping_flag()
     return counts
+
+
+def _clear_broken(lot_id: int, broke: str) -> None:
+    """단절 자리에 **남아 있던 행을 지운다.**
+
+    이전 시드에서 그 자리가 단절이 아니었다면 행이 만들어져 있고, 그대로 두면 사슬이
+    이어진 것으로 읽힌다 — 선언은 '끊었다' 인데 데이터는 이어져 있는 상태다.
+    """
+    if "공정실적 누락" in broke:
+        # 이력(`PRC_PROCESS_HISTORIES`)은 **남기고 `PERF_ID` 만 비운다** — 단절의 뜻이
+        # 그것이다("이력은 남기되 PERF_ID 가 빈다"). 먼저 비우지 않으면 FK 가 삭제를 막는다.
+        conn.x("update PRC_PROCESS_HISTORIES set PERF_ID = null where PERF_ID in "
+               "(select PERF_ID from PRC_PERFORMANCES where LOT_TRACE_ID = %s)", (lot_id,))
+        conn.x("delete from PRC_PERFORMANCES where LOT_TRACE_ID = %s", (lot_id,))
+    if "검사·출하 누락" in broke:
+        # 출하 품목이 검사를 참조한다 — 품목을 먼저 떼고 검사를 지운다.
+        conn.x("update SHP_SHIPMENT_ITEMS set INSPECT_ID = null where INSPECT_ID in "
+               "(select INSPECT_ID from SHP_INSPECTIONS where LOT_TRACE_ID = %s)", (lot_id,))
+        conn.x("delete from SHP_INSPECTIONS where LOT_TRACE_ID = %s", (lot_id,))
+        # 출하 품목을 먼저 지우고, **품목이 하나도 안 남은 출하 헤더**만 지운다 —
+        # 다른 LOT 의 품목이 붙어 있는 출하는 건드리지 않는다.
+        ships = [int(r["shipment_id"]) for r in conn.q(
+            "select distinct SHIPMENT_ID from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s",
+            (lot_id,))]
+        conn.x("delete from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s", (lot_id,))
+        for sid in ships:
+            left = int(conn.q1("select count(*) as n from SHP_SHIPMENT_ITEMS "
+                               "where SHIPMENT_ID = %s", (sid,))["n"])
+            if left == 0:
+                conn.x("delete from SHP_SHIPMENTS where SHIPMENT_ID = %s", (sid,))
 
 
 def _restate_mapping_flag() -> int:

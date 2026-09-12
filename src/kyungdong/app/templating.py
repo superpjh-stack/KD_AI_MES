@@ -34,6 +34,27 @@ def _synthetic_note() -> str:
         return ""
     return f"합성 데이터 기준 ({row['config_value']})"
 
+def _sample_note() -> str:
+    """표본 확대 고지 (D-199) — 기본 40 이면 **빈 문자열**이다(평소에는 안 뜬다).
+
+    `합성 데이터 기준 (D-131)` 이 *지어낸 것*을 말한다면 이것은 *몇 건을 지어냈는지*를
+    말한다. 기본 40 은 실측(프로젝트 12 × 갑지 근거 BOM 4)에 묶여 있고, 그보다 키운
+    표본은 **화면을 굴려 보려고 늘린 것**이라 같은 근거가 없다.
+    """
+    import conn
+
+    try:
+        row = conn.q1(
+            "select DESCRIPTION from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+            "and CONFIG_KEY = 'SAMPLE_SCALE' and USE_YN = 'Y'")
+    except Exception:                # noqa: BLE001 — DB 장애는 G-30 이 잡는다
+        return ""
+    if not row or not row["description"]:
+        return ""
+    head = str(row["description"]).split(".")[0].replace("**", "")
+    return f"표본 확대 (D-199) — {head}"
+
+
 TEMPLATES = Path(__file__).parent / "templates"
 
 _env = Environment(
@@ -86,6 +107,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         csrf_token=csrf.issue(request),
         cad_configured=s.cad_configured,
         synthetic_note=_synthetic_note(),
+        sample_note=_sample_note(),
         followups=_followups(request),
         **ctx,
     )

@@ -242,12 +242,32 @@ def test_024_가_LOT_로_사슬_9단계를_보여_준다(chain):
 
 
 def test_017_LOT_열이_024_링크다(chain):
+    """**특정 행이 아니라 불변식을 단언한다.**
+
+    전에는 `limit 1` 로 아무 LOT 이나 뽑아 그 링크가 1페이지에 있는지 봤다. `ORDER BY` 가
+    없어 어느 행이 나올지 모르고(D-81 과 같은 계열), 표본을 40 → 100 으로 키우자
+    **그 LOT 이 1페이지 밖으로 밀려** 깨졌다. 화면은 멀쩡했는데 테스트만 틀렸다.
+
+    그래서 바꾼 단언: **화면에 뜬 LOT 은 전부 링크여야 하고, 그 링크는 실재해야 한다.**
+    표본 크기와 무관하다.
+    """
+    import re as _re
+
     from fastapi.testclient import TestClient
+
     from kyungdong.app.main import app
     c = TestClient(app, raise_server_exceptions=False)
-    lot = conn.q1("select PRODUCT_LOT_NO from SHP_LOT_TRACES where PROJECT_ID = any(%s) limit 1",
-                  (_project_ids(),))["product_lot_no"]
-    assert f'href="/prc/024?lot={lot}"' in c.get("/shp/017").text
+    html = c.get("/shp/017").text
+    linked = set(_re.findall(r'href="/prc/024\?lot=([^"]+)"', html))
+    assert linked, "017 에 LOT 링크가 하나도 없다"
+    # 화면에 글자로만 나온 LOT 이 있으면 — 링크가 빠진 것이다.
+    shown = set(_re.findall(r"(PLOT-\d{4}-\d+)", _re.sub(r"<[^>]+>", " ", html)))
+    assert shown <= linked, f"링크 없이 글자로만 나온 LOT: {sorted(shown - linked)}"
+    # **픽스처가 만든 것만 보면 안 된다** —  은 자기 LOT(PLOT-2026-*)을 따로 넣고
+    # 화면은 시드가 넣은 것(PLOT-2017~2020)을 보여 준다. 비교 대상은 표 전체다.
+    real = {r["product_lot_no"]
+            for r in conn.q("select PRODUCT_LOT_NO from SHP_LOT_TRACES")}
+    assert linked <= real, f"DB 에 없는 LOT 을 링크했다: {sorted(linked - real)}"
 
 
 # ── KPI 독립 재계산 ─────────────────────────────────────────────────────

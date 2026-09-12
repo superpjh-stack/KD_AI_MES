@@ -66,6 +66,7 @@
 <footer class="foot">
   경동글로벌텍 제조AI 시스템 · 과제번호 SF26179182 · 공급기업 주식회사 재일 —
   화면·항목·문장은 SF-TD3/TD4/SF-AD2 정본에서 렌더한다. 값이 없으면 <span class="badge undetermined">미확정 (D-nn)</span> 을 표시한다.
+  {% if sample_note %}<br><b>{{ sample_note }}</b> — 기본 표본이 아니다. 이 화면의 건수를 실측 규모로 인용할 수 없다.{% endif %}
   {% if synthetic_note %}<br><b>{{ synthetic_note }}</b> — 자재LOT·작업지시·공정실적·LOT추적·검사·출하는 원천이 없는 합성이다.
   프로젝트·도면은 실측, 고객사 코드는 확정 (D-139), 품목 코드는 가설 (D-131) 이다. 이 화면의 수치를 성과 실적으로 인용할 수 없다.{% endif %}
 </footer>
