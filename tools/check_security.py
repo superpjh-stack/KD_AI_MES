@@ -197,13 +197,31 @@ def gate_26(client: TestClient) -> None:
     external = [d for d in csp.split("; ") if "http" in d]
     tpl_ext = [p.relative_to(ROOT).as_posix() for p in TEMPLATES
                if re.search(r"https?://(?!localhost)", p.read_text())]
-    net_imports = [f"{f}" for f, s in src.items()
-                   if re.search(r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|boto3|openai)\b",
-                                s, re.M) and not f.startswith("tests/")]
-    say(f"     CSP 안 외부 출처 {external or '0건'} · 템플릿 외부 URL {tpl_ext or '0건'} · "
-        f"외부 통신 모듈 import {net_imports or '0건'}")
-    if external or tpl_ext or net_imports:
-        bad.append("외부 출처·외부 통신 흔적이 있다")
+    # **제품 코드(`src/`)에는 통신 모듈이 아예 없어야 한다** — 폐쇄형이 요건이다(9.2 · D-08).
+    # `tools/` 는 개발 도구라 통신이 있을 수 있지만, **루프백에만 닿는 것이 증명돼야** 한다.
+    # 규칙을 느슨하게 하는 것이 아니라 **더 정밀하게** 만든 것이다: 전에는 import 만 보고
+    # 잡았고, 그러면 "우리 앱에 POST 하는 시뮬레이터"와 "외부 API 호출"이 구분되지 않았다.
+    net_re = re.compile(
+        r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|boto3|openai)\b", re.M)
+    # 루프백이 아닌 목적지 리터럴. `localhost`·`127.0.0.1`·`::1` 만 빼고 전부 외부로 본다.
+    ext_url_re = re.compile(r"https?://(?!localhost|127\.0\.0\.1|\[?::1\]?)[A-Za-z0-9.\-]+")
+    net_product, net_tool_ext, net_tool_ok = [], [], []
+    for f, t in src.items():
+        if f.startswith("tests/") or not net_re.search(t):
+            continue
+        if f.startswith("src/"):
+            net_product.append(f)
+        elif ext_url_re.search(t):
+            net_tool_ext.append(f"{f} → {ext_url_re.search(t).group(0)}")
+        else:
+            net_tool_ok.append(f)
+    say(f"     CSP 안 외부 출처 {external or '0건'} · 템플릿 외부 URL {tpl_ext or '0건'}")
+    say(f"     통신 모듈 — 제품 src/ {net_product or '0건'} · "
+        f"도구 중 외부 목적지 {net_tool_ext or '0건'} · "
+        f"도구 중 루프백 전용 {net_tool_ok or '0건'}")
+    if external or tpl_ext or net_product or net_tool_ext:
+        bad.append(f"외부 출처·외부 통신 흔적이 있다 "
+                   f"(제품 {net_product} · 도구 외부목적지 {net_tool_ext})")
 
     # ④ 비밀번호 해시 (bcrypt/Argon2)
     rows = conn.q("select LOGIN_ID, PASSWORD_HASH from SYS_USERS order by USER_ID")

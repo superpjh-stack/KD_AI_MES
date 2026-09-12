@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
+sys.path.insert(0, str(ROOT / "tools"))   # plc_simulator (D-174 등록/거둠 시험)
 
 import conn                                                     # noqa: E402
 from conftest import csrf_post                                  # noqa: E402
@@ -253,13 +254,65 @@ def test_장비_경로_목록은_CSRF_면제_목록과_같다():
         sorted(set(device.MACHINE_PATHS) ^ set(csrfmod.EXEMPT_PATHS)))
 
 
-def test_장비_IP_를_지어내지_않았다():
-    """시드가 IP 를 채워 두면 `열린다` 가 **검사기 자신 때문에** 참이 된다."""
-    n = int(conn.q1("select count(*) as n from IF_DEVICE_REGISTRY "
-                    "where IP_ADDRESS is not null and length(trim(IP_ADDRESS)) > 0")["n"])
-    assert n == 0, (
-        f"IF_DEVICE_REGISTRY 에 IP 가 {n} 건 있다 — 도입기업이 장비 IP 를 주지 않았고 "
-        "시드는 지어내지 않는다. 실제로 받았다면 이 테스트를 뒤집어라 (D-168)")
+def test_장비_IP_는_선언_없이는_존재할_수_없다():
+    """**방향을 뒤집었다.** 전에는 `IP 가 0건인지` 를 단언했다 — 시드가 IP 를 채워 두면
+    `열린다` 가 검사기 자신 때문에 참이 되기 때문이다.
+
+    시뮬레이터(D-174)가 생기면서 IP 가 **있을 수 있게** 됐다. 그래서 이제 단언하는 것은
+    `0건인지` 가 아니라 **`있다면 그것이 시뮬레이터라고 선언돼 있는지`** 다.
+    선언 없는 IP 는 **실물 장비가 붙은 것처럼** 읽힌다 — 그것이 막는 대상이다.
+
+    도입기업이 실물 IP 를 주면(D-169) 그때 이 테스트를 다시 뒤집는다: 선언을 지우고
+    실물 IP 를 넣는 것이 정상 상태가 된다.
+    """
+    from kyungdong.app.util import device
+
+    ips = conn.q("select DEVICE_ID, DEVICE_NAME, IP_ADDRESS from IF_DEVICE_REGISTRY "
+                 "where IP_ADDRESS is not null and length(trim(IP_ADDRESS)) > 0")
+    decl = device.simulation()
+    if not ips:
+        assert decl is None, (
+            f"IP 는 0건인데 시뮬레이터 선언 {decl} 이 남아 있다 — "
+            "`--unregister` 가 둘을 함께 거두지 않았다")
+        return
+    assert decl is not None, (
+        f"선언 없이 장비 IP 가 {len(ips)} 건 있다 — 실물이 붙은 것처럼 읽힌다. "
+        f"도입기업 장비 IP 는 아직 없다(D-169). {[r['ip_address'] for r in ips]}")
+    assert "실물이 아니라" in device.simulation_note(), device.simulation_note()
+
+
+def test_시뮬레이터_IP_와_선언은_함께_붙고_함께_떨어진다():
+    """**데이터만 남기고 표시만 떼는 것**이 되지 않아야 한다 (D-131·D-160 과 같은 규칙).
+
+    선언만 지우면 IP 가 남아 실물처럼 보이고, IP 만 지우면 선언이 붕 뜬다.
+    `--register` / `--unregister` 가 둘을 한 묶음으로 다루는지 실제로 돌려서 잰다.
+    """
+    import importlib
+
+    from kyungdong.app.util import device
+
+    sim = importlib.import_module("plc_simulator")
+    before_ip = conn.q1("select IP_ADDRESS from IF_DEVICE_REGISTRY "
+                        "where DEVICE_NAME = %s", (sim.DEVICE_NAME,))["ip_address"]
+    before_decl = device.simulation()
+    try:
+        sim.register_sim_ip("127.0.0.1")
+        assert device.simulation() == sim.SIM_DECISION
+        row = conn.q1("select IP_ADDRESS from IF_DEVICE_REGISTRY where DEVICE_NAME = %s",
+                      (sim.DEVICE_NAME,))
+        assert row["ip_address"] == "127.0.0.1", row
+
+        sim.unregister_sim_ip()
+        assert device.simulation() is None, "선언이 남았다"
+        row = conn.q1("select IP_ADDRESS from IF_DEVICE_REGISTRY where DEVICE_NAME = %s",
+                      (sim.DEVICE_NAME,))
+        assert row["ip_address"] is None, f"IP 가 남았다: {row['ip_address']}"
+    finally:
+        conn.x("update IF_DEVICE_REGISTRY set IP_ADDRESS = %s where DEVICE_NAME = %s",
+               (before_ip, sim.DEVICE_NAME))
+        if before_decl is None:
+            conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = %s and CONFIG_KEY = %s",
+                   (device.CONFIG_TYPE, device.CONFIG_KEY))
 
 
 # ══ G-27 ═════════════════════════════════════════════════════════════════
@@ -696,3 +749,33 @@ def test_g30_ingest_stale_badge_shows(client):
         for t, c in (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
                      ("IF_PLC_SIGNALS", "PLC_IF_ID")):
             conn.x(f"delete from {t} where {c} > %s", (base[t],))
+
+
+def test_시뮬레이터는_루프백_밖으로_못_나간다():
+    """사업계획서 9.2 외부 접속 최소화 · RAG 폐쇄형(외부 검색 0)의 경계다.
+
+    시뮬레이터가 임의 호스트로 POST 할 수 있으면 그 경계가 **이 파일 하나로** 뚫린다.
+    목적지는 우리 앱이고 우리 앱은 localhost 에 뜬다 — 그 밖은 아예 막는다.
+    """
+    import importlib
+
+    sim = importlib.import_module("plc_simulator")
+    for ok in ("http://127.0.0.1:8020", "http://localhost:8020", "http://[::1]:8020"):
+        assert sim.check_loopback(ok) in sim.LOOPBACK_HOSTS, ok
+    for bad in ("http://example.com", "https://api.openai.com", "http://10.0.0.5:8020"):
+        with pytest.raises(SystemExit, match="루프백"):
+            sim.check_loopback(bad)
+
+
+def test_제품_코드에는_통신_모듈이_없다():
+    """`tools/` 는 개발 도구라 통신이 있을 수 있지만 **`src/` 는 아니다.**
+
+    검사기를 느슨하게 한 것이 아니라 **정밀하게** 만들었다(D-179) — 전에는 import 만 보고
+    잡아서 '우리 앱에 POST 하는 시뮬레이터' 와 '외부 API 호출' 이 구분되지 않았다.
+    제품 코드 쪽 기준은 그대로 **0건**이다.
+    """
+    net = re.compile(r"^\s*(import|from)\s+(requests|httpx|urllib|aiohttp|boto3|openai)\b", re.M)
+    hits = [p.relative_to(ROOT).as_posix()
+            for p in (ROOT / "src").rglob("*.py")
+            if "__pycache__" not in p.parts and net.search(p.read_text())]
+    assert hits == [], f"제품 코드에 통신 모듈이 있다: {hits}"

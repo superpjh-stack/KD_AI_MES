@@ -33,6 +33,12 @@ from .csrf import EXEMPT_PATHS
 
 MACHINE_PATHS: tuple[str, ...] = tuple(EXEMPT_PATHS)
 
+# 시뮬레이터 선언 (D-174) — `SYNTHETIC_THREAD`(D-131) · `ASSUMED_ANSWERS`(D-160) 와 같은 방식.
+# **IP 가 등록돼 있으면 그것이 실물인지 시뮬레이터인지 반드시 구분된다.** 구분이 없으면
+# 시뮬레이터로 채운 IP 가 "장비가 붙었다" 로 읽힌다.
+CONFIG_TYPE = "시스템설정"
+CONFIG_KEY = "PLC_SIMULATOR"
+
 # IP 대조가 막지 못하는 것 — 판정 문장에 그대로 싣는다. 강도를 부풀리지 않는다.
 LIMIT_NOTE = ("IP 대조는 암호학적 인증이 아니다 — 같은 IP 를 쓰는 다른 프로그램을 가리지 "
               "못한다. 사업계획서 9.2 의 VPN·폐쇄망 위에 얹는 보조 수단이다")
@@ -44,6 +50,31 @@ class Device:
     name: str
     device_type: str
     ip: str
+
+
+def simulation() -> str | None:
+    """시뮬레이터 선언의 결정번호. 없으면 `None`.
+
+    선언이 있으면 `IF_DEVICE_REGISTRY.IP_ADDRESS` 는 **시뮬레이터가 넣은 값**이다 —
+    실물 장비가 붙은 것이 아니다. 선언을 지우면 `tools/plc_simulator.py --unregister`
+    가 IP 도 함께 거둔다: **데이터만 남기고 표시만 떼는 것이 되지 않게** 한다.
+    """
+    import conn
+
+    try:
+        row = conn.q1("select CONFIG_VALUE from SYS_CONFIGS where CONFIG_TYPE = %s "
+                      "and CONFIG_KEY = %s and USE_YN = 'Y'", (CONFIG_TYPE, CONFIG_KEY))
+    except Exception:                 # noqa: BLE001
+        return None
+    return (row["config_value"] or None) if row else None
+
+
+def simulation_note() -> str:
+    """등록된 IP 가 시뮬레이터라는 **한 문장**. 실물이면 빈 문자열."""
+    decl = simulation()
+    return "" if decl is None else (
+        f"시뮬레이터 기준 ({decl}) — 등록된 장비 IP 는 실물이 아니라 "
+        f"`tools/plc_simulator.py` 가 넣은 값이다. 도입기업 장비 IP 는 아직 없다 (D-169)")
 
 
 def client_ip(request: Any) -> str:
@@ -98,5 +129,6 @@ def reason(request: Any) -> str:
         return (f"출발지 {ip} — 등록된 수집 장비 {total}대 전부 **IP_ADDRESS 가 비어 있다**. "
                 f"도입기업이 장비 IP 를 주지 않았고 시드가 지어내지 않았다 — "
                 f"화면 034 수집장비관리에서 IP 를 넣으면 이 경로가 열린다 (D-168)")
+    sim = simulation_note()
     return (f"출발지 {ip} 는 등록된 수집 장비 {with_ip}대 어디와도 맞지 않는다 — "
-            f"화면 034 수집장비관리에서 IP 를 확인한다")
+            f"화면 034 수집장비관리에서 IP 를 확인한다" + (f" · {sim}" if sim else ""))

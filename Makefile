@@ -1,5 +1,6 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
+	plc-scan plc-poll plc-status plc-register plc-unregister \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
 
@@ -32,6 +33,21 @@ run:
 
 simulate:                       ## 레이저커팅기 1대 → 수집 API (수집 지점 2개소뿐 — D-06)
 	uv run python tools/plc_simulator.py
+
+plc-scan:                       ## ① PLC 스캔만 — work/plc_device.db 레지스터에 쌓는다 (D-174)
+	uv run python tools/plc_simulator.py --plc-reset --cycles $(or $(CYCLES),20) --scan-only
+
+plc-poll:                       ## ② Gateway 폴링 — PLC 미전송분을 HTTP 로 올린다 (`make run` 필요)
+	uv run python tools/plc_simulator.py --poll-only --via http
+
+plc-status:                     ## PLC 레지스터·미전송 현황
+	uv run python tools/plc_simulator.py --plc-status
+
+plc-register:                   ## 시뮬레이터 장비 IP 등록 + 선언 — **실물 IP 가 아니다** (D-174)
+	uv run python tools/plc_simulator.py --register
+
+plc-unregister:                 ## 시뮬레이터 IP·선언을 함께 거둔다 → prod 수집은 다시 403 (D-168)
+	uv run python tools/plc_simulator.py --unregister
 
 cad-ingest:                     ## 도면 수집·정제(중복 183·0KB 4 제거) → EST_CAD_DRAWINGS
 	uv run python tools/cad_ingest.py

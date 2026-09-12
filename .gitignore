@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 outputs/*.tmp
 work/*.tmp
+
+# PLC 시뮬레이터가 만드는 장비 측 저장소 — 산출물이 아니다 (D-174)
+work/plc_device.db

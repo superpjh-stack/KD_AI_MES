@@ -125,3 +125,64 @@ def test_수집_상태_시그니처가_공표한_모양이다():
 def test_수집이_없으면_미수집_문구가_나온다():
     pop = [d for d in collector.status()["devices"] if d["device_name"] == "현장POP(터치PC)"]
     assert pop and pop[0]["notice"], "수집이 0건이면 문구가 있어야 한다 (G-11)"
+
+
+# ══ 시뮬레이터 두 단절 (D-174·D-175) ══════════════════════════════════════
+# **끊긴 자리가 다르면 값이 남는 자리도 다르다.** 처음엔 이것을 뭉뚱그려서, 한 번의 단절에
+# Gateway 버퍼와 PLC 레지스터가 **같은 값을 둘 다** 들고 있었다 — 복구하면 두 번 올라간다.
+# 아래 두 시험이 그 구분을 못박는다.
+def _run_sim(tmp_path, *extra: str) -> dict:
+    import importlib
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    sim = importlib.import_module("plc_simulator")
+    from kyungdong.ingest import plcdb
+
+    db = tmp_path / "plc.db"
+    argv = sys.argv[:]
+    sys.argv = ["plc_simulator", "--plc-db", str(db), "--cycles", "10",
+                "--via", "inproc", *extra]
+    try:
+        assert sim.main() == 0
+    finally:
+        sys.argv = argv
+    c = plcdb.connect(db)
+    st = plcdb.stats(c)
+    c.close()
+    st["buffer"] = int(conn.q1("select count(*) as n from IF_GATEWAY_BUFFER "
+                               "where BUFFER_STATUS = '대기'")["n"])
+    st["signals"] = int(conn.q1("select count(*) as n from IF_PLC_SIGNALS")["n"])
+    return st
+
+
+@pytest.fixture()
+def clean_runtime():
+    """런타임 전용 표는 **0건이 정상**이다(G-11). 앞뒤로 확인하고 비운다."""
+    tbls = ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS", "IF_GATEWAY_BUFFER")
+    for t in tbls:
+        n = int(conn.q1(f"select count(*) as n from {t}")["n"])
+        assert n == 0, f"{t} 가 시험 전부터 {n} 행이다 — G-11 을 확인한다"
+    yield
+    for t in tbls:
+        conn.x(f"delete from {t}")
+
+
+def test_PLC측_단절은_장비에_남고_Gateway_버퍼에는_안_들어간다(tmp_path, clean_runtime):
+    """PLC↔Gateway 가 끊기면 Gateway 는 그 값을 **본 적도 없다.** 버퍼에 들어갈 수 없다."""
+    st = _run_sim(tmp_path, "--plc-offline", "4")
+    assert st["scanned"] == 80
+    assert st["unsent"] == 48, f"장비에 남아 있어야 한다: {st}"
+    assert st["buffer"] == 0, "Gateway 가 보지도 못한 값이 버퍼에 들어갔다"
+    assert st["signals"] == 32, st
+
+
+def test_클라우드측_단절은_버퍼가_지고_PLC_는_넘긴_것으로_본다(tmp_path, clean_runtime):
+    """Gateway↔클라우드가 끊기면 폴링은 **됐다** — 값은 Gateway 손에 있다.
+
+    이때 PLC 에도 미전송으로 남기면 **같은 값을 둘이 들고** 있게 되어 복구 때 두 번 올라간다.
+    """
+    st = _run_sim(tmp_path, "--disconnect", "4", "--reconnect", "7")
+    assert st["scanned"] == 80
+    assert st["unsent"] == 0, f"Gateway 가 가져간 값이 장비에 또 남아 있다: {st}"
+    assert st["buffer"] == 0, "재전송 뒤에도 대기 버퍼가 남았다"
+    assert st["signals"] == 80, f"재전송 포함 유실 0 이어야 한다: {st}"
