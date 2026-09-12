@@ -124,11 +124,11 @@ def reason(request: Any) -> str:
     with_ip = len(_registered())
     if total == 0:
         return (f"출발지 {ip} — IF_DEVICE_REGISTRY 에 사용중인 수집 장비가 0건이다. "
-                f"화면 034 수집장비관리에서 등록해야 한다")
+                f"화면 029 시스템 설정(수집 장비 등록)에서 등록해야 한다")
     if with_ip == 0:
         return (f"출발지 {ip} — 등록된 수집 장비 {total}대 전부 **IP_ADDRESS 가 비어 있다**. "
                 f"도입기업이 장비 IP 를 주지 않았고 시드가 지어내지 않았다 — "
-                f"화면 034 수집장비관리에서 IP 를 넣으면 이 경로가 열린다 (D-168)")
+                f"화면 029 시스템 설정(수집 장비 등록)에서 IP 를 넣으면 이 경로가 열린다 (D-168)")
     sim = simulation_note()
     return (f"출발지 {ip} 는 등록된 수집 장비 {with_ip}대 어디와도 맞지 않는다 — "
-            f"화면 034 수집장비관리에서 IP 를 확인한다" + (f" · {sim}" if sim else ""))
+            f"화면 029 시스템 설정(수집 장비 등록)에서 IP 를 확인한다" + (f" · {sim}" if sim else ""))

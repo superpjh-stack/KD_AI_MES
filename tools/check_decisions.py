@@ -290,26 +290,10 @@ NO_PROBE_WHY = {
 
 # 닫힌 표시. 상태 칸이 `~~차단~~ → **해소 …**` 이면 **더는 열린 항목이 아니다** —
 # 원문(`차단`)을 지우지 않고 취소선으로 남기기 때문에 글자만 보면 계속 열린 것으로 읽힌다.
-CLOSED_MARK = "해소"
-
-
-def _bare(state: str) -> str:
-    """상태 칸에서 강조·취소선·공백을 뗀 **맨 앞 글자**를 본다."""
-    return state.replace("*", "").replace("~", "").strip()
-
-
-def is_open(state: str) -> bool:
-    """**열린 항목인가.** 글자 포함 여부로 보면 틀린다 —
-
-    `확정 — G-10 이 차단에서 풀렸다` 는 **확정**인데 '차단' 이 들어 있다. 실제로 이 문장
-    하나 때문에 열린 항목이 29 → 30 으로 늘었다(D-187). 그래서 **맨 앞 상태어**로 판정한다.
-    """
-    bare = _bare(state)
-    if CLOSED_MARK in bare:                      # `~~차단~~ → 해소 …`
-        return False
-    if bare.startswith("확정"):                   # `확정 — … 차단에서 풀렸다`
-        return False
-    return any(bare.startswith(w) for w in OPEN_WORDS)
+# **파서를 여기 두지 않는다.** 화면도 같은 목록을 읽어야 하므로(D-188)
+# `app/followup.py` 한 곳이 판정하고 검사기는 그것을 쓴다 — 두 곳이 각각 파싱하면
+# 화면과 게이트가 서로 다른 건수를 말한다(D-163 이 정확히 그 사고였다).
+from kyungdong.app.followup import CLOSED_MARK, _bare, is_open   # noqa: E402
 
 
 def parse_open() -> list[tuple[str, str]]:

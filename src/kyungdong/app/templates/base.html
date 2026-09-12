@@ -30,6 +30,37 @@
   </nav>
   <main class="content">
     {% block content %}{% endblock %}
+{# ── 미비 항목 (D-188) — **이 화면에서 아직 안 된 것**을 화면에 남긴다.
+     목록은 `decisions.md` 에서 온다. 화면이 자기 목록을 들면 대장과 어긋난다. #}
+    {% if followups %}
+    <div class="card" id="followup">
+      <h2>{% if request.url.path == '/sys/029' %}전체 미비 항목{% else %}이 화면의 미비 항목{% endif %} {{ followups|length }}건</h2>
+      <p class="meta">
+        아직 안 된 것을 숨기지 않는다. 각 항목은 결정 대장(<code>decisions.md</code>)의
+        번호이고, <b>무엇이 있어야 닫히는지</b>와 <b>그때까지 어떻게 하고 있는지</b>를 함께 적었다.
+        값을 지어내 채우지 않았다 — 그래서 비어 있는 칸이 있다.
+        {% if request.url.path != '/sys/029' %}전체 목록은
+        <a href="/sys/029#followup">029 시스템 설정</a>에 모인다.{% else %}
+        <b>이 화면이 전체 집계다</b> — 화면에 배정되지 않은 항목도 여기서 빠지지 않는다.{% endif %}
+      </p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>번호</th><th>상태</th><th>닫으려면</th><th>왜 비어 있나</th><th>지금은 어떻게 하고 있나</th></tr></thead>
+          <tbody>
+            {% for f in followups %}
+            <tr>
+              <td>{{ f.no }}</td>
+              <td><span class="badge {{ 'bad' if f.critical else 'undetermined' }}">{{ f.state }}</span></td>
+              <td>{{ f.need }}</td>
+              <td>{{ f.summary }}</td>
+              <td>{{ f.action or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
   </main>
 </div>
 <footer class="foot">

@@ -11,7 +11,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import nav, rbac
+from . import followup, nav, rbac
 from .util import csrf
 from .settings import settings
 
@@ -54,6 +54,22 @@ def _visible_menu(role_code: str) -> list[tuple[str, list[nav.Screen]]]:
     return out
 
 
+def _followups(request: Request) -> list:
+    """이 화면에 걸린 **미비 항목**. 경로로 화면을 찾고 `decisions.md` 에서 읽는다(D-188).
+
+    **화면이 자기 목록을 들지 않는다** — 대장이 정본이고 여기가 읽기만 한다. 화면마다
+    목록을 박아 두면 대장과 어긋나고, 그 사고를 이미 두 번 겪었다(D-163 · D-181).
+    화면을 못 찾으면 **빈 목록**이다. 아무 화면에나 붙이지 않는다.
+    """
+    sc = nav.by_path().get(request.url.path)
+    if sc is None:
+        return []
+    try:
+        return followup.for_screen(sc.no)
+    except Exception:                # noqa: BLE001 — 대장을 못 읽어도 화면은 떠야 한다
+        return []
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
     role = getattr(request.state, "role_code", None) or "SYSADMIN"
     s = settings()
@@ -70,6 +86,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         csrf_token=csrf.issue(request),
         cad_configured=s.cad_configured,
         synthetic_note=_synthetic_note(),
+        followups=_followups(request),
         **ctx,
     )
     return HTMLResponse(html, status_code=status_code)
