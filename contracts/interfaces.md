@@ -116,7 +116,33 @@ FORM_FIELD = "_csrf" · HEADER = "X-CSRF-Token" · COOKIE = "kyungdong_csrf"
 csrf.require(request, form.get("_csrf"))   # POST 처리 첫 줄
 ```
 **강제 적용 시점**: 개발 3명이 전부 끝난 **조용한 창**에서 미들웨어로 켠다 —
-돌고 있는 동안 켜면 진행 중인 POST 가 403 으로 깨진다.
+돌고 있는 동안 켜면 진행 중인 POST 가 403 으로 깨진다. (현재 `ENFORCE=1`)
+
+**화면 form 마다 토큰이 실려야 한다** (D-172). 라우터에 `csrf.require()` 가 31/31 걸려
+있어도 화면의 `<form method=post>` 가 토큰을 빠뜨리면 **그 화면의 쓰기만 403** 이고
+게이트는 통과한다 — D-73 이 정확히 그 사고였다(`with context` 누락으로 토큰이 빈 문자열로
+렌더됐고, 그대로 켰으면 쓰기가 전부 403). `tools/check_security.py` G-26 이 **form 단위로**
+센다(현재 10/10).
+
+**기계 대 기계 경로 4건 — `kyungdong.app.util.device` (D-103 · D-168~D-171)**
+
+```python
+device.MACHINE_PATHS                      # csrf.EXEMPT_PATHS 와 **같은 목록이어야 한다**
+device.identify(request) -> Device | None # 출발지 IP ↔ IF_DEVICE_REGISTRY (USE_YN='Y')
+device.reason(request) -> str             # 왜 인증되지 않았는지 한 문장
+device.LIMIT_NOTE                         # IP 대조는 암호학적 인증이 아니다
+```
+
+CSRF 면제는 **"막을 수 없으니 끈다" 가 아니라 "이 위협에 해당하지 않는다"** 는 판단이다
+(D-103) — PLC·Gateway·배치는 쿠키를 쓰지 않으므로 CSRF 의 대상이 아니다. 대신
+**등록 기반 인증**이 그 자리를 메운다: 역할로 막힌 뒤 `identify()` 가 한 번 더 본다.
+
+> ⚠ **지금은 아무도 통과하지 못한다.** `IF_DEVICE_REGISTRY.IP_ADDRESS` 가 등록된 2대 모두
+> **NULL** 이라(도입기업 미제공 · 시드는 지어내지 않는다) prod 에서 `POST /api/ingest/plc` 는
+> **403** 이고, 그래서 **PLC·Gateway 가 운영에서 데이터를 넣지 못한다**(D-168).
+> TD5 `IF_DEVICE_REGISTRY` 11컬럼에 비밀키·인증서 칸이 없고 **컬럼은 추가하지 않는다**
+> (G-02 762 고정) — 갈래는 둘뿐이다: **① 도입기업이 장비 IP 를 준다 ② 정본에 인증 칸을 넣는다**(D-169).
+> 화면 034 수집장비관리에서 IP 를 넣으면 그 경로가 열린다 — 되돌림 시험으로 확인했다(D-171).
 
 ## 6. 설정 — `kyungdong.app.settings`
 

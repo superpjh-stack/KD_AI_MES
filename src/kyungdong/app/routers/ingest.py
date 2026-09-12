@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from ...agent import docs as agent_docs
 from ...ingest import collector
 from .. import rbac
-from ..util import csrf, http
+from ..util import csrf, device, http
 from ..util.audit import audit
 
 import conn  # noqa: E402
@@ -31,10 +31,30 @@ def _role(request: Request) -> str:
 
 
 def _need_write(request: Request, area: str) -> str:
+    """쓰기 권한. **사람은 역할로, 장비는 등록으로** 통과한다 (D-103 · D-168).
+
+    이 라우터의 4개 경로는 **기계가 부른다.** 사람 세션이 없으므로 prod 에서는 역할이 빈
+    문자열이고 그대로면 전부 403 이다 — 실측 확인했다: prod `POST /api/ingest/plc` = **403**.
+    개발에서는 `x-kyungdong-role` 헤더가 SYSADMIN 을 주기 때문에 게이트가 전부 통과해
+    이것이 보이지 않았다. **PLC 와 Gateway 가 운영에서 데이터를 넣지 못한다.**
+
+    그래서 역할로 막힌 뒤 **등록된 장비인지 한 번 더 본다.** 지금은 `IF_DEVICE_REGISTRY` 의
+    IP 가 전부 NULL 이라 **아무도 통과하지 못한다** — 동작은 그대로다. 바뀌는 것은
+    **진단**이다: `데이터관리 등록 권한 없음`(권한 설정을 뒤지게 된다) 대신 무엇이 비었는지
+    말한다. IP 가 등록되면 그때 이 경로가 열린다.
+    """
     role = _role(request)
-    if not rbac.can_write(role, area):
-        raise http.fail("forbidden", f"{area} 등록 권한 없음")
-    return role
+    if rbac.can_write(role, area):
+        return role
+    dev = device.identify(request)
+    if dev is not None:
+        request.state.device = dev
+        return f"장비:{dev.device_id} {dev.name}"
+    if request.url.path in device.MACHINE_PATHS:
+        raise http.fail("forbidden",
+                        f"{area} 쓰기 — 사람 세션도 등록된 수집 장비도 아니다. "
+                        f"{device.reason(request)} · {device.LIMIT_NOTE}")
+    raise http.fail("forbidden", f"{area} 등록 권한 없음")
 
 
 # ── MES-TD4-047 IoT/PLC 수집 ──────────────────────────────────────────────

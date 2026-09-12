@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
 from kyungdong.app.util import assumed, http             # noqa: E402
+from kyungdong.cad import archive                         # noqa: E402
 from kyungdong.cad import dwgconv                        # noqa: E402
 from kyungdong.cad import inventory as inv               # noqa: E402
 from kyungdong.cad import pipeline, provider             # noqa: E402
@@ -66,6 +67,61 @@ def test_정제는_순서를_유지하고_처음_1건만_남긴다(files):
 
 
 # ── D-05 미구성이면 501. 조용한 합성 금지 ─────────────────────────────────
+def test_고객사_목록은_박아_두지_않고_확정_정본에서_읽는다():
+    """**D-136 해소** — 하드코딩 18종에 고객사가 아닌 것이 4종 섞여 있었다.
+
+    `최성배`(사람 이름) 1 · `원명에스티에스`·`리트산업`·`태양기어`(셋 다 *경동글로벌텍 귀중*
+    견적서의 **공급자**) 3. 게다가 `그린텍` 은 미분류였고, 확정 19종 중 **7종이 빠져** 있었다.
+    실측으로 `GD1806-최성배` 3폴더가 **사람을 고객사로** 세고 있었고 `GD2003-01-썬바이오`
+    2폴더는 진짜 고객사인데 **빠뜨리고** 있었다.
+
+    도입기업이 ⑥ 에서 "협력사·공급사 16종은 고객사가 아니다" 를 확인해 준 뒤로는(D-166)
+    이 목록이 정본과 **증명 가능하게** 어긋난 상태였다. 그래서 출처를 하나로 묶었다 —
+    D-163 과 같은 결함이다: **진실을 두 곳에 두면 한 곳이 조용히 낡는다.**
+    """
+    import json as _json
+
+    pairs = archive.known_customers()
+    canon = {c for _, c in pairs}
+    data = _json.loads(archive.CUSTOMER_JSON.read_text(encoding="utf-8"))
+    expected = {str(c["정규화이름"]).split("/")[0].strip() for c in data["후보"]
+                if str(c["분류"]).startswith(archive.CUSTOMER_ROLE_PREFIX)}
+    assert canon == expected, f"확정 정본과 어긋난다: {sorted(canon ^ expected)}"
+    assert len(canon) == 19, f"확정 고객사는 19종이다 (D-139·D-166): {len(canon)}"
+
+    # **돌아오면 안 되는 것** — 사람 이름과 공급사 4종. 하나라도 다시 들어오면 깨진다.
+    tokens = {t for t, _ in pairs}
+    for wrong in ("최성배", "원명에스티에스", "리트산업", "태양기어"):
+        assert wrong not in tokens and wrong not in canon, (
+            f"`{wrong}` 은 고객사가 아니다 — 사람 이름이거나 *경동글로벌텍 귀중* 견적서의 공급자다")
+    # 빠져 있던 것이 실제로 들어왔는가.
+    assert "썬바이오" in canon and "나노신소재" in canon
+
+    # 폴더 표기가 대표 이름으로 접히는가 — `웰이엔시` 폴더도 `웰이엔씨` 로 센다.
+    m = dict(pairs)
+    assert m.get("웰이엔시") == "웰이엔씨", m.get("웰이엔시")
+    assert m.get("애니젠") == "에니젠", m.get("애니젠")
+    # 슬래시가 박힌 이름이 그대로 나가지 않는다 — 회사 이름인 줄 안다.
+    assert not any("/" in c for c in canon), sorted(c for c in canon if "/" in c)
+
+    # 긴 표기가 먼저 온다 — `엔에프테크 조범주` 가 `엔에프테크` 보다 앞이어야
+    # 폴더명 전체를 설명한다.
+    order = [t for t, _ in pairs]
+    assert order.index("엔에프테크 조범주") < order.index("엔에프테크")
+
+
+def test_확정_정본이_없으면_고객사는_0건이고_하드코딩으로_돌아가지_않는다(tmp_path, monkeypatch):
+    """**출처가 사라지면 0건이다.** 하드코딩 폴백을 두면 D-136 이 조용히 되살아난다(§10-9)."""
+    archive.known_customers.cache_clear()
+    monkeypatch.setattr(archive, "CUSTOMER_JSON", tmp_path / "없는파일.json")
+    try:
+        assert archive.known_customers() == ()
+    finally:
+        monkeypatch.undo()
+        archive.known_customers.cache_clear()
+    assert len(archive.known_customers()) >= 19, "원상복구되지 않았다"
+
+
 def test_인식_공급자가_미구성이다():
     avail = provider.availability()
     assert len(avail) == 2

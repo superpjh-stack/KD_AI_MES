@@ -19,10 +19,12 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import unicodedata
 from collections import Counter
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -46,10 +48,62 @@ PRODUCT_ALIASES: dict[str, tuple[str, ...]] = {
     "누체필터": ("누체필터", "누체", "NUTSCHE", "FILTER"),
     "저장탱크": ("저장탱크", "리시버", "RECEIVER", "STORAGE", "TANK", "탱크", "콘덴샤", "CONDENSER"),
 }
-# D-114 가 폴더명에서 실측한 고객사 실명. **마스터가 아니라 후보다.**
-KNOWN_CUSTOMERS = ("두루텍", "한모루", "동광제약", "웰이엔씨", "웰이엔시", "대한열기", "대호테크",
-                   "엔에프테크", "비나텍", "그린텍", "신풍제약", "일성신약", "동아제약", "에니젠",
-                   "최성배", "원명에스티에스", "리트산업", "태양기어")
+# 확정 고객사 (D-139 · 도입기업 회신 ⑥ 로 재확인 D-166). **여기 목록을 박아 두지 않는다** —
+# `docs/cad/customer_candidates.json` 이 정본이고 이 함수가 거기서 꺼낸다.
+#
+# 박아 뒀을 때 실제로 틀렸다(D-136): 하드코딩 18종에 **사람 이름 `최성배` 1 + 공급사 3**
+# (`원명에스티에스`·`리트산업`·`태양기어` — 셋 다 *경동글로벌텍 귀중* 견적서의 **공급자**)이
+# 섞여 있었고, `그린텍` 은 미분류였다. 반대로 확정 19종 중 **7종이 빠져** 있었다.
+# 도입기업이 ⑥ 에서 "협력사·공급사 16종은 고객사가 아니다" 를 확인해 준 뒤로는 이 목록이
+# 정본과 **증명 가능하게** 어긋난 상태였다. 출처를 하나로 묶어 그 어긋남을 없앤다(D-163 과 같은 결함).
+CUSTOMER_JSON = Path(__file__).resolve().parents[3] / "docs" / "cad" / "customer_candidates.json"
+
+# `분류` 가 이 둘로 시작하는 후보만 고객사다. 협력사·공급사 · 관계사 · 도입기업 본인 ·
+# 미분류 · 사람이름 · 제품명은 **고객사가 아니다.**
+CUSTOMER_ROLE_PREFIX = ("발주처", "수요처")
+
+
+@lru_cache(maxsize=1)
+def known_customers() -> tuple[tuple[str, str], ...]:
+    """`((폴더에서 찾을 표기, 정규화이름), …)` — **긴 표기가 먼저** 온다.
+
+    긴 것부터 보는 이유: `엔에프테크 조범주` 가 `엔에프테크` 보다 먼저 걸려야 폴더명 전체를
+    설명한다. 둘 다 같은 고객으로 접히므로 결과는 같지만 **무엇을 보고 붙였는지**가 달라진다.
+
+    표기는 두 곳에서 모은다 — ① `정규화이름`(`에니젠/애니젠` 처럼 `/` 로 두 표기를 적은 것은
+    갈라서 둘 다) ② `표기변형` 중 **폴더·파일명에서 관측된 것**(`웰이엔시` · `서한` 처럼
+    폴더에만 나오는 표기가 여기 있다). 견적서 수신처 표기(`㈜ 한 모 루`)는 **넣지 않는다** —
+    공백이 박힌 문서 표기라 폴더명에 없고, 넣으면 영영 걸리지 않는 항목만 늘어난다.
+
+    파일을 못 읽으면 **빈 튜플**이다. 하드코딩으로 되돌아가지 않는다 — 되돌아가면 D-136 이
+    조용히 되살아난다. 부르는 쪽은 고객사 0건을 그대로 보고한다(§10-9).
+    """
+    try:
+        data = json.loads(CUSTOMER_JSON.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    pairs: dict[str, str] = {}
+    for c in data.get("후보") or []:
+        if not str(c.get("분류", "")).startswith(CUSTOMER_ROLE_PREFIX):
+            continue
+        raw = nfc(str(c.get("정규화이름") or "")).strip()
+        if not raw:
+            continue
+        # `에니젠/애니젠` 처럼 한 칸에 두 표기를 적은 것이 있다. **앞의 것을 대표로 쓰고**
+        # 뒤의 것은 찾을 표기로만 둔다 — 슬래시가 박힌 이름이 화면·통계에 그대로 나가면
+        # 그게 회사 이름인 줄 안다.
+        parts = [x.strip() for x in raw.split("/") if x.strip()]
+        canon = parts[0]
+        for part in parts:
+            pairs.setdefault(part, canon)
+        for v in c.get("표기변형") or []:
+            v = nfc(str(v))
+            if "폴더" not in v and "파일명" not in v:
+                continue
+            head = v.split(" (")[0].strip()
+            if head:
+                pairs.setdefault(head, canon)
+    return tuple(sorted(pairs.items(), key=lambda kv: (-len(kv[0]), kv[0])))
 
 # `GD` + YYMM + (일련번호) + 나머지. 구분자는 `-` · `_` · 공백 무엇이든 온다.
 PROJECT_RE = re.compile(
@@ -216,7 +270,8 @@ def parse_project(folder: str, rel: str = "") -> Project | None:
         if any(a.upper() in up for a in aliases):
             group = g
             break
-    cust = next((c for c in KNOWN_CUSTOMERS if c in rest), None)
+    # 붙는 이름은 **정규화이름**이다 — `엔에프테크 조범주` 폴더도 `엔에프테크` 로 센다.
+    cust = next((canon for tok, canon in known_customers() if tok in rest), None)
     return Project(folder=name, rel=rel, project_no=no, yymm=yymm, seq=seq,
                    label=rest, product_group=group, customer=cust)
 

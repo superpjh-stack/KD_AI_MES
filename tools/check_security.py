@@ -226,6 +226,32 @@ def gate_26(client: TestClient) -> None:
                         for f, s in src.items()
                         if f.startswith("src/") and not f.endswith("util/csrf.py"))
     tpl_tokens = [p.relative_to(ROOT).as_posix() for p in TEMPLATES if "_csrf" in p.read_text()]
+    # **POST form 마다 토큰이 실렸는가** — 라우트 수(31/31)만 세면 이걸 못 잡는다.
+    # 라우트에 `csrf.require()` 가 걸려 있어도 화면의 form 이 토큰을 안 실으면 **403** 이다.
+    # 지금은 10/10 이라 통과하지만, 이 검사가 없으면 **새 form 하나가 조용히 깨진 채로**
+    # 게이트를 통과한다. `{{ csrf_field() }}` 를 빠뜨리는 것이 정확히 그 사고다(D-73 선례:
+    # `with context` 누락으로 토큰이 빈 문자열로 렌더됐고, 그대로 켰으면 쓰기 전부 403 이었다).
+    post_forms, form_ok, form_bad = 0, 0, []
+    for p in TEMPLATES:
+        body_all = p.read_text()
+        for m in re.finditer(r"<form\b[^>]*>", body_all, re.I):
+            tag = m.group(0)
+            if not re.search(r"method\s*=\s*[\"']?post", tag, re.I):
+                continue
+            post_forms += 1
+            end = body_all.find("</form>", m.end())
+            body = body_all[m.end(): end if end > 0 else len(body_all)]
+            act = re.search(r"action\s*=\s*[\"']([^\"']+)", tag)
+            if "csrf_field" in body or csrf.FORM_FIELD in body:
+                form_ok += 1
+            elif act and csrf.exempt(act.group(1)):
+                form_ok += 1                       # 기계 엔드포인트 — 세션이 없어 토큰도 없다
+            else:
+                form_bad.append(f"{p.relative_to(ROOT).as_posix()} {tag[:60]}")
+    say(f"     화면 POST form {post_forms} 중 토큰 실린 것 {form_ok} "
+        f"{'· **빠진 것 ' + str(len(form_bad)) + '**' if form_bad else ''}")
+    for b in form_bad[:5]:
+        say(f"       빠짐 {b}")
     enforced = csrf.enforced()                        # 정본 함수
     badge = [p.relative_to(ROOT).as_posix() for p in TEMPLATES if "CSRF 미적용" in p.read_text()]
     say(f"  ⑤ CSRF — POST 라우트 {post_routes} · csrf.require() 호출 {require_calls} · "
@@ -237,12 +263,16 @@ def gate_26(client: TestClient) -> None:
     if require_calls == 0 or not tpl_tokens:
         bad.append(f"CSRF 가 POST {post_routes}개 중 {require_calls}곳에만 연결돼 있다 "
                    f"(템플릿 토큰 {len(tpl_tokens)}개) — 요청 위조 방지 미적용 (D-60/D-73)")
+    if form_bad:
+        bad.append(f"화면 POST form {len(form_bad)}개에 `csrf_field()` 가 없다 — "
+                   f"ENFORCE=1 에서 그 화면의 쓰기는 403 이다: {form_bad[0]}")
     if not enforced:
         bad.append("KYUNGDONG_CSRF_ENFORCE=0 — 보호 장치가 꺼져 있다")
 
     verdict("G-26", PASS if not bad else FAIL,
             f"prod HSTS·기동거부 코드 경로 있음 · 외부 출처 0 · 해시 {algos} · "
             f"**CSRF {require_calls}/{post_routes}** (템플릿 토큰 {len(tpl_tokens)}, "
+            f"화면 POST form {form_ok}/{post_forms}, "
             f"ENFORCE={int(enforced)}, 배지 노출 {shown}) · "
             f"TLS 버전·저장 암호화 알고리즘은 정본 부재(D-15)로 판정 대상 아님" +
             ("" if not bad else " · 결함 " + " / ".join(bad[:3])))

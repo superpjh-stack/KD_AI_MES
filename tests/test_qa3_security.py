@@ -79,6 +79,43 @@ def test_g26_csrf_is_wired_on_every_post_route():
     assert tokens, "화면이 CSRF 토큰 필드를 하나도 찍지 않는다 — 브라우저가 쓰기를 할 수 없다"
 
 
+def test_g26_모든_화면_POST_form_에_토큰이_실린다():
+    """**라우트 수(31/31)를 세는 것으로는 이걸 못 잡는다.**
+
+    라우터에 `csrf.require()` 가 걸려 있어도 화면의 `<form method=post>` 가 토큰을 안
+    실으면 그 화면의 쓰기는 **403** 이다. 라우트는 31/31 로 멀쩡해 보이므로 게이트는
+    통과하고, 깨진 것은 **사람이 그 버튼을 누를 때** 드러난다.
+
+    D-73 이 정확히 그 사고였다 — `{% from … import csrf_field %}` 에 `with context` 가
+    빠져 토큰이 **빈 문자열**로 렌더됐고, 그대로 켰으면 쓰기가 전부 403 이었다.
+
+    면제 경로(`util/csrf.EXEMPT_PATHS`)로 보내는 form 은 토큰이 없는 것이 맞다 —
+    세션·쿠키가 없는 기계 엔드포인트라 토큰을 만들 수가 없다.
+    """
+    from kyungdong.app.util import csrf as csrfmod
+
+    post_forms, missing = 0, []
+    for p in TEMPLATES:
+        text = p.read_text()
+        for m in re.finditer(r"<form\b[^>]*>", text, re.I):
+            tag = m.group(0)
+            if not re.search(r"method\s*=\s*[\"']?post", tag, re.I):
+                continue
+            post_forms += 1
+            end = text.find("</form>", m.end())
+            body = text[m.end(): end if end > 0 else len(text)]
+            act = re.search(r"action\s*=\s*[\"']([^\"']+)", tag)
+            if "csrf_field" in body or csrfmod.FORM_FIELD in body:
+                continue
+            if act and csrfmod.exempt(act.group(1)):
+                continue
+            missing.append(f"{p.relative_to(ROOT).as_posix()} {tag[:60]}")
+    assert post_forms >= 10, f"POST form 이 {post_forms} 개다 — 세는 방식이 바뀌었는지 확인하라"
+    assert not missing, (
+        f"`csrf_field()` 가 빠진 화면 POST form {len(missing)} 개 — 그 화면의 쓰기는 403 이다: "
+        f"{missing}")
+
+
 def test_g26_csrf_off_is_declared_on_screen(client):
     """조용히 꺼진 보안 장치를 만들지 않는다(G-30).
 
@@ -129,6 +166,100 @@ def test_g26_prod_profile_is_enforced(monkeypatch):
         monkeypatch.undo()
         settings.cache_clear()
     assert "Strict-Transport-Security" not in security.headers()
+
+
+# ══ 수집 장비 인증 (D-103 후속 · D-168) ═══════════════════════════════════
+# **개발에서는 이 결함이 보이지 않는다.** `x-kyungdong-role` 헤더가 SYSADMIN 을 주기 때문에
+# 게이트가 전부 통과한다. prod 로 올려야 드러난다 — 그래서 여기서 prod 로 올려 잰다.
+def _prod_client(monkeypatch):
+    monkeypatch.setenv("KYUNGDONG_ENV", "prod")
+    monkeypatch.setenv("KYUNGDONG_SESSION_SECRET", "test-only-not-a-real-key")
+    settings.cache_clear()
+    return TestClient(app, raise_server_exceptions=False)
+
+
+PLC_BODY = {"device_id": 1, "equip_code": "EQ10",
+            "samples": [{"tag": "RUN_STATUS", "value": "가동",
+                         "collect_dt": "2026-09-12T10:00:00"}]}
+
+
+def test_prod_에서_수집_장비는_403_이고_이유가_권한이_아니라고_말한다(monkeypatch):
+    """**실측 결함** — prod 에서 PLC·Gateway 가 데이터를 넣지 못한다.
+
+    세션이 없으면 `role_code` 가 빈 문자열이고 `rbac.can_write()` 가 막는다. 전에는 이것이
+    `데이터관리 등록 권한 없음` 으로 나왔다 — **틀린 진단**이다. 현장에서 이 403 을 보면
+    권한 설정을 뒤지는데, 진짜 원인은 `IF_DEVICE_REGISTRY.IP_ADDRESS` 가 비어 있는 것이다.
+
+    **이 테스트는 지금 결함이 사실이라는 것을 못박는다.** 장비 IP 가 등록되면
+    아래 `열린다` 테스트가 통과하고 이 테스트의 403 단언이 깨져서 리포트를 갱신하게 만든다.
+    """
+    c = _prod_client(monkeypatch)
+    try:
+        r = c.post("/api/ingest/plc", json=PLC_BODY)
+        assert r.status_code == 403, r.status_code
+        txt = r.text
+        assert "등록된 수집 장비" in txt, "왜 막혔는지를 말하지 않는다"
+        assert "IP_ADDRESS" in txt or "0건" in txt, "무엇이 비었는지를 말하지 않는다"
+        assert "등록 권한 없음" not in txt, (
+            "권한 문제라고 말한다 — 진짜 원인은 장비 IP 미등록이다")
+        # 강도를 부풀리지 않는다 — IP 대조의 한계가 문장에 함께 나간다.
+        assert "암호학적 인증이 아니다" in txt
+    finally:
+        monkeypatch.undo()
+        settings.cache_clear()
+
+
+def test_IP_가_등록되면_그_장비만_통과한다(monkeypatch):
+    """**N건 경로** — 0건만 재면 '막힌다' 만 알고 '열리는지' 는 모른다(§10-4).
+
+    끝나고 IP 를 NULL 로 되돌리고 적재한 행도 지운다 — `IF_PLC_SIGNALS` 는
+    **런타임 전용 표라 0건이 정상**이다(G-11).
+    """
+    c = _prod_client(monkeypatch)
+    dev = conn.q1("select DEVICE_ID from IF_DEVICE_REGISTRY where USE_YN = 'Y' "
+                  "order by DEVICE_ID limit 1")
+    assert dev, "수집 장비가 0건이다 — 시드를 확인한다"
+    did = int(dev["device_id"])
+    before = {t: int(conn.q1(f"select count(*) as n from {t}")["n"])
+              for t in ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS")}
+    try:
+        conn.x("update IF_DEVICE_REGISTRY set IP_ADDRESS = %s where DEVICE_ID = %s",
+               ("testclient", did))
+        r = c.post("/api/ingest/plc", json=PLC_BODY)
+        assert r.status_code == 200, (r.status_code, r.text[:200])
+        assert r.json()["stored"] == 1, r.json()
+
+        # **등록되지 않은 출발지는 여전히 막힌다** — 하나 열었다고 전부 열리면 안 된다.
+        conn.x("update IF_DEVICE_REGISTRY set IP_ADDRESS = %s where DEVICE_ID = %s",
+               ("10.0.0.99", did))
+        r2 = c.post("/api/ingest/plc", json=PLC_BODY)
+        assert r2.status_code == 403, "IP 가 다른데 통과했다"
+        assert "맞지 않는다" in r2.text, r2.text[:200]
+    finally:
+        conn.x("update IF_DEVICE_REGISTRY set IP_ADDRESS = null where DEVICE_ID = %s", (did,))
+        for t, n in before.items():
+            conn.x(f"delete from {t}")
+            assert n == 0, f"{t} 가 검사 전부터 {n} 행이었다 — G-11 을 확인한다"
+        monkeypatch.undo()
+        settings.cache_clear()
+
+
+def test_장비_경로_목록은_CSRF_면제_목록과_같다():
+    """둘이 어긋나면 **CSRF 는 면제인데 장비 인증은 안 보는 구멍**이 생긴다."""
+    from kyungdong.app.util import csrf as csrfmod
+    from kyungdong.app.util import device
+
+    assert set(device.MACHINE_PATHS) == set(csrfmod.EXEMPT_PATHS), (
+        sorted(set(device.MACHINE_PATHS) ^ set(csrfmod.EXEMPT_PATHS)))
+
+
+def test_장비_IP_를_지어내지_않았다():
+    """시드가 IP 를 채워 두면 `열린다` 가 **검사기 자신 때문에** 참이 된다."""
+    n = int(conn.q1("select count(*) as n from IF_DEVICE_REGISTRY "
+                    "where IP_ADDRESS is not null and length(trim(IP_ADDRESS)) > 0")["n"])
+    assert n == 0, (
+        f"IF_DEVICE_REGISTRY 에 IP 가 {n} 건 있다 — 도입기업이 장비 IP 를 주지 않았고 "
+        "시드는 지어내지 않는다. 실제로 받았다면 이 테스트를 뒤집어라 (D-168)")
 
 
 # ══ G-27 ═════════════════════════════════════════════════════════════════
