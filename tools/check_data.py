@@ -74,13 +74,18 @@ def synthetic_note() -> str:
     return f"합성 데이터 기준 {row['config_value']}"
 
 
-# ── 가정 답변 고지 (D-150) — **수치에 실제로 섞였을 때만 붙인다** ────────────
+# ── 선언 파생값 고지 (D-160) — **수치에 실제로 섞였을 때만 붙인다** ──────────
 # 선언(`SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')`)이 있어도 그 파생물이 판정에 들어오지
 # 않았으면 고지를 붙이지 않는다 — 안 쓰인 고지는 노이즈이고, 쓰인 곳에 없는 고지가 거짓 증거다.
-# 그래서 **쓰였는지를 실측한다**: 가정 표시가 붙은 코드를 참조하는 행 수 · 가정 표시가 붙은
+# 그래서 **쓰였는지를 실측한다**: 선언 표시가 붙은 코드를 참조하는 행 수 · 표지가 붙은
 # Feature 가 정합성 사슬에 들어온 행 수. 문구는 선언에서 읽는다(여기 박지 않는다).
-ASSUMED_CODE_MARK = "가정 답변 기준 %"
-ASSUMED_FEATURE_MARK = "%단위 가정 (%"
+#
+# 패턴도 문구에서 뽑지 않는다. ②③ 이 **확정**으로 바뀌면서 표시가 `가정 답변 기준 …` →
+# `도입기업 확정 (D-160) …` 이 됐다 — 문구를 박아 뒀으면 이 검사가 **조용히 0건**이 되고
+# 고지가 사라졌을 것이다. 결정번호 괄호로 건다(`assumed.ATTR1_LIKE`).
+ASSUMED_CODE_MARK = assumed.ATTR1_LIKE
+# 문구가 아니라 **변환 화살표**로 건다 — 앞머리는 성격에 따라 바뀐다(assumed.UNIT_MARK).
+ASSUMED_FEATURE_MARK = assumed.UNIT_TAG_LIKE
 
 
 def assumed_used() -> tuple[int, list[str]]:

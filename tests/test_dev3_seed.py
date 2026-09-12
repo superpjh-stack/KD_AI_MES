@@ -138,31 +138,65 @@ def test_임베딩_미구성이면_벡터가_비어_있다():
         assert n == 0, "임베딩 공급자가 없는데 벡터가 있다 — 0벡터를 채웠는지 확인한다 (D-08)"
 
 
-# ══ 가정 답변 선언 (D-150) 과 그 파생물 ═══════════════════════════════════
+# ══ 도입기업 답변 선언 (D-160) 과 그 파생물 ═══════════════════════════════
 # **0건 단언을 지우지 않고 방향을 뒤집었다** — '재질' 그룹이 0건이던 동안은
 # `tests/test_dev1_seed.py` 가 비었는지를 단언했다. 가정 답변에서 채운 뒤에는 여기가
-# **표지가 붙었는지·목록 밖 이름이 없는지**를 단언한다.
-def test_가정_선언이_DB_에_박혀_있고_파일과_같은_결정번호다():
+# **표지가 붙었는지·목록 밖 이름이 없는지**를 단언했고, 답변이 실제로 온 뒤에는
+# **표기가 `가정` 이 아니라 `확정` 인지**를 단언한다. 세 번 뒤집었지만 한 번도 지우지 않았다.
+def test_선언이_DB_에_박혀_있고_파일과_같은_결정번호다():
     decl = conn.q1("select CONFIG_VALUE, DESCRIPTION from SYS_CONFIGS "
                    "where CONFIG_TYPE = %s and CONFIG_KEY = %s and USE_YN = 'Y'",
                    (assumed.CONFIG_TYPE, assumed.CONFIG_KEY))
     assert decl is not None, (
         "가정 선언이 없다 — 이 선언이 없으면 재질 코드·단위 가정·G-14 라벨이 전부 차단이다")
-    assert decl["config_value"] == assumed.file_decision() == "D-150"
+    assert decl["config_value"] == assumed.file_decision() == "D-160"
     assert assumed.path_text() in (decl["description"] or ""), "선언에 출처 파일이 없다"
-    assert assumed.declaration() == "D-150"
+    assert assumed.declaration() == "D-160"
 
 
 def test_고지_문구는_선언_파일에서_읽는다():
     """검사기·화면이 문구를 박아 두면 선언을 지워도 문구가 남아 거짓 증거가 된다."""
-    assert assumed.base_note() == "가정 답변 기준 (D-150)"
-    assert assumed.circular_note() == "가정 답변 기준 (D-150) · 순환 라벨 — 정확도 증거 아님"
-    assert "25.4" in assumed.unit_tag() and "단위 가정 (D-150)" in assumed.unit_tag()
-    assert assumed.material_attr1() == "가정 답변 기준 (D-150) — 도입기업 미확인"
+    assert assumed.base_note() == "미확정 (D-160)"
+    assert assumed.circular_note().startswith("차단 (D-160)"), assumed.circular_note()
+    assert "정답 라벨 0건" in assumed.circular_note()
+    assert "25.4" in assumed.unit_tag() and assumed.UNIT_MARK in assumed.unit_tag()
+    assert assumed.material_attr1() == "도입기업 확정 (D-160) 2026-09-12"
+
+
+def test_받은_항목과_못_받은_항목의_표기가_다르다():
+    """**확정에 가정 딱지를 붙이면 쓸 수 있는 값을 못 쓰고, 미확정에서 떼면 거짓 증거다.**
+
+    ②재질 ③단위 ⑥고객사 는 회신을 받았다(확정) → 출처 표기가 붙는다.
+    ①.cad 제품 은 못 받았다(미확정) → 출처 표기가 **없어야** 한다.
+    ④ 는 `어휘는 확정 · 정답 라벨 자체는 미확정` 이라 **받은 것으로 세지 않는다** —
+    어휘만 받고 라벨은 못 받았는데 받은 척하면 G-14 가 열린다.
+    """
+    for key in (assumed.K_MATERIAL, assumed.K_UNIT, assumed.K_CUSTOMER):
+        assert assumed.answered(key), f"{key} 는 확정인데 미확정으로 읽힌다"
+        assert assumed.source_tag(key).startswith("도입기업 확정"), key
+    assert not assumed.answered("①_cad_출처_제품"), "못 받은 답을 받은 것으로 센다"
+    assert assumed.source_tag("①_cad_출처_제품") == "", "미확정에 출처 표기가 붙었다"
+    assert not assumed.answered(assumed.K_LABEL), (
+        "④ 는 어휘만 확정이다 — 라벨을 받은 것으로 세면 G-14 가 잘못 열린다")
+
+
+def test_회수_패턴은_문구가_아니라_결정번호로_건다():
+    """문구(`가정 답변 기준 …` → `도입기업 확정 …`)가 바뀌어도 회수가 계속 걸려야 한다.
+
+    실제로 `%단위 가정 (%` 가 5곳에 복사돼 있었고, ②③ 이 확정으로 바뀌는 순간 다섯 곳이
+    **조용히 0건**이 될 뻔했다. 표지가 안 걸리면 선언을 지워도 파생물이 남는다.
+    """
+    assert "(D-" in assumed.ATTR1_LIKE, assumed.ATTR1_LIKE
+    assert assumed.material_attr1() and "(D-160)" in assumed.material_attr1()
+    # 실제로 걸리는가 — 문자열 규칙이 아니라 DB 가 답한다.
+    n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = '재질' "
+                    "and ATTR1 like %s", (assumed.ATTR1_LIKE,))["n"])
+    assert n, "재질 코드에 선언 표시가 하나도 걸리지 않는다 — 회수가 작동하지 않는다"
+    assert assumed.UNIT_MARK in assumed.unit_tag(), "단위 표지에 불변 부분이 없다"
 
 
 def test_재질_코드는_실측_목록_밖의_이름을_만들지_않는다():
-    """**목록 밖 이름이 하나라도 있으면 FAIL** — 가정 답변 ② 는 실측 표기만 확인했다."""
+    """**목록 밖 이름이 하나라도 있으면 FAIL** — 답변 ② 는 실측 표기 14종만 확인했다."""
     import seed_dev3
 
     measured = {k for k, _ in seed_dev3.measured_materials()}
@@ -172,7 +206,9 @@ def test_재질_코드는_실측_목록_밖의_이름을_만들지_않는다():
     rows = conn.q("select CODE_VALUE, CODE_NAME, ATTR1, ATTR2 from BAS_COMMON_CODES "
                   "where CODE_GROUP = '재질' order by SORT_ORDER")
     assert rows, "재질 코드가 비었다 — `make db-seed`"
-    seeded = {r["code_value"] for r in rows if (r["attr1"] or "").startswith("가정 답변 기준")}
+    # 표시 문구를 여기 박지 않는다 — 성격이 바뀌면(가정→확정) 문구도 바뀌고, 박아 두면
+    # 이 집합이 **조용히 비어** 단언이 전부 공집합 위에서 참이 된다. 실제로 그랬다.
+    seeded = {r["code_value"] for r in rows if (r["attr1"] or "") == assumed.material_attr1()}
     assert seeded <= allowed, f"실측·통합 목록 밖의 재질을 만들었다: {sorted(seeded - allowed)}"
     assert len(seeded) == 8, f"통합 후 8종이어야 한다: {sorted(seeded)}"
     for r in rows:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """개발3 시드 — 수집 장비 2개소 · 전처리 규칙 · 학습 데이터셋 헤더 · 지식문서
-· **가정 답변 선언(D-150)과 그 파생물**.
+· **도입기업 답변 선언(D-160)과 그 파생물**. ②③⑥ 은 회신을 받았고(확정) ①⑤ 와 ④ 의 정답 라벨은 오지 않았다(미확정).
 
 **규칙**
   · 멱등이다(G-07). 두 번 돌려도 행 수 diff 0.
   · **지어내지 않는다.** 값은 사업계획서 2.7.1 · TD5 비고 · `docs/cad/` 실측에서만 온다.
-  · **가정 답변에서 파생한 것은 `docs/assumed/customer_answers.json` (D-150) 안의 값만이다.**
+  · **답변에서 파생한 것은 `docs/assumed/customer_answers.json` (D-160) 안의 값만이다.**
     그 파일이 없으면 선언을 지우고 파생물도 **되돌린다** — 선언 없이 남은 파생물은 조작이다.
   · **런타임 전용 표는 비워 둔다**(G-11) —
     `AGT_QUERY_LOGS` `AGT_RECOMMENDATIONS` `EST_ML_*` `EST_SHAP_FACTORS` `EST_OBJECT_REVIEWS`
@@ -92,7 +92,7 @@ KNOWLEDGE = [
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# 가정 답변 선언 (D-150) — `SYNTHETIC_THREAD`(D-131) 와 같은 방식
+# 도입기업 답변 선언 (D-160) — `SYNTHETIC_THREAD`(D-131) 와 같은 방식
 # ═════════════════════════════════════════════════════════════════════════
 def seed_assumed_flag() -> str | None:
     """가정 선언 1행. **파일이 없으면 선언을 지운다** — 선언은 파일의 그림자다.
@@ -135,7 +135,7 @@ def measured_materials() -> list[tuple[str, int]]:
 
 
 def merged_materials() -> tuple[dict[str, dict], list[str]]:
-    """실측 표기를 ② `통합_제안` 으로 묶는다. **목록 밖의 재질은 만들지 않는다.**
+    """실측 표기를 ② `통합` 으로 묶는다. **목록 밖의 재질은 만들지 않는다.**
 
     돌려주는 것: `{정규표기: {"count": 실측건수, "from": [원표기 …]}}` 와
     **통합 제안에 적혔지만 실측에 없는 표기** 목록(지어낸 것이 아니라 제안이 남는 것이다).
@@ -158,18 +158,23 @@ def merged_materials() -> tuple[dict[str, dict], list[str]]:
 
 
 def seed_material_codes(admin_id: int | None) -> dict[str, object]:
-    """`BAS_COMMON_CODES` 그룹 '재질' — **가정 답변 ②(D-150) 에서만** 파생한다.
+    """`BAS_COMMON_CODES` 그룹 '재질' — **도입기업 답변 ②(D-160) 에서만** 파생한다.
+
+    ② 는 **확정**이다(2026-09-12 회신 `O`). 그래서 `ATTR1` 에 붙는 것은 가정 딱지가 아니라
+    **출처 표기**다 — `도입기업 확정 (D-160) 2026-09-12`. 확정된 값에 가정 딱지를 붙이면
+    쓸 수 있는 값을 못 쓰게 되고, 표기를 아예 떼면 출처가 사라진다.
 
     · 값은 `docs/cad/dwg_features.json` 실측 표기뿐이다. **목록 밖의 이름을 만들지 않는다.**
-    · `ATTR1` 에 `가정 답변 기준 (D-150) — 도입기업 미확인`, `ATTR2` 에 실측 도면 건수.
+    · `ATTR1` 에 `assumed.material_attr1()`, `ATTR2` 에 실측 도면 건수.
     · **두께는 코드가 아니다** — 수치이고 `EST_CAD_FEATURES` 에 있다. 코드 그룹을 만들지 않는다.
     · 선언이 없으면 **표시가 붙은 행을 지운다** → 그룹이 다시 0건이 되고 D-47 차단으로 돌아간다.
       화면(032 코드관리)이 손으로 넣은 행은 표시가 없으므로 건드리지 않는다.
     """
     mark = assumed.material_attr1()
     if not mark:                                   # 선언 없음 → 파생물 회수
+        # 패턴을 문구에서 뽑지 않는다 — `assumed.ATTR1_LIKE` 가 결정번호 괄호로 건다.
         removed = conn.x("delete from BAS_COMMON_CODES where CODE_GROUP = '재질' "
-                         "and ATTR1 like '가정 답변 기준 %%'")
+                         "and ATTR1 like %s", (assumed.ATTR1_LIKE,))
         return {"declared": None, "before": len(measured_materials()), "after": 0,
                 "removed": removed, "codes": {}, "unseen": []}
     measured = dict(measured_materials())
@@ -206,7 +211,8 @@ def unmark_assumed_features() -> int:
     """
     if assumed.declaration() is not None:
         return 0
-    return conn.x("delete from EST_CAD_FEATURES where SOURCE_DESC like '%%단위 가정 (%%'")
+    return conn.x("delete from EST_CAD_FEATURES where SOURCE_DESC like %s",
+                  (assumed.UNIT_TAG_LIKE,))
 
 
 def seed_devices() -> int:

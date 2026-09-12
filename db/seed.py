@@ -82,12 +82,13 @@ MOVED_TO_DEV1: dict[str, str] = {
 }
 # 사용자 지시로 **개발3 시드가 채우는** 그룹 — 공통 시드는 여전히 비워 둔다.
 # `EMPTY_GROUPS` 에서 뺀다: 0건 단언의 대상이 아니고, 대신 `tests/test_dev3_seed.py` 가
-# **가정 표시가 붙었는지 · 실측 목록 밖의 이름이 없는지**를 단언한다(방향을 뒤집었다).
+# **표시가 붙었는지 · 실측 목록 밖의 이름이 없는지**를 단언한다(방향을 뒤집었다).
 MOVED_TO_DEV3: dict[str, str] = {
-    "재질": "**가정 답변 기준 (D-150)** — 도입기업 답변은 오지 않았다. 사용자 지시로 "
-           "`docs/assumed/customer_answers.json` ② 를 가정하고, 도면 표제란 실측 14종을 "
-           "STS=SUS 통합으로 8종으로 묶어 `db/seed_dev3.py` 가 넣는다. ATTR1 에 가정 표시, "
-           "ATTR2 에 실측 도면 건수가 남는다. **선언(SYS_CONFIGS ASSUMED_ANSWERS)을 지우면 회수된다**",
+    "재질": "**도입기업 확정 (D-160)** — 2026-09-12 회신에서 실측 14종과 `STS = SUS 동일` 을 "
+           "확인받았다. `docs/assumed/customer_answers.json` ② 에서 읽어 도면 표제란 실측 "
+           "14종을 8종으로 묶어 `db/seed_dev3.py` 가 넣는다. ATTR1 에 **출처 표기**(가정 딱지가 "
+           "아니다), ATTR2 에 실측 도면 건수가 남는다. "
+           "**선언(SYS_CONFIGS ASSUMED_ANSWERS)을 지우면 회수된다**",
 }
 # 정본에 구체 값이 **없는** 그룹 — 비워 둔다. 화면 입력 마스터이고 시드에 지어내지 않는다.
 EMPTY_GROUPS: dict[str, str] = {

@@ -50,57 +50,79 @@ def n1(sql: str, params=None) -> int:
 
 
 # ── G-14 CAD 객체 인식 ───────────────────────────────────────────────────
-def test_g14_labelset_is_assumed_and_says_so():
-    """**0건 단언을 지우지 않고 방향을 뒤집었다** (선례: CSRF 표지 3건 · G-08 시드 표지 · 품목 코드).
+def test_g14_라벨셋은_회수됐고_이유가_둘_다_적혀_있다():
+    """**0건 단언을 지우지 않고 방향을 두 번 뒤집었다** (선례: CSRF 표지 · G-08 시드 표지 · 품목 코드).
 
-    라벨이 0건이던 동안은 "비었는지" 를 단언했다. 사용자 지시(D-150)로 가정 답변에서 라벨을
-    만든 뒤에는 **"표지가 붙었는지"** 를 단언한다 — 표지 없이 라벨만 있으면 그 수치가
-    도입기업 정답 대비 정확도처럼 인용된다. 그게 이 테스트가 막는 것이다.
+    ① 라벨이 0건이던 동안은 `비었는지` 를 단언했다.
+    ② 사용자 지시(D-150)로 가정 답변에서 라벨을 만든 뒤에는 `표지가 붙었는지` 를 단언했다.
+    ③ 도입기업이 어휘를 3종으로 확정하자(D-160) 그 라벨은 **범위 밖**이 됐다. 이제
+       `회수됐는지 · 왜 회수했는지` 를 단언한다.
+
+    지우지 않는 이유는 매번 같다 — 단언이 사라지면 다음 사람이 라벨을 다시 만들어 넣어도
+    아무도 막지 못한다.
     """
     meta = LABELSET["_meta"]
-    assert LABELSET["labels"], "라벨이 비었다 — `uv run python tools/gen_cad_labelset.py`"
-    assert LABELSET["predictions"]
-    assert meta["결정번호"] == "D-150", meta.get("결정번호")
-    assert "순환" in meta["판정"] and "정확도 증거 아님" in meta["판정"], meta["판정"]
-    assert "정확도" in meta["⚠_정확도_증거_아님"] and "아니다" in meta["⚠_정확도_증거_아님"]
-    assert "501" in meta["예측의_정체"], "예측이 실제 탐지기 출력이 아니라는 사실이 없다"
+    assert LABELSET["labels"] == [], f"회수했는데 라벨이 남아 있다: {len(LABELSET['labels'])}건"
+    assert LABELSET["predictions"] == []
+    assert meta["결정번호"] == "D-160", meta.get("결정번호")
+    assert "회수" in meta["성격"], meta["성격"]
+    w = meta["회수한_것"]
+    # **두 사유가 각각 남아 있어야 한다.** 하나만 적으면 다른 하나가 풀렸을 때 되살아난다.
+    assert "범위" in w["사유_①_범위밖"], w["사유_①_범위밖"]
+    assert "우리가 만든 정답과 비교" in w["사유_②_순환"], w["사유_②_순환"]
+    assert "단독" in w["둘의_관계"], w["둘의_관계"]
+    # 회수 전 수치를 남긴다 — 어딘가에 인용돼 있을 때 추적할 수 있어야 한다.
+    assert "0.9009" in w["이전_수치"], w["이전_수치"]
     assert LABELSET["evaluator_selftest"]["gate_input"] is False
 
 
-def test_g14_라벨_어휘는_TD5_5종_안에만_있다():
-    """`docs/cad/라벨링 가이드.docx` 의 3종(title_block·bom_table·rev_table)은 TD5 와 다르다(D-98).
+def test_g14_확정어휘는_3종이고_박스를_한_개도_만들지_않았다():
+    """도입기업 확정 어휘는 `title_block`·`bom_table`·`rev_table` 3종이다 (D-160 ④).
 
-    **목록 밖 이름이 하나라도 있으면 FAIL** 이다 — 어휘를 지어내면 TD5 에 담을 자리가 없다.
+    **우리가 3종 박스를 만들면 그게 합성이다.** 우리 파서는 영역을 가리지 못한다 —
+    `_title_block` 은 이름과 달리 TEXT 에서 재질·두께 문자열을 찾을 뿐이다.
     """
-    td5 = {"홀", "슬롯", "노즐", "플랜지", "치수문자"}
+    meta = LABELSET["_meta"]
+    assert meta["확정_어휘"] == ["title_block", "bom_table", "rev_table"], meta["확정_어휘"]
     used = {b["cls"] for b in LABELSET["labels"]} | {b["cls"] for b in LABELSET["predictions"]}
-    assert used <= td5, f"TD5 OBJECT_TYPE 5종 밖의 라벨 어휘가 있다: {sorted(used - td5)}"
-    assert used, "어휘가 비었다"
-    # 빈 4종을 박스로 채우지 않았다는 사실도 단언한다 — 채우면 그게 합성이다.
-    assert meta_vocab_empty(), "라벨이 생기지 않은 어휘와 그 이유가 적혀 있지 않다"
+    assert used == set(), f"확정 어휘로 박스를 만들었다 — 그건 정답이 아니라 합성이다: {sorted(used)}"
+    why = meta["우리가_만들_수_없는_이유"]
+    assert "경계상자가 나오지 않는다" in why, f"왜 못 만드는지가 적혀 있지 않다: {why}"
+    assert "_title_block" in why, "어느 코드가 영역을 못 가리는지 적혀 있지 않다"
 
 
-def meta_vocab_empty() -> bool:
-    v = LABELSET["_meta"]["어휘"]
-    return bool(v["0건인 것"]) and "D-05" in v["0건인 이유"]
+def test_g14_D98_은_해소됐고_TD5_비고가_열린_목록임을_적었다():
+    """`가이드 3종을 쓰면 TD5 에 담을 자리가 없다`(D-98) 던 판단이 **틀렸다**.
+
+    TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 비고는 `홀/슬롯/노즐/플랜지/치수문자 **등**` 이다.
+    `등` 으로 끝나므로 닫힌 목록이 아니고, VARCHAR(50) 이라 3종이 들어간다.
+    **내 판단이 틀렸다는 사실을 파일에 남긴다** — 남기지 않으면 다음 사람이 같은 충돌을
+    다시 '발견'한다.
+    """
+    import json as _json
+    design = _json.loads((ROOT / "docs" / "design" / "design.json").read_text())
+    remark = None
+    for det in design["td5"]["details"]:
+        for c in det.get("columns", []):
+            if len(c) >= 7 and c[1] == "OBJECT_TYPE":
+                remark = c[6]
+    assert remark is not None, "TD5 에서 OBJECT_TYPE 을 찾지 못했다"
+    assert remark.rstrip().endswith("등"), f"비고가 열린 목록이 아니다: {remark}"
+    obs = LABELSET["_meta"]["정본_불일치_관찰"]
+    assert "해소" in obs and "틀렸다" in obs, obs
 
 
-def test_g14_주입은_고정비율이고_자리가_적혀_있다():
-    """무작위 주입은 금지다 — 재실행하면 같은 자리여야 하고, 자리가 파일에 남아야 한다."""
-    inj = LABELSET["_meta"]["주입"]
-    assert "무작위 없음" in inj["방식"], inj["방식"]
-    assert inj["FP 자리"] and inj["FN 자리"], "주입 자리가 적혀 있지 않다"
-    # 비율이 실제로 그 비율인가 — 통번호 modulo 로만 정했으므로 정확히 재현된다.
-    assert all(x["n"] % 10 == 3 for x in inj["FP 자리"]), "FP 자리가 고정 규칙을 벗어났다"
-    assert all(x["n"] % 10 == 7 for x in inj["FN 자리"]), "FN 자리가 고정 규칙을 벗어났다"
+def test_g14_회수하면_주입자리도_남지_않는다():
+    """가정 라벨의 **고정비율 주입**(i%10==3 FP · i%10==7 FN)은 회수와 함께 사라져야 한다.
 
-
-def test_g14_라벨_좌표는_도면별로_갈라져_있다():
-    """다른 도면의 박스가 우연히 매칭되면 TP 가 부풀려진다 — `image` 로 갈라야 한다."""
-    assert all("image" in b for b in LABELSET["labels"])
-    assert all("image" in b for b in LABELSET["predictions"])
-    imgs = {b["image"] for b in LABELSET["labels"]}
-    assert len(imgs) == LABELSET["_meta"]["표본"]["도면"] == 30, (len(imgs), )
+    주입 자리만 남으면 라벨이 0건인데도 `기대 혼동행렬` 이 파일에 남아, 누가 그 숫자를
+    실측처럼 읽는다. 회수는 **수치까지 회수하는 것**이다.
+    """
+    meta = LABELSET["_meta"]
+    assert "주입" not in meta, "회수했는데 주입 자리가 남아 있다"
+    assert "표본" not in meta, "회수했는데 표본 수치가 남아 있다"
+    # `evaluator_selftest` 만은 남아야 한다 — 라벨과 무관한 채점기 자기검증이다(§10-16).
+    assert LABELSET["evaluator_selftest"]["labels"], "자기검증까지 지우면 채점기를 못 잰다"
 
 
 def test_g14_evaluator_moves_with_threshold():

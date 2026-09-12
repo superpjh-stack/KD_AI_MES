@@ -1,27 +1,22 @@
 #!/usr/bin/env python
-"""G-14 정답 라벨셋 생성기 — **가정 답변 ④ (D-150) 에서만** 파생한다.
+"""G-14 정답 라벨셋 — **도입기업이 어휘를 3종으로 확정한 뒤(D-160) 이 생성기는 라벨을 만들지 않는다.**
 
-⚠ **이 라벨은 도입기업이 준 정답이 아니다. 순환이다.**
-   우리 DXF 기하 파싱에서 라벨과 예측을 **둘 다** 뽑았다. 그러면 우리 탐지를 우리가 만든
-   정답과 비교하는 것이고, 거기서 나온 P/R/F1 은 **측정이 아니라 우리가 고른 값**이다.
-   목적은 오직 하나다 — **채점 코드가 실제로 TP/FP/FN 을 세는지** 시험하는 것(④ 가정_방식).
+전에는 가정 답변 ④(D-150)에서 **홀** 라벨 3,391건을 파생해 만들었다. 답이 오면서 그 라벨은
+**두 가지 이유로 각각 단독으로** 못 쓰게 됐다.
 
-**어긋나게 만드는 방식 (무작위 금지 · 재실행하면 같은 자리)**
-  도면을 `DRAWING_ID` 순으로 돌고, 각 도면의 CIRCLE 을 DXF 읽은 순서대로 돌면서
-  **전체에 걸친 0부터의 통번호 `i`** 를 붙인다. 그 통번호로만 주입 자리를 정한다.
-    · `i % 10 == FP_SLOT` → **라벨에서 뺀다** → 그 예측은 짝이 없어 **FP** 가 된다 (오검출 주입)
-    · `i % 10 == FN_SLOT` → **예측에서 뺀다** → 그 라벨은 짝이 없어 **FN** 이 된다 (누락 주입)
-  주입 비율은 각각 10% 고정이고, 뺀 자리(통번호·도면·박스)를 `_meta.주입` 에 전부 적는다.
+  ① **어휘가 범위 밖이다.** 답은 `title_block`·`bom_table`·`rev_table` **3종**이다.
+     홀·슬롯·노즐·플랜지·치수문자는 이번 사업이 아니다(라벨링 가이드 '2차 고도화 별도 프로젝트').
+  ② **순환이었다.** 라벨과 예측을 같은 DXF 기하 파싱에서 뽑았으니 우리 탐지를 우리가 만든
+     정답과 비교한 것이고, 거기서 나온 P/R/F1 0.9009 는 측정이 아니라 우리가 고른 값이다.
 
-**예측도 실제 탐지기의 출력이 아니다.** `cad.provider` 는 501 미구성(D-05)이라 예측이 0건이다.
-여기 `predictions` 는 DXF 기하 파싱(D-110-b·D-123)에서 FN 주입분을 뺀 것이다 — 그 사실을
-`_meta` 에 적는다. 점수(`score`)는 기하 파싱이라 확신도가 없어 1.0 자리채움이다.
+그래서 이 도구는 이제 **회수기**다. 어휘에 홀이 없으면 `labels`·`predictions` 를 **0건으로
+비우고** 회수 사유를 `_meta` 에 적는다. `evaluator_selftest` 는 남긴다 — 그것은 게이트 입력이
+아니라 **채점기가 임계값을 읽는지** 보는 자기검증이고, 라벨과 무관하게 계속 돌아야 한다.
 
-**어휘는 TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 5종**(홀·슬롯·노즐·플랜지·치수문자)을 썼다.
-`docs/cad/라벨링 가이드.docx` 의 3종(title_block·bom_table·rev_table)과 다르다(D-98) —
-가이드 어휘를 쓰면 TD5 에 담을 자리가 없다. 그리고 5종 중 실제로 라벨이 생기는 것은
-**홀뿐**이다: 우리 파서는 CIRCLE 을 셀 뿐 슬롯·노즐·플랜지·치수문자를 가릴 기준이 없다(D-05).
-**빈 4종을 박스로 채우지 않는다.**
+**3종 라벨을 우리가 만들지 않는다.** 우리 파서는 재질·두께 **문자열을 찾을 뿐 표제란·BOM표·
+리비전표의 경계상자를 가리지 못한다**(`cad/dxf.py _title_block` 은 영역이 아니라 텍스트를 본다).
+없는 탐지 결과로 정답을 만들면 그게 다시 순환이다. **G-14 는 도면 30~50건의 사람 라벨이
+올 때까지 차단이 정답이다.**
 """
 from __future__ import annotations
 
@@ -47,10 +42,13 @@ FP_SLOT = 3                  # 통번호 % 10 == 3 → 라벨에서 뺀다 (오�
 FN_SLOT = 7                  # 통번호 % 10 == 7 → 예측에서 뺀다 (누락 주입 10%)
 MODULO = 10
 
-# TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 어휘. **이 밖의 이름을 라벨로 쓰지 않는다.**
+# TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 비고가 예로 든 어휘. 비고는 `… 등` 으로 끝나는
+# **열린 목록**이고 컬럼은 VARCHAR(50) 이라 3종도 담긴다 — `TD5 에 담을 자리가 없다` 던
+# D-98 의 내 판단이 틀렸다(D-160).
 TD5_VOCAB = ("홀", "슬롯", "노즐", "플랜지", "치수문자")
 CLS_HOLE = "홀"
-# 라벨링 가이드(D-98)의 클래스 — **쓰지 않았다**. 어느 쪽을 썼는지 남기려고 적어 둔다.
+# 도입기업이 확정한 어휘(D-160 ④). **코드에 박아 두지 않는다** — `assumed.label_vocab()` 이
+# 선언 파일에서 꺼낸다. 여기 이름은 선언을 못 읽었을 때 무엇이 빠졌는지 적기 위한 것뿐이다.
 GUIDE_VOCAB = ("title_block", "bom_table", "rev_table")
 
 
@@ -118,6 +116,67 @@ def build(picked: list[dict]) -> dict:
     return {"labels": labels, "predictions": preds, "fp_at": fp_at, "fn_at": fn_at, "total": i}
 
 
+def withdraw(old: dict, decl: str, vocab: tuple[str, ...], dry: bool) -> int:
+    """**회수한다** — 라벨·예측을 0건으로 비우고 왜 비웠는지 남긴다.
+
+    지우고 끝내지 않는 이유: 다음 사람이 `labels: []` 만 보면 **아직 안 만든 것**으로 읽고
+    다시 만들려 한다. 회수 사유를 파일 안에 적어 두면 그러지 않는다.
+
+    `evaluator_selftest` 는 **건드리지 않는다.** 채점기가 임계값을 실제로 읽는지 보는
+    자기검증이고 게이트 입력이 아니다 — 라벨이 0건이어도 계속 돌아야 한다(§10-16).
+    """
+    meta = {
+        "owner": "QA3 / 개발3",
+        "purpose": old["_meta"]["purpose"],
+        "판정": "차단 — 3종 어휘의 정답 라벨 0건",
+        "성격": f"**회수됨 ({decl}).** 도입기업이 라벨 어휘를 {list(vocab)} 3종으로 확정했다",
+        "결정번호": decl,
+        "출처": assumed.path_text(),
+        "선언": f"SYS_CONFIGS('{assumed.CONFIG_TYPE}','{assumed.CONFIG_KEY}') = {decl}",
+        "회수한_것": {
+            "무엇": f"가정 답변 ④(D-150)에서 파생한 `{CLS_HOLE}` 라벨과 예측 전량",
+            "이전_수치": "IoU 0.5 · TP 3055 · FP 336 · FN 336 · P/R/F1 0.9009 (D-151)",
+            "사유_①_범위밖": assumed.label_out_of_scope(),
+            "사유_②_순환": ("라벨과 예측을 같은 DXF 기하 파싱에서 뽑아 우리 탐지를 우리가 만든 "
+                        "정답과 비교했다 — 측정이 아니라 우리가 고른 값이다 (D-151)"),
+            "둘의_관계": "**각각 단독으로 회수 사유다.** 하나가 풀려도 다른 하나가 남는다",
+        },
+        "확정_어휘": list(vocab),
+        "우리가_만들_수_없는_이유": (
+            "3종은 도면 위의 **영역**(표제란·BOM표·리비전표)이다. `cad/dxf.py` 의 `_title_block` 은 "
+            "이름과 달리 영역을 가리지 않고 TEXT/MTEXT 에서 재질·두께 **문자열**을 찾을 뿐이라 "
+            "경계상자가 나오지 않는다. 없는 탐지 결과로 정답을 만들면 그게 다시 순환이다"),
+        "도입기업에_필요한_것": [
+            f"{list(vocab)} 3종의 **정답 박스** — 도면 30~50건. 이것이 G-14·G-19 의 유일한 분모다",
+            "Label Studio 내보내기(YOLO 포맷 images/·labels/·classes.txt) 또는 동등한 형식",
+            "학습/검증/테스트 분할 기준 — 가이드는 프로젝트 단위 70:15:15 을 권고하나 "
+            "사업계획서에는 없다",
+        ],
+        "답을_받아_지운_것": ("`TD5 5종 어휘와 라벨 클래스의 매핑 확정(또는 어휘 자체의 정정)` 은 "
+                        f"더 묻지 않는다 — {decl} 에서 3종으로 확정됐다"),
+        "정본_불일치_관찰": (
+            f"D-98 은 해소됐다 — TD5 `EST_CAD_OBJECTS.OBJECT_TYPE` 비고 "
+            f"`홀/슬롯/노즐/플랜지/치수문자 등` 은 `등` 으로 끝나는 **열린 목록**이고 "
+            f"VARCHAR(50) 이라 {list(vocab)} 를 담을 자리가 있다. "
+            f"`가이드 어휘를 쓰면 TD5 에 담을 자리가 없다` 던 내 판단이 틀렸다"),
+        "지어내지_않은_것": f"{list(vocab)} 박스 — 한 개도 만들지 않았다",
+    }
+    out = {"_meta": meta, "labels": [], "predictions": [],
+           "evaluator_selftest": old["evaluator_selftest"]}
+    print(f"**회수** — 도입기업 확정 어휘 {list(vocab)} 에 `{CLS_HOLE}` 이 없다.")
+    print(f"  이전 라벨 {len(old.get('labels', []))} · 예측 {len(old.get('predictions', []))} "
+          f"→ 0 · 0")
+    print(f"  사유 ① {assumed.label_out_of_scope()[:70]}")
+    print("  사유 ② 순환 (D-151) — 각각 단독으로 회수 사유다")
+    print("  G-14 는 차단이 정답이다 — 3종 정답 라벨은 도입기업이 주어야 한다")
+    if dry:
+        print("  (--dry-run · 파일을 쓰지 않았다)")
+        return 0
+    LABELSET.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"  → {LABELSET.relative_to(ROOT)}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="G-14 정답 라벨셋 생성 (가정 답변 ④ · D-150)")
     ap.add_argument("--drawings", type=int, default=DRAWINGS)
@@ -132,9 +191,24 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    old = json.loads(LABELSET.read_text(encoding="utf-8"))
+
+    # ── 어휘 확인 (D-160 ④) ─────────────────────────────────────────────
+    # 도입기업이 3종을 확정했다. 우리가 만들 줄 아는 라벨은 **홀**뿐인데 홀은 범위 밖이다.
+    # 그러면 만들 것이 없다 — **비우는 것이 답이다.** 어휘를 코드에서 고르지 않고
+    # 선언 파일에서 꺼내므로, 답이 바뀌면 이 분기도 따라 바뀐다.
+    vocab = assumed.label_vocab()
+    if vocab and CLS_HOLE not in vocab:
+        return withdraw(old, decl, vocab, a.dry_run)
+    if not vocab:
+        print(f"선언은 {decl} 인데 라벨 어휘를 읽지 못했다 — 라벨을 만들지 않는다.",
+              file=sys.stderr)
+        print(f"  {assumed.path_text()} 의 `{assumed.K_LABEL}.답변` 에 백틱으로 감싼 "
+              "클래스 이름이 있어야 한다.", file=sys.stderr)
+        return 1
+
     picked, skipped = collect(a.drawings)
     built = build(picked)
-    old = json.loads(LABELSET.read_text(encoding="utf-8"))
 
     answers = (assumed.answers() or {}).get(assumed.K_LABEL) or {}
     meta = {

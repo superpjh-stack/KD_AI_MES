@@ -206,10 +206,15 @@ def gate_14() -> None:
     say(f"     **되돌림 시험**: 임계를 바꾸면 혼동행렬이 움직이는가 → {reversal} "
         f"(같은 값이 나오면 평가기가 임계를 안 읽는 것이다 — 광성 사업 사고 §10-16)")
 
-    why = ("정답 박스 0건 (docs/cad 에 YOLO 라벨·Label Studio 내보내기 없음. "
-           "라벨링 가이드는 'MVP 100장 → 권장 300장' 계획 단계) · 예측 0건 "
-           "(Autodesk API·YOLOv8 가중치 미확보 D-05) · EST_CAD_OBJECTS 0건 · "
-           "라벨 클래스(title_block·bom_table·rev_table) ≠ TD5 OBJECT_TYPE 5종")
+    # **어휘 충돌은 더 이상 차단 사유가 아니다.** 도입기업이 3종으로 확정했고(D-160 ④),
+    # TD5 비고가 `… 등` 으로 끝나는 열린 목록이라 담을 자리도 있다 — D-98 은 해소됐다.
+    # 남은 차단 사유는 하나다: **그 3종의 정답 박스가 0건**이다.
+    vocab = assumed.label_vocab()
+    why = (f"정답 박스 0건 — 확정 어휘 {list(vocab) or '미확인'} (D-160 ④) 의 사람 라벨이 "
+           "docs/cad 에 없다 (Label Studio 내보내기 없음. 라벨링 가이드는 'MVP 100장 → "
+           "권장 300장' 계획 단계) · 예측 0건 (Autodesk API·YOLOv8 가중치 미확보 D-05 · "
+           "우리 파서는 표제란·BOM표·리비전표의 **경계상자를 만들지 못한다**) · "
+           "EST_CAD_OBJECTS 0건")
 
     # ── 가정 답변 선언 (D-150) ─────────────────────────────────────────
     # **고지 문구를 여기 박지 않는다.** `SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')` 선언과
@@ -236,7 +241,7 @@ def gate_14() -> None:
     meta = ls.get("_meta", {})
     imgs = sorted({str(b.get("image")) for b in labels + preds})
     say(f"  라벨 도면 {len(imgs)} 건 · 라벨 어휘 {sorted({b['cls'] for b in labels})} "
-        f"(TD5 5종 중 나머지는 0건 — 우리 파서가 가릴 기준이 없다)")
+        f"· 도입기업 확정 어휘 {list(assumed.label_vocab()) or '미확인'} (D-160 ④)")
     say(f"  주입 {meta.get('주입', {}).get('FP(오검출) 비율')} · "
         f"{meta.get('주입', {}).get('FN(누락) 비율')}")
     # 도면별로 재고 합산한다 — 다른 도면의 박스가 우연히 매칭되지 않게. 산식은 `match()` 한 벌이다.
@@ -425,7 +430,7 @@ def gate_19(client: TestClient) -> None:
     note = assumed.circular_note()
     n_feat = count("EST_CAD_FEATURES")
     n_assumed = n1("select count(*) as n from EST_CAD_FEATURES "
-                   "where SOURCE_DESC like %s", ("%단위 가정 (%",))
+                   "where SOURCE_DESC like %s", (assumed.UNIT_TAG_LIKE,))
     say(f"  가정 선언 {assumed.declaration() or '없음 — ' + (assumed.mismatch() or '')}")
     say(f"  3단계 Feature {n_feat} 행 중 **단위 가정 (D-150) 표지가 붙은 것 {n_assumed} 행** "
         "— 표지 없이 단위만 바뀐 행이 있으면 그것이 거짓 실측이다")

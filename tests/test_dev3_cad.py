@@ -275,7 +275,7 @@ def test_단위_가정은_표지를_달고_붙고_명시된_단위는_건드리�
                 break
         assert unknown, "단위 미상 도면이 하나도 없다 — 표본을 확인한다"
         marked = conn.q("select UOM, SOURCE_DESC from EST_CAD_FEATURES "
-                        "where SOURCE_DESC like %s", ("%단위 가정 (%",))
+                        "where SOURCE_DESC like %s", (assumed.UNIT_TAG_LIKE,))
         assert marked, "단위 미상 도면인데 표지가 붙은 Feature 가 없다"
         for m in marked:
             assert "25.4" in m["source_desc"], f"배율 오차 경고가 없다: {m['source_desc']}"
@@ -285,7 +285,7 @@ def test_단위_가정은_표지를_달고_붙고_명시된_단위는_건드리�
         silent = conn.q("select DRAWING_ID, FEATURE_TYPE, UOM, SOURCE_DESC "
                         "from EST_CAD_FEATURES where UOM like 'mm%%' "
                         "and SOURCE_DESC not like %s and FEATURE_TYPE <> '두께'",
-                        ("%단위 가정 (%",))
+                        (assumed.UNIT_TAG_LIKE,))
         for s in silent:
             # 두께는 원래 mm 로 읽힌다(표제란 표기). 그 밖에 mm 인데 표지가 없으면
             # `$INSUNITS` 가 실제로 mm 였던 도면이어야 한다.
