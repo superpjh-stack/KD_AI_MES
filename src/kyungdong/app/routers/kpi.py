@@ -134,7 +134,10 @@ async def quality_kpi(request: Request):
             {"label": "클레임 발생률",
              "value": f"{q.claim_rate:,.1f} %" if q.claim_rate is not None
                       else http.not_collected("D-204"),
-             "sub": f"출하 {q.shipment_cnt:,}건 · 클레임 {q.claim_cnt:,}건",
+             # **분모와 분자를 구분해서 적는다.** 분자(클레임)에 `0 건` 이라고만 적으면
+             # "분모가 0인데 0%로 메웠다" 로 오독된다 — `tools/check_data.py` ③ 의 보조설명
+             # 판정이 실제로 그렇게 오탐했다(D-211). 분모가 39건이면 0.0% 는 **참값**이다.
+             "sub": f"분모 출하 {q.shipment_cnt:,}건 · 분자 클레임 {q.claim_cnt:,} (D-204 미등록)",
              "off": q.claim_rate is None},
             {"label": "집계 기간", "value": period or f"전체 (기준 {dt(a, '%Y-%m-%d')})"},
         ],

@@ -185,10 +185,23 @@ async def create_shipment(request: Request):
         raise http.fail("validation", f"{lot['product_lot_no']} 는 이미 출하 내역에 있다")
 
     codes.require_code("SHP_SHIPMENTS", "CUSTOMER_CODE", lot["customer_code"])
-    codes.require_code("SHP_SHIPMENT_ITEMS", "ITEM_CODE", lot["product_group"])
+    # 출하 품목 코드는 **그 제품LOT 의 BOM 레벨1 품목**이다. 제품군 코드(PG10 등)는 '제품군'
+    # 그룹이고 '품목' 그룹이 아니다 — 제품군을 품목 칸에 넣으면 D-32 검증에서 422 가 난다.
+    # BOM 이 안 이어진 LOT(사슬 단절 표본)은 제품군으로 되돌리고, 그것도 없으면 422 로 드러낸다.
+    bom_item = conn.q1(
+        "select i.ITEM_CODE from SHP_LOT_TRACES lt "
+        "join EST_BOM_ITEMS i on i.BOM_ID = lt.BOM_ID "
+        "where lt.LOT_TRACE_ID = %s order by i.BOM_LEVEL, i.BOM_ITEM_ID limit 1", (lot_trace_id,))
+    item_code = (bom_item or {}).get("item_code") or lot["product_group"]
+    codes.require_code("SHP_SHIPMENT_ITEMS", "ITEM_CODE", item_code)
 
     a = anchor()
-    seq = conn.q1("select count(*) + 1 as n from SHP_SHIPMENTS")["n"]
+    # **`count(*) + 1` 을 쓰지 않는다.** 시드가 연도별 일련번호로 채번해 두면 전체 건수와
+    # 그 해의 마지막 번호가 어긋나 같은 번호를 두 번 만들고 UNIQUE 위반 500 이 난다(D-210 실측).
+    # 그 해에 이미 발급된 **마지막 일련번호 + 1** 을 쓴다 — 형식은 개발1 공표 `SH-YYYY-NNNN`.
+    seq = conn.q1(
+        "select coalesce(max(substring(SHIPMENT_NO from '^SH-[0-9]{4}-([0-9]+)$')::int), 0) + 1 "
+        "as n from SHP_SHIPMENTS where SHIPMENT_NO ~ %s", (f"^SH-{a.year}-[0-9]+$",))["n"]
     no = f"SH-{a.year}-{int(seq):04d}"
     pack = conn.q1(
         "select max(OUT_DT) as packed from PRC_PROCESS_HISTORIES "
@@ -210,7 +223,7 @@ async def create_shipment(request: Request):
         cur.execute(
             "insert into SHP_SHIPMENT_ITEMS (SHIPMENT_ID, LOT_TRACE_ID, ITEM_CODE, SHIP_QTY, "
             "PACKING_DT, INSPECT_ID, CREATED_DT) values (%s,%s,%s,%s,%s,%s, now())",
-            (sid, lot_trace_id, lot["product_group"], 1, pack.get("packed"),
+            (sid, lot_trace_id, item_code, 1, pack.get("packed"),
              int(insp["inspect_id"]) if insp else None),
         )
     return RedirectResponse("/shp/016", status_code=303)

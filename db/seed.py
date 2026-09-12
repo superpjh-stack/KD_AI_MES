@@ -72,11 +72,17 @@ CODE_GROUPS: dict[str, tuple[list[tuple[str, str, str]], str]] = {
     "외주구간": (OUTSOURCE_STEPS, "PRC_PROCESS_HISTORIES.OUTSOURCE_STEP 비고"),
     "설비": (EQUIPMENTS, "사업계획서 2.7.1 데이터 집계 포인트 2개소"),
 }
+# 사용자 지시로 **개발1 시드가 채우는** 그룹 — 공통 시드는 여전히 비워 둔다(여기서 넣지 않는다).
+# 비워 두는 이유가 사라졌으므로 `EMPTY_GROUPS` 에서 뺀다. 0건 단언의 대상이 아니다.
+MOVED_TO_DEV1: dict[str, str] = {
+    "고객사": "**확정 (D-139)** — 사용자 확정 2026-09-12. `docs/cad/customer_candidates.json` 의 "
+             "발주처·수요처 19종을 `db/seed_dev1.py` 가 넣는다. ATTR1 에 역할, ATTR2 에 확신도가 남는다",
+    "품목": "**가설 (D-131)** — 과거 견적서 품목명세 462행/19문서 실측에서 뽑은 179종을 "
+           "`db/seed_dev1.py` 가 넣는다. 도입기업 코드체계는 미확정이라 ATTR1 에 가설 표시가 남는다",
+}
 # 정본에 구체 값이 **없는** 그룹 — 비워 둔다. 화면 입력 마스터이고 시드에 지어내지 않는다.
 EMPTY_GROUPS: dict[str, str] = {
-    "품목": "품목 마스터가 정본에 없다 — 화면 입력 (D-26)",
     "재질": "재질 코드 목록이 정본에 없다 — 입고·도면에서 수집",
-    "고객사": "고객사 목록이 정본에 없다 — 개인정보·거래처 (D-26)",
     "보관위치": "창고 레이아웃이 정본에 없다 — 현장 실사 (D-26)",
     "불량유형": "불량 유형 분류가 정본에 없다 — 화면 입력",
     "클레임유형": "클레임 유형 분류가 정본에 없다 — 화면 입력",
@@ -193,6 +199,10 @@ def main() -> int:
     print()
     print("비운 코드 그룹 — 정본에 값이 없다. 지어내지 않는다(화면 입력 마스터):")
     for g, why in EMPTY_GROUPS.items():
+        print(f"  · {g:<8} {why}")
+    print()
+    print("공통 시드가 비워 두지만 **개발1 시드가 채우는** 그룹 (0건 단언 대상이 아니다):")
+    for g, why in MOVED_TO_DEV1.items():
         print(f"  · {g:<8} {why}")
     if issued:
         print()

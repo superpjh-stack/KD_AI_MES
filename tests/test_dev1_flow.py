@@ -80,11 +80,18 @@ def rollback_after():
     yield marks
     for table, pk in TRACKED:
         conn.x(f"delete from {table} where {pk} > %s", (marks[table],))
-    # 되돌림 확인 — 빈 코드그룹이 다시 비었는지 (D-47)
-    for group in ("품목", "재질"):
-        n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = %s",
-                        (group,))["n"])
-        assert n == 0, f"테스트가 그룹 '{group}' 을 남겼다 — D-47 단언이 깨진다"
+    # 되돌림 확인 — **테스트가 만든 코드만** 지워졌는지.
+    #   · '재질' 은 여전히 0건이 정답이다 (D-47)
+    #   · '품목' 은 사용자 지시로 개발1 시드가 채운다(가설 D-131) → 0건이 아니라
+    #     **테스트가 만든 값이 사라졌는지**를 본다. 시드 행을 지우면 그게 결함이다.
+    n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = '재질'")["n"])
+    assert n == 0, "테스트가 그룹 '재질' 을 남겼다 — D-47 단언이 깨진다"
+    assert conn.q1("select 1 as x from BAS_COMMON_CODES where CODE_GROUP = '품목' "
+                   "and CODE_VALUE = %s", (ITEM,)) is None, \
+        f"테스트가 만든 품목 코드 {ITEM} 가 남았다"
+    assert int(conn.q1("select count(*) as n from BAS_COMMON_CODES "
+                       "where CODE_GROUP = '품목' and ATTR1 like '가설 (D-131)%'")["n"]) > 0, \
+        "시드가 넣은 가설(D-131) 품목 코드까지 지웠다"
 
 
 @pytest.fixture(scope="module")
@@ -112,7 +119,8 @@ def supplier(rollback_after):
 # 032 코드관리 — 중복 검증 (SF-TD3-032 체크: "코드는 중복될 수 없다")
 # ═══════════════════════════════════════════════════════════════════════
 def test_코드_등록_후_그리드에_보인다(codes_registered):
-    html = get("/bas/032?grp=품목").text
+    # 그룹만 걸면 시드가 넣은 가설 품목 179종(D-131)에 밀려 1쪽에 안 보인다 — 코드로 좁힌다.
+    html = get(f"/bas/032?grp=품목&code={ITEM}").text
     assert ITEM in html and "테스트 품목" in html
 
 
@@ -468,6 +476,6 @@ def test_그리드_셀이_이스케이프된다():
     payload = "<script>alert(1)</script>"
     assert post("/bas/032", {"code_group": "품목", "code_value": "TEST-XSS-01",
                              "code_name": payload}).status_code == 200
-    html = get("/bas/032?grp=품목").text
+    html = get("/bas/032?grp=품목&code=TEST-XSS-01").text
     assert payload not in html, "그리드 셀에 스크립트가 그대로 나갔다 (§10-8)"
     assert "&lt;script&gt;" in html

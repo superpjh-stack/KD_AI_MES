@@ -15,6 +15,25 @@ from . import nav, rbac
 from .util import csrf
 from .settings import settings
 
+
+def _synthetic_note() -> str:
+    """합성 데이터 고지 — `SYS_CONFIGS('시스템설정','SYNTHETIC_THREAD')` 선언 **한 곳**에서 읽는다.
+
+    사용자 지시로 디지털 스레드를 합성으로 채웠다(D-131). 그러면 그 데이터를 읽는 화면 전부에
+    고지가 붙어야 한다 — goal.md §2.3 이 광성정밀 사업에서 실제로 요구한 처리다.
+    **DB 를 못 읽으면 배지를 숨기지 않는다** — 숨기면 합성이 실측처럼 보인다.
+    """
+    import conn                      # 지연 임포트 — 템플릿 모듈이 db 를 끌고 들어오지 않게
+    try:
+        row = conn.q1(
+            "select CONFIG_VALUE from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+            "and CONFIG_KEY = 'SYNTHETIC_THREAD' and USE_YN = 'Y'")
+    except Exception:                # DB 장애는 다른 게이트(G-30)가 잡는다 — 여기서 삼키지 않게 빈 값
+        return ""
+    if not row or not row["config_value"]:
+        return ""
+    return f"합성 데이터 기준 ({row['config_value']})"
+
 TEMPLATES = Path(__file__).parent / "templates"
 
 _env = Environment(
@@ -50,6 +69,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         csrf_enforced=s.csrf_enforce,
         csrf_token=csrf.issue(request),
         cad_configured=s.cad_configured,
+        synthetic_note=_synthetic_note(),
         **ctx,
     )
     return HTMLResponse(html, status_code=status_code)

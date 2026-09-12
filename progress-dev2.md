@@ -317,3 +317,66 @@ uv run python tools/check_ingest.py                            # G-12-③a 화�
   "`routers/dsh.collection_badges()` 의 `anchor() - last_dt`" 를 지목하는데 그 코드는 없다(grep 0건).
   실제 중단 시나리오(③a)는 화면·모듈 **둘 다 True** 로 일치한다(실측). **QA 가 ③b 를 갱신해야 한다.**
 - DEF-QA2-011(`PRC_PROCESS_HISTORIES` 판정 ↔ 실제 0건)은 **손대지 않았다.**
+
+---
+
+# 회전 22 — 사슬 후반(작업지시~출하)을 합성으로 채웠다 (D-131 · 상세는 `progress-dev1.md` 회전 22)
+
+> **자재LOT 이후는 전부 합성이다.** 이 수치를 성과 실적으로 인용할 수 없다 — `합성 데이터 기준 (D-131)`.
+
+## 무엇이 바뀌었나
+
+- **제품LOT 은 BOM 1건당 1건이다**(D-212). `seed_chain` 이 `seed_dev1.thread_rows()`
+  (프로젝트 → BOM → 투입 자재LOT + **의도적 단절 위치**)를 읽어 돈다. 프로젝트당 1건이 아니다 —
+  LOT 매핑률의 분모를 12에서 **40** 으로 키워 85% 임계를 의미 있게 재려는 목적도 있다.
+- **작업지시는 제품LOT × 제조 7공정**이다 → 280건. `ROUTING_ID` 가 개발1 이 만든
+  `EST_BOM_ROUTINGS` 를 가리킨다(전에는 NULL 이었다).
+- **품질기준을 제품군별로 고른다** — `standards_for(qstd, PRODUCT_GROUP)`. 15행(제품군 5 × 검사 3)
+  중 그 제품군의 수압·기밀·진공 3종을 다 못 찾으면 검사를 만들지 않고 `차단` 으로 적는다.
+- **`SHP_SHIPMENTS.APPROVER_ID` 를 반드시 채운다** — `SHIP_DT` 가 있는데 승인자가 비면
+  **G-24 가 FAIL** 이다(`check_ai.py` · `tests/test_qa3_ai.py`). 실명을 넣지 않고 직무 계정 `exec` 를 쓴다.
+- **출하 품목 코드 = BOM 레벨1 품목**(D-206-정정). 제품군 코드(PG10…)를 품목 칸에 넣던 것이 틀렸다.
+- **`MAPPING_OK_YN` 을 선언하지 않고 실제 연결로 다시 쓴다**(D-213) — `_restate_mapping_flag()`.
+  Y 35 / 전체 40 이고 QA2 독립 재계산 35/40(87.5%)과 **정확히 일치**한다.
+- **`SHP_SHIPMENT_ITEMS.REMARK` · `KPI_MEASURES.REMARK` 에 합성 표시**를 남겼다.
+  나머지 개발2 표(`PRC_WORK_ORDERS`·`PRC_PERFORMANCES`·`PRC_PROCESS_HISTORIES`·`SHP_LOT_TRACES`·
+  `SHP_INSPECTIONS`·`SHP_SHIPMENTS`)에는 **비고 칸이 없다** — 컬럼을 추가하지 않았고(G-02 762 고정)
+  표시는 화면 배지·게이트 판정 줄·`SYS_CONFIGS` 선언이 진다. 근거는 `decisions-dev1.md` D-131-보고.
+
+## 행 수 (합성)
+
+`PRC_WORK_ORDERS` **280** · `PRC_PERFORMANCES` **195** · `PRC_PROCESS_HISTORIES` **280** ·
+`SHP_LOT_TRACES` **40** · `SHP_INSPECTIONS` **117** · `SHP_SHIPMENTS` **39** ·
+`SHP_SHIPMENT_ITEMS` **39** · `KPI_TARGETS` 2 · `KPI_MEASURES` **22**.
+여전히 **0건**: `PRC_STD_CONDITIONS`·`PRC_ACTUAL_CONDITIONS`·`PRC_CONDITION_DEVIATIONS`(D-203) ·
+`PRC_EQUIP_SIGNALS`(D-06 수집 산출물) · `SHP_CLAIMS`·`SHP_CLAIM_CAUSES`(D-204).
+
+**의도적 단절 5 / 40 = 12.5%** — 위치는 `seed_dev1.BREAKS` 가 정본이고 표는
+`progress-dev1.md` 회전 22 ④ 에 있다. **단절을 빼서 100% 를 만들지 않았다.**
+
+## KPI — 합성 표본이라 성과가 아니다
+
+| 코드 | 기존 → 목표 | 감소율 | **합성 표본** | 실측 평균 | 달성률 |
+|---|---|---|---|---|---|
+| `LEADTIME_MFG` | 1,320h → 1,080h | −18.2% | 39건 | 1,099.1 h | 92.0 % |
+| `LEADTIME_O2D` | 1,440h → 1,200h | −16.7% | 39건 | 1,206.5 h | 97.3 % |
+
+QA2 독립 SQL 과 앱 산식이 **표본·평균 모두 일치**하고 4화면(`/board`·043·044·045)의 문자열이
+**1종**이다 → `KPI PASS`. 다만 `KPI_MEASURES.REMARK` 에
+`합성 데이터 기준 (D-131) — … 자재LOT 이후가 합성이라 이 값은 성과 실적이 아니다` 가 박혀 있다.
+
+## 결함 2건 (합성 데이터가 드러냈다)
+
+- **D-210** `POST /shp/016` 채번 `count(*) + 1` → 연도별 시드 번호와 충돌해 UNIQUE 위반 **500**.
+  그 해 마지막 일련번호 + 1 로 고쳤다.
+- **D-211** `/kpi/044` 클레임 발생률 카드 보조설명이 "분모 0 인데 0%로 메웠다" 로 **오탐**됐다.
+  분모는 출하 39건이고 분자가 0이라 0.0% 는 참값이다. **검사기(QA2 소유)를 고치지 않고**
+  보조설명을 `분모 출하 39건 · 분자 클레임 0 (D-204 미등록)` 로 갈랐다.
+  **QA2 에 보고**: 보조설명 문자열 판정은 **분자 0 을 분모 0 으로 오탐**할 수 있다.
+
+## 테스트
+
+`tests/test_dev2_chain.py` 픽스처가 상류(도면 → BOM → BOM자재 → 공정구조 → 자재LOT)까지 세운다 —
+`seed_chain` 이 BOM 단위로 돌기 때문이다. 끝나면 전부 되돌리고 그것도 단언한다.
+`/dsh/001` 은 `PROJECT_NO` 오름차순 상위 8건만 그리므로 테스트 프로젝트가 밀린다 —
+**밀린 것이 결함이 아니라서** 화면과 같은 순서로 뽑은 첫 프로젝트를 확인하도록 뒤집었다.

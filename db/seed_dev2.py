@@ -34,8 +34,13 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                  # noqa: E402
+import seed_dev1                                             # noqa: E402
 from kyungdong.app import kpi                                # noqa: E402
 from kyungdong.app.util import clock, codes                  # noqa: E402
+
+# 합성 표시 — 개발1 이 공표한 문자열을 **그대로 쓴다**(복제하지 않는다, §10-16).
+MARK_SYNTH = seed_dev1.MARK_SYNTH
+SYNTH_NOTE = seed_dev1.SYNTH_NOTE
 
 # ── 채번 ────────────────────────────────────────────────────────────────
 # **개발1 이 `BAS_COMMON_CODES('LOT채번')` 에 공표한 형식을 그대로 읽어 쓴다**(D-200).
@@ -111,22 +116,40 @@ def projects() -> list[dict[str, Any]]:
     )
 
 
-def quality_standards() -> dict[str, dict[str, Any]]:
-    """검사 항목(수압·기밀·진공) → 품질기준 행. `BAS_QUALITY_STANDARDS` 는 개발1 소유라 **읽기만** 한다.
+def quality_standards() -> dict[tuple[str, str], dict[str, Any]]:
+    """(제품군, 검사항목) → 품질기준 행. `BAS_QUALITY_STANDARDS` 는 개발1 소유라 **읽기만** 한다.
 
     검사 항목명·단위는 **기준 데이터에서 가져온다** — 여기서 지어내지 않는다(§0.2).
+    제품군이 없는 행(PRODUCT_GROUP 은 NOT NULL 이라 실제로는 없다)은 `('', key)` 로 떨어진다.
     """
     rows = conn.q(
-        "select QSTD_ID, INSPECT_TYPE, INSPECT_ITEM, UOM, STANDARD_SPEC "
+        "select QSTD_ID, PRODUCT_GROUP, INSPECT_TYPE, INSPECT_ITEM, UOM, STANDARD_SPEC "
         "from BAS_QUALITY_STANDARDS where USE_YN = 'Y' order by QSTD_ID"
     )
-    out: dict[str, dict[str, Any]] = {}
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     for r in rows:
         label = f"{r['inspect_item'] or ''}"
         for key, _fallback_item, _fallback_uom in INSPECT_ITEMS:
-            if key in label and key not in out:
-                out[key] = r
+            if key in label:
+                out.setdefault((r["product_group"] or "", key), r)
     return out
+
+
+def standards_for(qstd: dict[tuple[str, str], dict[str, Any]],
+                  product_group: str) -> dict[str, dict[str, Any]]:
+    """그 제품군의 수압·기밀·진공 기준. 3종을 다 못 찾으면 **빈 dict** — 검사를 만들지 않는다."""
+    got = {key: qstd[(product_group, key)]
+           for key, _i, _u in INSPECT_ITEMS if (product_group, key) in qstd}
+    return got if len(got) == len(INSPECT_ITEMS) else {}
+
+
+def _approver_id() -> int | None:
+    """출하 승인자 — `SHIP_DT` 가 있는데 `APPROVER_ID` 가 비면 G-24 가 FAIL 이다.
+
+    실명을 넣지 않는다(G-29·D-39) — 공통 시드의 **직무 계정**(경영자)을 쓴다.
+    """
+    row = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'exec'")
+    return int(row["user_id"]) if row else None
 
 
 # ── KPI 목표 (의존 없음 — 항상 시드한다) ──────────────────────────────────
@@ -170,7 +193,9 @@ def seed_kpi_measures(anchor: datetime) -> tuple[int, list[str]]:
                 (tid, period),
             )
             params = (m.sample_cnt, m.value, m.achieve, m.definition.source_type,
-                      anchor, "seed_dev2 집계 (시드 데이터 기준) · 산식은 app/kpi.py 단일 소스")
+                      anchor,
+                      f"{SYNTH_NOTE} — 표본 {m.sample_cnt}건. 자재LOT 이후가 합성이라 이 값은 "
+                      "성과 실적이 아니다. 산식은 app/kpi.py 단일 소스")
             if row:
                 conn.x(
                     "update KPI_MEASURES set SAMPLE_CNT=%s, MEASURE_VALUE=%s, ACHIEVE_RATE=%s, "
@@ -189,74 +214,148 @@ def seed_kpi_measures(anchor: datetime) -> tuple[int, list[str]]:
 
 
 # ── 공정·LOT·검사·출하 ───────────────────────────────────────────────────
-def seed_chain(anchor: datetime, procs: dict[str, str], qstd: dict[str, dict[str, Any]],
-               nums: dict[str, str], blocked: Blocked) -> dict[str, int]:
-    """G-08 디지털 스레드 — 프로젝트 → 작업지시 → 공정실적 → 제품LOT → 검사 → 출하."""
-    counts = dict(work_orders=0, lot_traces=0, performances=0, histories=0,
-                  inspections=0, shipments=0, ship_items=0, shipped=0, in_progress=0)
-    pjs = projects()
-    if not pjs:
+def seed_chain(anchor: datetime, procs: dict[str, str],
+               qstd: dict[tuple[str, str], dict[str, Any]],
+               nums: dict[str, str], blocked: Blocked) -> dict[str, Any]:
+    """G-08 디지털 스레드 — BOM → 작업지시 → 공정실적 → 제품LOT → 검사 → 출하.
+
+    **상류(프로젝트·도면·BOM·자재LOT)는 개발1 이 만들고 여기서는 읽기만 한다** —
+    `seed_dev1.thread_rows()` 가 전역 순번과 **의도적 단절 위치**까지 함께 준다(D-131).
+    제품LOT 은 **BOM 1건당 1건**이다.
+
+    ⚠ 자재LOT 이후는 **전부 합성이다.** 사슬을 일부러 끊은 표본을 넣는다 —
+    전부 완벽하게 이으면 100% 가 나오고 그건 검사기를 시험하지 못한다.
+    """
+    counts: dict[str, Any] = dict(work_orders=0, lot_traces=0, performances=0, histories=0,
+                                 inspections=0, shipments=0, ship_items=0, shipped=0,
+                                 in_progress=0, broken=0, breaks=[])
+    rows = seed_dev1.thread_rows()
+    if not rows:
         blocked.note("공정·LOT·검사·출하 전부",
-                     "EST_PROJECTS 0건 — 프로젝트(수주)번호가 최상위 추적 키다(G-08). "
-                     "개발3 `db/seed_dev3.py` 가 채운 뒤 다시 돌린다")
+                     "상류 골격이 0건이다 — EST_PROJECTS·EST_BOM_HEADERS·INV_MATERIAL_LOTS 를 "
+                     "`db/seed_dev1.py` 가 먼저 채운다 (G-08 1~4단계 · D-131)")
         return counts
+    if tuple(seed_dev1.ROUTING_PROCESSES) != MFG_PROCESSES:
+        blocked.note("공정 구조 대조",
+                     f"개발1 ROUTING_PROCESSES {seed_dev1.ROUTING_PROCESSES} 와 "
+                     f"개발2 MFG_PROCESSES {MFG_PROCESSES} 가 다르다 — 정본이 갈라졌다")
 
-    can_inspect = len(qstd) == len(INSPECT_ITEMS)
-    if not can_inspect:
-        blocked.note("SHP_INSPECTIONS · SHP_SHIPMENTS",
-                     f"BAS_QUALITY_STANDARDS 에서 수압·기밀·진공 기준을 {len(qstd)}/3 만 찾았다 — "
-                     "QSTD_ID 가 NOT NULL 이라 검사 결과를 만들 수 없다 (개발1)")
+    pjs = {int(p["project_id"]): p for p in projects()}
+    approver = _approver_id()
+    if approver is None:
+        blocked.note("SHP_SHIPMENTS.APPROVER_ID",
+                     "직무 계정 'exec' 가 없다 — SHIP_DT 가 있는데 승인자가 비면 G-24 가 FAIL 이다")
 
-    for idx, pj in enumerate(pjs):
-        confirm = pj["order_confirm_dt"]
-        if confirm is None:
-            blocked.note(f"{pj['project_no']}",
+    for b in rows:
+        idx = b["index"]
+        pj = pjs.get(b["project_id"])
+        if pj is None or pj["order_confirm_dt"] is None:
+            blocked.note(f"{b['bom_no']}",
                          "EST_PROJECTS.ORDER_CONFIRM_DT 가 비어 있다 — "
-                         "수주출하 리드타임 시작 시각이 없어 이 프로젝트를 건너뛴다")
+                         "수주출하 리드타임 시작 시각이 없어 이 BOM 을 건너뛴다")
             continue
+        broke = b["break"]
+        if broke:
+            counts["broken"] += 1
+            counts["breaks"].append(f"#{idx} {b['project_no']} / {b['bom_no']} — {broke}")
 
+        confirm = pj["order_confirm_dt"]
         mfg_h = MFG_HOURS[idx % len(MFG_HOURS)]
         o2d_h = O2D_HOURS[idx % len(O2D_HOURS)]
         wo_confirm = confirm + timedelta(hours=ORDER_TO_WORKORDER_H)
         packing = wo_confirm + timedelta(hours=mfg_h)
         ship_dt = confirm + timedelta(hours=o2d_h)
-        completed = ship_dt <= anchor and can_inspect
         year = wo_confirm.year
 
-        lot_no = apply_pattern(nums["PRODUCT_LOT_NO"], year, idx + 1)
-        wo_ids = _seed_work_orders(pj, idx, wo_confirm, procs, nums, blocked)
+        std = standards_for(qstd, pj["product_group"])
+        if not std:
+            blocked.note("SHP_INSPECTIONS · SHP_SHIPMENTS",
+                         f"제품군 {pj['product_group']} 의 수압·기밀·진공 기준을 "
+                         "BAS_QUALITY_STANDARDS 에서 3종 다 찾지 못했다 — QSTD_ID 가 NOT NULL "
+                         "이라 검사 결과를 만들 수 없다 (개발1)")
+
+        wo_ids = _seed_work_orders(pj, idx, b, wo_confirm, procs, nums, blocked)
         if not wo_ids:
             continue
         counts["work_orders"] += len(wo_ids)
 
-        lot_id = _upsert_lot_trace(lot_no, pj, wo_ids, anchor, packing, completed, blocked)
+        lot_no = apply_pattern(nums["PRODUCT_LOT_NO"], year, idx + 1)
+        lot_id = _upsert_lot_trace(lot_no, pj, b, wo_ids, blocked)
         if lot_id is None:
             continue
         counts["lot_traces"] += 1
 
-        counts["performances"] += _seed_performances(wo_ids, lot_id, wo_confirm, mfg_h, procs)
-        counts["histories"] += _seed_histories(lot_id, wo_ids, wo_confirm, mfg_h, anchor)
+        if broke and "공정실적 누락" in broke:
+            # **의도적 단절** — 공정실적을 만들지 않는다. 이력은 남기되 PERF_ID 가 빈다.
+            counts["histories"] += _seed_histories(lot_id, wo_ids, wo_confirm, mfg_h, anchor)
+        else:
+            counts["performances"] += _seed_performances(wo_ids, lot_id, wo_confirm, mfg_h, procs)
+            counts["histories"] += _seed_histories(lot_id, wo_ids, wo_confirm, mfg_h, anchor)
 
-        if not can_inspect:
+        if broke and "검사·출하 누락" in broke:
             counts["in_progress"] += 1
             continue
-        counts["inspections"] += _seed_inspections(lot_id, qstd, packing)
-
-        if not completed:
+        if not std:
             counts["in_progress"] += 1
             continue
-        made = _seed_shipment(pj, idx, lot_id, packing, ship_dt, year, nums, blocked)
+        counts["inspections"] += _seed_inspections(lot_id, std, packing)
+
+        if ship_dt > anchor:
+            counts["in_progress"] += 1
+            continue
+        made = _seed_shipment(pj, idx, b, lot_id, packing, ship_dt, year, nums, approver, blocked)
         if made:
             counts["shipments"] += made[0]
             counts["ship_items"] += made[1]
             counts["shipped"] += 1
         else:
             counts["in_progress"] += 1
+
+    _restate_mapping_flag()
     return counts
 
 
-def _seed_work_orders(pj: dict, idx: int, confirm: datetime, procs: dict[str, str],
-                      nums: dict[str, str], blocked: Blocked) -> list[tuple[str, int]]:
+def _restate_mapping_flag() -> int:
+    """`MAPPING_OK_YN` 을 **실제 연결로 다시 쓴다** — 선언만 Y 로 두면 매핑률이 조작된다.
+
+    판정 산식은 `tools/check_data.py` 의 `LOT_FULL_CHAIN`(QA2 독립 재계산)과 같은 9단계다.
+    여기서 Y 를 남발하지 않는 것이 요점이다 — 검사기는 이 열을 **믿지 않고** 따로 센다.
+    """
+    return conn.x("""
+update SHP_LOT_TRACES t set MAPPING_OK_YN = case when (
+        t.PROJECT_ID is not null and t.BOM_ID is not null
+    and t.MATERIAL_LOT_ID is not null and t.WORK_ORDER_ID is not null
+    and exists (select 1 from EST_CAD_DRAWINGS d join EST_BOM_HEADERS b
+                 on b.DRAWING_ID = d.DRAWING_ID where b.BOM_ID = t.BOM_ID)
+    and exists (select 1 from INV_MATERIAL_LOTS m where m.LOT_ID = t.MATERIAL_LOT_ID)
+    and exists (select 1 from PRC_WORK_ORDERS w where w.WORK_ORDER_ID = t.WORK_ORDER_ID)
+    and exists (select 1 from PRC_PERFORMANCES f where f.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    and exists (select 1 from SHP_INSPECTIONS i where i.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    and exists (select 1 from SHP_SHIPMENT_ITEMS s join SHP_SHIPMENTS h
+                 on h.SHIPMENT_ID = s.SHIPMENT_ID where s.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    ) then 'Y' else 'N' end,
+    UPDATED_DT = now()
+where MAPPING_OK_YN is distinct from (case when (
+        t.PROJECT_ID is not null and t.BOM_ID is not null
+    and t.MATERIAL_LOT_ID is not null and t.WORK_ORDER_ID is not null
+    and exists (select 1 from EST_CAD_DRAWINGS d join EST_BOM_HEADERS b
+                 on b.DRAWING_ID = d.DRAWING_ID where b.BOM_ID = t.BOM_ID)
+    and exists (select 1 from INV_MATERIAL_LOTS m where m.LOT_ID = t.MATERIAL_LOT_ID)
+    and exists (select 1 from PRC_WORK_ORDERS w where w.WORK_ORDER_ID = t.WORK_ORDER_ID)
+    and exists (select 1 from PRC_PERFORMANCES f where f.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    and exists (select 1 from SHP_INSPECTIONS i where i.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    and exists (select 1 from SHP_SHIPMENT_ITEMS s join SHP_SHIPMENTS h
+                 on h.SHIPMENT_ID = s.SHIPMENT_ID where s.LOT_TRACE_ID = t.LOT_TRACE_ID)
+    ) then 'Y' else 'N' end)
+""")
+
+
+def _seed_work_orders(pj: dict, idx: int, b: dict[str, Any], confirm: datetime,
+                      procs: dict[str, str], nums: dict[str, str],
+                      blocked: Blocked) -> list[tuple[str, int]]:
+    """제품LOT 1건당 제조 7공정. `ROUTING_ID` 는 개발1 이 만든 BOM 공정구조를 가리킨다."""
+    routing = {r["process_code"]: int(r["routing_id"]) for r in conn.q(
+        "select PROCESS_CODE, ROUTING_ID from EST_BOM_ROUTINGS where BOM_ID = %s", (b["bom_id"],))}
     out: list[tuple[str, int]] = []
     for n, code in enumerate(MFG_PROCESSES):
         if code not in procs:
@@ -268,16 +367,17 @@ def _seed_work_orders(pj: dict, idx: int, confirm: datetime, procs: dict[str, st
         no = apply_pattern(nums["WORK_ORDER_NO"], confirm.year,
                            idx * len(MFG_PROCESSES) + n + 1)
         conn.x(
-            "insert into PRC_WORK_ORDERS (WORK_ORDER_NO, PROJECT_ID, PROCESS_CODE, ORDER_QTY, "
-            "CONFIRM_DT, PLAN_START_DT, PLAN_END_DT, OUTSOURCE_YN, ORDER_STATUS, CREATED_DT) "
-            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s, now()) "
+            "insert into PRC_WORK_ORDERS (WORK_ORDER_NO, PROJECT_ID, ROUTING_ID, PROCESS_CODE, "
+            "ORDER_QTY, CONFIRM_DT, PLAN_START_DT, PLAN_END_DT, OUTSOURCE_YN, ORDER_STATUS, "
+            "CREATED_DT) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now()) "
             "on conflict (WORK_ORDER_NO) do update set "
-            "PROJECT_ID = excluded.PROJECT_ID, PROCESS_CODE = excluded.PROCESS_CODE, "
+            "PROJECT_ID = excluded.PROJECT_ID, ROUTING_ID = excluded.ROUTING_ID, "
+            "PROCESS_CODE = excluded.PROCESS_CODE, "
             "ORDER_QTY = excluded.ORDER_QTY, CONFIRM_DT = excluded.CONFIRM_DT, "
             "PLAN_START_DT = excluded.PLAN_START_DT, PLAN_END_DT = excluded.PLAN_END_DT, "
             "OUTSOURCE_YN = excluded.OUTSOURCE_YN, ORDER_STATUS = excluded.ORDER_STATUS, "
             "UPDATED_DT = now()",
-            (no, pj["project_id"], code, 1,
+            (no, pj["project_id"], routing.get(code), code, 1,
              confirm, confirm.date(), pj["due_dt"],
              "Y" if code in OUTSOURCED else "N", "완료"),
         )
@@ -286,29 +386,33 @@ def _seed_work_orders(pj: dict, idx: int, confirm: datetime, procs: dict[str, st
     return out
 
 
-def _upsert_lot_trace(lot_no: str, pj: dict, wo_ids: list[tuple[str, int]], anchor: datetime,
-                      packing: datetime, completed: bool, blocked: Blocked) -> int | None:
-    # 현재 공정 — 앵커 시점에 어느 공정에 있는지. 완료면 출하 공정(P95)이 아니라 마지막 제조 공정.
-    current = "P90" if completed or anchor >= packing else _current_process(anchor, packing, wo_ids)
+def _upsert_lot_trace(lot_no: str, pj: dict, b: dict[str, Any],
+                      wo_ids: list[tuple[str, int]], blocked: Blocked) -> int | None:
+    """제품LOT — BOM·자재LOT·작업지시를 잇는다. **의도적 단절이면 그 칸을 비운다.**
+
+    `MAPPING_OK_YN` 은 여기서 'N' 으로 두고 마지막에 `_restate_mapping_flag()` 가
+    **실제 연결을 확인해** 다시 쓴다. 선언만 Y 로 적어 매핑률을 올리지 않는다.
+    """
+    broke = b["break"] or ""
+    bom_id = None if "BOM 미연결" in broke else b["bom_id"]
+    mat_id = None if "자재LOT 미투입" in broke else b["material_lot_id"]
+    current = wo_ids[-1][0]
     if not codes.validate_code("공정", current):
         blocked.note("SHP_LOT_TRACES", f"현재 공정 코드 {current} 검증 실패 (D-32)")
         return None
-    status = "출하" if completed else ("검사" if current in ("P80", "P90") else "생산중")
     conn.x(
-        "insert into SHP_LOT_TRACES (PRODUCT_LOT_NO, PROJECT_ID, WORK_ORDER_ID, CURRENT_PROCESS, "
-        "TRACE_STATUS, MAPPING_OK_YN, CREATED_DT) values (%s,%s,%s,%s,%s,%s, now()) "
+        "insert into SHP_LOT_TRACES (PRODUCT_LOT_NO, PROJECT_ID, BOM_ID, MATERIAL_LOT_ID, "
+        "WORK_ORDER_ID, CURRENT_PROCESS, TRACE_STATUS, MAPPING_OK_YN, CREATED_DT) "
+        "values (%s,%s,%s,%s,%s,%s,'출하','N', now()) "
         "on conflict (PRODUCT_LOT_NO) do update set "
-        "PROJECT_ID = excluded.PROJECT_ID, WORK_ORDER_ID = excluded.WORK_ORDER_ID, "
+        "PROJECT_ID = excluded.PROJECT_ID, BOM_ID = excluded.BOM_ID, "
+        "MATERIAL_LOT_ID = excluded.MATERIAL_LOT_ID, WORK_ORDER_ID = excluded.WORK_ORDER_ID, "
         "CURRENT_PROCESS = excluded.CURRENT_PROCESS, TRACE_STATUS = excluded.TRACE_STATUS, "
-        "MAPPING_OK_YN = excluded.MAPPING_OK_YN, UPDATED_DT = now()",
-        (lot_no, pj["project_id"], wo_ids[0][1], current, status, "Y"),
+        "UPDATED_DT = now()",
+        (lot_no, pj["project_id"], bom_id, mat_id, wo_ids[0][1], current),
     )
     row = conn.q1("select LOT_TRACE_ID from SHP_LOT_TRACES where PRODUCT_LOT_NO = %s", (lot_no,))
     return int(row["lot_trace_id"]) if row else None
-
-
-def _current_process(anchor: datetime, packing: datetime, wo_ids: list[tuple[str, int]]) -> str:
-    return wo_ids[-1][0]
 
 
 def _seed_performances(wo_ids: list[tuple[str, int]], lot_id: int, start: datetime,
@@ -384,7 +488,11 @@ def _seed_histories(lot_id: int, wo_ids: list[tuple[str, int]], start: datetime,
 
 def _seed_inspections(lot_id: int, qstd: dict[str, dict[str, Any]], packing: datetime) -> int:
     """출하검사 — 수압·기밀·진공(사업계획서 1.3). **측정값은 도입기업 실측**이라
-    판정만 기록하고 `MEASURED_VALUE` 는 비운다(§0.2 지어내지 않는다)."""
+    판정만 기록하고 `MEASURED_VALUE` 는 비운다(§0.2 지어내지 않는다).
+
+    `SHP_INSPECTIONS` 에는 비고 칸이 없다 — `REJECT_REASON` 은 **불합격 사유** 칸이라
+    합격 행에 합성 표시를 넣으면 거짓이 된다. 표시는 화면 배지·게이트 줄이 진다(D-131).
+    """
     made = 0
     for n, (key, _fallback_item, _fallback_uom) in enumerate(INSPECT_ITEMS):
         std = qstd[key]
@@ -405,9 +513,15 @@ def _seed_inspections(lot_id: int, qstd: dict[str, dict[str, Any]], packing: dat
     return made
 
 
-def _seed_shipment(pj: dict, idx: int, lot_id: int, packing: datetime, ship_dt: datetime,
-                   year: int, nums: dict[str, str], blocked: Blocked) -> tuple[int, int] | None:
-    """검사 **합격 LOT 만** 출하 대상이다. 코드성 FK 는 넣기 전에 확인한다(D-32)."""
+def _seed_shipment(pj: dict, idx: int, b: dict[str, Any], lot_id: int, packing: datetime,
+                   ship_dt: datetime, year: int, nums: dict[str, str], approver: int | None,
+                   blocked: Blocked) -> tuple[int, int] | None:
+    """검사 **합격 LOT 만** 출하 대상이다. 코드성 FK 는 넣기 전에 확인한다(D-32).
+
+    `APPROVER_ID` 를 반드시 채운다 — `SHIP_DT` 가 있는데 승인자가 비면 G-24 가 FAIL 이다.
+    출하 품목 코드는 **그 제품LOT 의 BOM 레벨1 품목**이다. 제품군 코드(PG10 등)를 품목 칸에
+    넣지 않는다 — 제품군과 품목은 다른 코드 그룹이다.
+    """
     failed = conn.q1(
         "select 1 as x from SHP_INSPECTIONS where LOT_TRACE_ID = %s and JUDGE_RESULT <> '합격'",
         (lot_id,),
@@ -417,27 +531,28 @@ def _seed_shipment(pj: dict, idx: int, lot_id: int, packing: datetime, ship_dt: 
     if not codes.validate_code("고객사", pj["customer_code"]):
         blocked.note("SHP_SHIPMENTS",
                      f"고객사 코드 '{pj['customer_code']}' 가 BAS_COMMON_CODES 에 없다 — "
-                     "'고객사' 그룹은 D-47 로 비워 둔 그룹이다(화면 입력 마스터)")
+                     "고객사 19종은 개발1 시드가 넣는다 (확정 D-139)")
         return None
-    item_code = pj["product_group"]
+    item_code = b.get("item_code")
     if not codes.validate_code("품목", item_code):
         blocked.note("SHP_SHIPMENT_ITEMS",
                      f"품목 코드 '{item_code}' 가 BAS_COMMON_CODES 에 없다 — "
-                     "'품목' 그룹은 D-47 로 비워 둔 그룹이다")
+                     "품목 179종은 개발1 시드가 넣는다 (가설 D-131)")
         return None
 
     no = apply_pattern(nums["SHIPMENT_NO"], year, idx + 1)
     otd = "Y" if (pj["due_dt"] is None or ship_dt.date() <= pj["due_dt"]) else "N"
     conn.x(
         "insert into SHP_SHIPMENTS (SHIPMENT_NO, PROJECT_ID, CUSTOMER_CODE, PLAN_DT, SHIP_DT, "
-        "DUE_DT, OTD_YN, SHIP_STATUS, ERP_SYNC_STATUS, CREATED_DT) "
-        "values (%s,%s,%s,%s,%s,%s,%s,%s,%s, now()) "
+        "DUE_DT, OTD_YN, SHIP_STATUS, APPROVER_ID, ERP_SYNC_STATUS, CREATED_DT) "
+        "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now()) "
         "on conflict (SHIPMENT_NO) do update set PROJECT_ID = excluded.PROJECT_ID, "
         "CUSTOMER_CODE = excluded.CUSTOMER_CODE, PLAN_DT = excluded.PLAN_DT, "
         "SHIP_DT = excluded.SHIP_DT, DUE_DT = excluded.DUE_DT, OTD_YN = excluded.OTD_YN, "
-        "SHIP_STATUS = excluded.SHIP_STATUS, UPDATED_DT = now()",
+        "SHIP_STATUS = excluded.SHIP_STATUS, APPROVER_ID = excluded.APPROVER_ID, "
+        "UPDATED_DT = now()",
         (no, pj["project_id"], pj["customer_code"], ship_dt.date(), ship_dt,
-         pj["due_dt"], otd, "완료", "미전송"),
+         pj["due_dt"], otd, "완료", approver, "미전송"),
     )
     row = conn.q1("select SHIPMENT_ID from SHP_SHIPMENTS where SHIPMENT_NO = %s", (no,))
     sid = int(row["shipment_id"])
@@ -445,16 +560,23 @@ def _seed_shipment(pj: dict, idx: int, lot_id: int, packing: datetime, ship_dt: 
         "select INSPECT_ID from SHP_INSPECTIONS where LOT_TRACE_ID = %s "
         "and JUDGE_RESULT = '합격' order by INSPECT_DT desc limit 1", (lot_id,),
     )
+    remark = (f"{MARK_SYNTH} — 출하 이후 전 구간이 합성이다. 실제 출하 기록의 원천이 없다. "
+              f"투입 BOM {b['bom_no']}")
     exists = conn.q1(
         "select SHIP_ITEM_ID from SHP_SHIPMENT_ITEMS where SHIPMENT_ID = %s and LOT_TRACE_ID = %s",
         (sid, lot_id),
     )
     items = 0
-    if not exists:
+    if exists:
+        conn.x("update SHP_SHIPMENT_ITEMS set ITEM_CODE = %s, PACKING_DT = %s, INSPECT_ID = %s, "
+               "REMARK = %s, UPDATED_DT = now() where SHIP_ITEM_ID = %s",
+               (item_code, packing, int(insp["inspect_id"]) if insp else None, remark,
+                int(exists["ship_item_id"])))
+    else:
         conn.x(
             "insert into SHP_SHIPMENT_ITEMS (SHIPMENT_ID, LOT_TRACE_ID, ITEM_CODE, SHIP_QTY, "
-            "PACKING_DT, INSPECT_ID, CREATED_DT) values (%s,%s,%s,%s,%s,%s, now())",
-            (sid, lot_id, item_code, 1, packing, int(insp["inspect_id"]) if insp else None),
+            "PACKING_DT, INSPECT_ID, REMARK, CREATED_DT) values (%s,%s,%s,%s,%s,%s,%s, now())",
+            (sid, lot_id, item_code, 1, packing, int(insp["inspect_id"]) if insp else None, remark),
         )
         items = 1
     return 1, items
@@ -502,21 +624,37 @@ def main() -> int:
                  "표준값을 지어내지 않는다. 023 은 '미확정' 을 렌더한다 (D-203)")
     blocked.note("SHP_CLAIMS · SHP_CLAIM_CAUSES",
                  "클레임 이력이 문서로만 존재한다(TD3 019 제약사항) — 런타임 등록 대상으로 판정. "
-                 "'클레임유형'·'고객사' 코드 그룹도 D-47 로 비어 있다 (D-204)")
+                 "'클레임유형' 코드 그룹도 D-47 로 비어 있다. 고객사는 확정됐지만(D-139) "
+                 "클레임 사실 자체를 지어내지 않는다 (D-204)")
     blocked.note("PRC_EQUIP_SIGNALS",
                  "수집 경로(개발3 ingest · 레이저커팅기 PLC 1지점)가 채운다 — "
                  "자동 수집을 흉내 낸 시드를 만들지 않는다 (D-06)")
 
     now = counts_now()
     print(f"시간 앵커        {anchor.isoformat(sep=' ')}")
-    print(f"프로젝트(읽기)    {len(projects())} 건  · 공정코드 {len(procs)} · 품질기준 {len(qstd)}/3")
+    print(f"프로젝트(읽기)    {len(projects())} 건  · 공정코드 {len(procs)}"
+          f" · 품질기준 {len(qstd)} 행(제품군×검사항목)")
     print(f"채번(개발1 공표)   " + " · ".join(f"{k}={v}" for k, v in nums.items()))
-    print(f"작업지시         {chain['work_orders']} 건 (신규·갱신)")
+    print()
+    print(f"═══ {SYNTH_NOTE} — 자재LOT 이후는 전부 합성이다 ═══")
+    print(f"작업지시         {chain['work_orders']} 건 (제품LOT 1건당 제조 7공정)")
     print(f"제품 LOT         {chain['lot_traces']} 건   · 출하완료 {chain['shipped']} · 진행중 {chain['in_progress']}")
     print(f"공정실적         {chain['performances']} 건   (자동 수집은 레이저커팅 1공정뿐 — D-06)")
     print(f"공정이력         {chain['histories']} 건")
     print(f"출하검사         {chain['inspections']} 건   · 출하 {chain['shipments']} · 출하품목 {chain['ship_items']}")
-    print(f"KPI 목표         {len(kpi.DEFS)} 건   · KPI 실적 {measures} 건")
+    print(f"KPI 목표         {len(kpi.DEFS)} 건   · KPI 실적 {measures} 건 (REMARK 에 합성 표시)")
+    print()
+    lots = chain["lot_traces"] or 1
+    print(f"의도적 단절       {chain['broken']} / {chain['lot_traces']} 건"
+          f" = {round(chain['broken'] / lots * 100, 1)}%  — 개발1 `BREAKS` 가 정본이다")
+    for line in chain["breaks"]:
+        print(f"  {line}")
+    print("  **단절을 빼서 100% 를 만들지 않는다.** G-08 이 이것을 잡아내는지가 검사기의 실력이다")
+    print()
+    mapped = conn.q1("select count(*) filter (where MAPPING_OK_YN = 'Y') as y, count(*) as n "
+                     "from SHP_LOT_TRACES") or {"y": 0, "n": 0}
+    print(f"MAPPING_OK_YN    Y {mapped['y']} / 전체 {mapped['n']}"
+          f" — 실제 9단계 연결을 확인해 다시 쓴 값이다(선언만 Y 로 적지 않는다)")
     print()
     print("KPI 확정값 (사업계획서 1.5 · D-21) — 개선율은 app/kpi.py 가 계산한다")
     for d in kpi.DEFS.values():

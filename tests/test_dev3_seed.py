@@ -65,11 +65,36 @@ def test_Label_은_0_건이고_차단으로_표기된다():
 
 
 def test_지어내지_않은_것은_비어_있다():
+    """**개발3 시드가** 넣지 않는 표. `EST_PROJECTS` 는 여기서 빠졌다 —
+
+    사용자 지시로 고객사 코드가 확정(D-139)되어 D-47 차단이 풀렸고, `db/seed_dev1.py` 가
+    **실측 GD 프로젝트**를 넣는다(D-131). 0건 단언을 지우지 않고 아래로 **뒤집어** 옮겼다.
+    """
     for t, why in (("EST_COST_RATES", "단가 값 미확보 (D-04)"),
-                   ("EST_PROJECTS", "고객사 코드 그룹 비어 있음 (D-47)"),
                    ("DAT_DATASET_SPLITS", "분할 비율이 정본에 없다")):
         n = int(conn.q1(f"select count(*) as n from {t}")["n"])
         assert n == 0, f"{t} 를 시드했다 — {why}"
+    src = SEED.read_text()
+    assert "insert into EST_PROJECTS" not in src, \
+        "EST_PROJECTS 는 개발3 시드가 넣지 않는다 — 개발1 이 실측 GD 코드로 넣는다 (D-131)"
+
+
+def test_EST_PROJECTS_는_실측_GD_코드만_들어간다():
+    """채워졌으면 **지어낸 번호가 아님**을 단언한다 — `GD`+YYMM 형식과 고객사 확정 표시."""
+    rows = conn.q("select PROJECT_NO, CUSTOMER_CODE, PRODUCT_GROUP from EST_PROJECTS "
+                  "where PROJECT_NO like 'GD%'")
+    if not rows:                    # 개발1 시드 전이면 0건이 정답이다 — 그 사실을 그대로 단언한다
+        assert int(conn.q1("select count(*) as n from EST_PROJECTS")["n"]) == 0
+        return
+    import re
+    for r in rows:
+        assert re.match(r"^GD\s?\d{4}", r["project_no"]), \
+            f"GD+YYMM 형식이 아니다 — 지어낸 번호다: {r['project_no']}"
+        mark = conn.q1("select ATTR1 from BAS_COMMON_CODES where CODE_GROUP = '고객사' "
+                       "and CODE_VALUE = %s", (r["customer_code"],))
+        assert mark is not None, f"고객사 코드 {r['customer_code']} 가 공통코드에 없다 (D-32)"
+        assert "확정 (D-139)" in (mark["attr1"] or ""), \
+            f"{r['customer_code']} 에 확정 표시가 없다 — 마스터로 조용히 승격됐다"
 
 
 RUNTIME_ONLY = ("AGT_QUERY_LOGS", "AGT_RECOMMENDATIONS", "EST_ML_MODELS", "EST_ML_TRAIN_RUNS",

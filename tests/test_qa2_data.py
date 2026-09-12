@@ -146,7 +146,17 @@ def test_G07_공통시드가_멱등이다_0건표와_N건표를_모두_단언():
     assert n_tables, "N건 경로가 없다 — 시드가 아무것도 넣지 못했다"
     assert zero_tables, "0건 경로가 없다 — 이 사업은 시드가 막힌 표가 있는 상태다"
     assert b["BAS_COMMON_CODES"] > 0 and b["SYS_ROLE_PERMISSIONS"] > 0
-    assert b["EST_PROJECTS"] == 0, "EST_PROJECTS 는 D-47·D-56 으로 0건이 정답이다"
+    # `EST_PROJECTS` 는 더 이상 **0건 단언 대상이 아니다** — 사용자 지시로 실측 GD 프로젝트가
+    # 들어갔다(D-131 · 고객사 확정 D-139). 0건 단언을 지우지 않고 **출처 단언으로 뒤집는다**:
+    # 채워졌으면 합성 선언이 함께 있어야 하고, 선언이 없으면 0건이 정답이다.
+    decl = conn.q1(cd.SYNTH_DECL)
+    if decl and decl["config_value"]:
+        assert b["EST_PROJECTS"] > 0, "합성 선언은 있는데 사슬 최상위(EST_PROJECTS)가 0건이다"
+        assert b["EST_CAD_DRAWINGS"] > 0 and b["SHP_LOT_TRACES"] > 0
+        assert cd.synthetic_note() == f"합성 데이터 기준 {decl['config_value']}"
+    else:
+        assert b["EST_PROJECTS"] == 0, \
+            "합성 선언 없이 채워진 프로젝트는 출처를 댈 수 없다 (D-47·D-56)"
 
 
 def test_G07_시간앵커가_고정이고_date_today_가_없다():
@@ -171,61 +181,128 @@ def test_G07_런타임_전용표는_시드가_채우지_않는다():
 
 # ══ G-08 디지털 스레드 · LOT 매핑 ═════════════════════════════════════════
 def test_G08_0건_경로는_0퍼센트가_아니라_판정불가다():
-    row = conn.q1(cd.LOT_FULL_CHAIN)
-    total = int(row["total"])
-    assert total == 0, "전제가 바뀌었다 — SHP_LOT_TRACES 가 채워졌으면 N건 경로로 판정한다"
-    assert cd.pct(int(row["linked"]), total) is None, "분모 0 을 0% 라고 말하면 거짓이다"
+    """사슬 표를 **롤백 트랜잭션 안에서 비우고** 재서 0건 경로를 실증한다.
+
+    시드가 채운 합성 사슬(D-131)을 지워서 0건을 만들지 않는다 — 커밋하지 않는다.
+    """
+    def body(cur):
+        for sql in ("delete from SHP_SHIPMENT_ITEMS", "delete from SHP_INSPECTIONS",
+                    "delete from PRC_PROCESS_HISTORIES", "delete from PRC_PERFORMANCES",
+                    "delete from SHP_LOT_TRACES"):
+            cur.execute(sql)
+        return _q1(cur)(cd.LOT_FULL_CHAIN)
+    row = _in_rollback(body)
+    assert int(row["total"]) == 0
+    assert cd.pct(int(row["linked"]), int(row["total"])) is None, "분모 0 을 0% 라고 말하면 거짓이다"
+    assert cd.pct_text(None) == "판정 불가(분모 0)"
+    # 롤백 뒤 라이브 사슬이 그대로 남아 있는지 — 테스트가 시드를 지우면 그게 더 큰 사고다
+    assert int(conn.q1(cd.LOT_FULL_CHAIN)["total"]) > 0
 
 
 def test_G08_N건_경로는_사슬이_양방향으로_이어진다():
+    """라이브에 합성 사슬이 이미 있으므로 **증분**으로 잰다 — 한 벌을 더 넣어 +1 을 확인한다."""
     def body(cur):
-        _chain(cur)
         run = _q1(cur)
-        chain = run(cd.LOT_FULL_CHAIN)
+        before = run(cd.LOT_FULL_CHAIN)
+        _chain(cur)
+        after = run(cd.LOT_FULL_CHAIN)
         steps = []
         for label, fwd, bwd, fden, bden in cd.CHAIN:
             steps.append((label,
                           int(run(f"select ({fwd}) as n")["n"]),
                           int(run(f"select ({bwd}) as n")["n"])))
-        return chain, steps
-    chain, steps = _in_rollback(body)
-    assert int(chain["total"]) == 1
-    assert int(chain["linked"]) == 1, "9단계를 다 이었는데 완주로 세지 않는다"
-    assert cd.pct(int(chain["linked"]), int(chain["total"])) == 100.0 >= cd.THRESHOLD
+        return before, after, steps
+    before, after, steps = _in_rollback(body)
+    assert int(after["total"]) - int(before["total"]) == 1
+    assert int(after["linked"]) - int(before["linked"]) == 1, "9단계를 다 이었는데 완주로 세지 않는다"
     for label, f, b in steps:
         assert f >= 1, f"정방향 끊김: {label}"
         assert b >= 1, f"역방향 끊김: {label}"
 
 
+def test_G08_합성_데이터로_잰_값이면_판정_줄에_그_사실이_붙는다():
+    """**숫자만 떼어 인용될 수 없게** 한다 (goal.md §2.3 · §10-1).
+
+    임계값(85%)·판정 조건은 그대로다 — 고지를 붙이는 것뿐이다.
+    """
+    note = cd.synthetic_note()
+    total = int(conn.q1(cd.LOT_FULL_CHAIN)["total"])
+    if total == 0:
+        assert note == "", "사슬이 0건인데 합성 선언이 있다 — 선언이 실제와 어긋난다"
+        return
+    assert note.startswith("합성 데이터 기준 D-"), f"합성 고지가 없다: {note!r}"
+    cd.VERDICTS.clear()
+    cd.gate_08()
+    gate, verdict, measured = next(v for v in cd.VERDICTS if v[0] == "G-08")
+    cd.VERDICTS.clear()
+    assert note in measured, f"G-08 판정 줄에 합성 고지가 없다: {measured!r}"
+    assert f"표본 {total}" in measured, f"판정 줄에 표본 수가 없다: {measured!r}"
+    assert "LOT 매핑" in measured and "%" in measured, "수치가 같은 줄에 없다"
+    assert f"기준 {cd.THRESHOLD}%" in measured, "임계값 표기가 사라졌다 — 85% 는 그대로다"
+
+
+def test_G08_의도적_단절_표본이_있어서_100퍼센트가_아니다():
+    """전부 이으면 100% 가 나오고 그건 검사기를 시험하지 못한다 — 단절 표본이 있어야 한다."""
+    import seed_dev1
+    row = conn.q1(cd.LOT_FULL_CHAIN)
+    total, linked = int(row["total"]), int(row["linked"])
+    if total == 0:
+        return
+    assert linked < total, "합성인데 전부 이어져 100% 다 — 단절 표본을 빼면 검사기를 못 시험한다"
+    assert seed_dev1.BREAKS, "의도적 단절 위치가 선언돼 있지 않다"
+    rate = cd.pct(linked, total)
+    assert rate is not None and rate >= cd.THRESHOLD, (
+        f"LOT 매핑 {rate}% — 기준 {cd.THRESHOLD}% 미달이면 **미달로 보고**하고 단절을 빼지 않는다")
+
+
 def test_G08_선언값_MAPPING_OK_YN_을_믿지_않고_독립_재계산한다():
     """`MAPPING_OK_YN='Y'` 라고 적어 두기만 하면 매핑률이 올라가서는 안 된다."""
     def body(cur):
+        run = _q1(cur)
+        before = run(cd.LOT_FULL_CHAIN)
         _insert(cur, "EST_PROJECTS", PROJECT_NO="QA2-P9", CUSTOMER_CODE="QA2CUST",
                 PRODUCT_GROUP="PG10", PROJECT_NAME="끊긴 체인", PROJECT_STATUS="생산")
         cur.execute("select PROJECT_ID from EST_PROJECTS where PROJECT_NO = 'QA2-P9'")
         pj = int(cur.fetchone()["project_id"])
         _insert(cur, "SHP_LOT_TRACES", PRODUCT_LOT_NO="QA2-T9", PROJECT_ID=pj,
                 TRACE_STATUS="생산중", MAPPING_OK_YN="Y")      # 선언만 Y, 실제로는 끊겼다
-        return _q1(cur)(cd.LOT_FULL_CHAIN)
-    row = _in_rollback(body)
-    assert int(row["declared"]) == 1, "선언값은 Y 로 세어야 한다"
-    assert int(row["linked"]) == 0, "끊긴 LOT 을 완주로 세면 매핑률이 조작된다"
+        return before, run(cd.LOT_FULL_CHAIN)
+    before, after = _in_rollback(body)
+    assert int(after["declared"]) - int(before["declared"]) == 1, "선언값은 Y 로 세어야 한다"
+    assert int(after["linked"]) - int(before["linked"]) == 0, \
+        "끊긴 LOT 을 완주로 세면 매핑률이 조작된다"
 
 
 # ══ G-09 정확성 · 정합성 · 연계성 ═════════════════════════════════════════
-def test_G09_0건_경로_세_지표_모두_판정불가다():
+def test_G09_분모_0_지표는_0퍼센트가_아니라_판정불가다():
+    """0건 경로는 **산식**으로 단언한다 — 합성 사슬(D-131)이 들어온 뒤 정확성·연계성 분모는 N이다.
+
+    **정합성은 여전히 분모 0 이다** — 그래서 G-09 는 `차단` 으로 남는다. 그 이유를 여기 못박는다:
+    `EST_CAD_FEATURES`(D-05) · `EST_QUOTATIONS`·`EST_COST_RATES`(D-04) · `재질` 코드(D-47)가 없다.
+    """
+    assert cd.pct(0, 0) is None and cd.pct(1, 0) is None
     ok, total, bad = cd.accuracy()
-    assert total == 0 and cd.pct(ok, total) is None
-    r = conn.q1(cd.LINKAGE)
-    assert int(r["total"]) == 0 and cd.pct(int(r["linked"]), int(r["total"])) is None
     assert bad == [] or all("코드 그룹 미정의" in b for b in bad)
+    if total:
+        assert cd.pct(ok, total) == 100.0, f"정확성 {ok}/{total} — 코드성 FK 위반이 있다 (D-32)"
+    comp_total = sum(int(conn.q1(f"select ({den}) as n")["n"]) for _n, den, _num in cd.CONSISTENCY)
+    assert comp_total == 0, (
+        "정합성 분모가 생겼다 — G-09 가 차단에서 벗어났으므로 판정을 다시 적어야 한다")
+    r = conn.q1(cd.LINKAGE)
+    if int(r["total"]) == 0:
+        assert cd.pct(int(r["linked"]), int(r["total"])) is None
+    else:
+        assert cd.pct(int(r["linked"]), int(r["total"])) is not None
 
 
 def test_G09_N건_경로_연계성_100퍼센트와_정확성_산식():
     def body(cur):
-        _chain(cur)
         run = _q1(cur)
+        link_before = run(cd.LINKAGE)
+        _chain(cur)
         link = run(cd.LINKAGE)
+        link = {"total": int(link["total"]) - int(link_before["total"]),
+                "linked": int(link["linked"]) - int(link_before["linked"])}
         # 코드성 FK 를 만족시키는 코드를 같은 트랜잭션에 넣고 정확성이 올라가는지 본다
         for group, value in (("품목", "QA2ITEM"), ("재질", "QA2MAT"), ("고객사", "QA2CUST")):
             cur.execute(
@@ -241,13 +318,16 @@ def test_G09_N건_경로_연계성_100퍼센트와_정확성_산식():
 
 
 def test_G09_없는_코드를_쓰면_정확성이_떨어진다():
+    """**증분**으로 본다 — 한 행을 더 넣으면 분모는 +1 인데 정상 건수는 그대로여야 한다."""
     def body(cur):
+        run = _q1(cur)
+        before = cd.accuracy(run=run)
         _insert(cur, "INV_MATERIAL_LOTS", LOT_NO="QA2-LX", ITEM_CODE="없는코드",
                 CURRENT_QTY=0, LOT_STATUS="입고")
-        return cd.accuracy(run=_q1(cur))
-    ok, total, _bad = _in_rollback(body)
-    assert total == 1 and ok == 0, "코드성 FK 위반 행을 '정상' 으로 세면 안 된다 (D-32)"
-    assert cd.pct(ok, total) == 0.0
+        return before, cd.accuracy(run=run)
+    (ok0, total0, _b0), (ok1, total1, _b1) = _in_rollback(body)
+    assert total1 - total0 == 1, "행을 넣었는데 정확성 분모가 늘지 않았다"
+    assert ok1 - ok0 == 0, "코드성 FK 위반 행을 '정상' 으로 세면 안 된다 (D-32)"
 
 
 def test_코드성_FK_29건이_전부_그룹에_매핑돼_있다():
@@ -300,7 +380,8 @@ def test_G10_규약_5_분모_0은_0퍼센트가_아니라_판정불가다():
 def test_G10_규약_4_정확성_조작적_정의를_검사기가_그대로_구현한다():
     """§4 — ① 코드성 FK ② NOT NULL ③ 물리 FK ④ 수치 범위(판정 제외)."""
     ok, total, _bad = cd.accuracy()                      # ①
-    assert (ok, total) == (0, 0), "전제가 바뀌었다 — N건 경로 테스트로 판정한다"
+    assert total > 0, "정확성 분모가 0이다 — 코드성 컬럼을 가진 표가 전부 비었는지 확인한다"
+    assert ok == total, f"코드성 FK 위반 {total - ok}행 (D-32)"
     assert cd.notnull_violations() == 0                  # ② DB 제약이 강제한다
     nfk, orphan = cd.fk_orphans()                        # ③
     assert nfk == 98, f"물리 FK 제약이 98건이 아니다: {nfk} (contracts/db-schema.md 머리말)"
@@ -378,20 +459,36 @@ def test_KPI_감소율을_상수가_아니라_계산으로_낸다():
     assert kpimod.definition(kpimod.CODE_O2D).improve_rate == 16.7
 
 
-def test_KPI_0건_경로는_None_이고_0_0_이_아니다():
+def test_KPI_표본_0건_경로는_None_이고_0_0_이_아니다():
+    """0건 경로는 **순수 함수**로 단언한다 — 합성 사슬(D-131)이 들어와 라이브 표본은 N건이다.
+
+    라이브에서는 **QA 독립 SQL 과 앱 산식이 같은 값**을 내는지를 본다(이것이 이 검사의 목적).
+    """
+    assert kpimod.mean_hours([]) is None, "표본 0건을 0.0 으로 메우면 결함이다"
+    assert kpimod.achieve_rate(1320, 1080, None) is None
+    assert kpimod.ratio_pct(0, 0) is None
     for code, sql in ((kpimod.CODE_MFG, cd.SQL_MFG_QA), (kpimod.CODE_O2D, cd.SQL_O2D_QA)):
         r = conn.q1(sql)
         m = kpimod.measure(code)
-        assert int(r["n"]) == 0 == m.sample_cnt
-        assert r["h"] is None and m.value is None, "표본 0건을 0.0 으로 메우면 결함이다"
-        assert m.achieve is None and m.value_text == "—"
+        assert int(r["n"]) == m.sample_cnt, f"{code} 표본 QA {r['n']} ≠ 앱 {m.sample_cnt}"
+        if int(r["n"]) == 0:
+            assert r["h"] is None and m.value is None
+            assert m.achieve is None and m.value_text == "—"
+        else:
+            assert round(float(r["h"]), 2) == m.value, f"{code} 평균 QA {r['h']} ≠ 앱 {m.value}"
+            assert m.achieve is not None and m.value_text != "—"
 
 
 def test_KPI_N건_경로_독립SQL이_앱_산식과_같은_값을_낸다():
     """`app/kpi.py` 를 믿지 않고 QA 가 새로 쓴 SQL 로 잰다."""
     def body(cur):
-        c = _chain(cur, hours_mfg=1000.0, hours_o2d=1100.0)
         run = _q1(cur)
+        # 라이브 합성 표본을 걷어낸 자리에서 **한 벌만** 넣어 산식을 정확히 잰다 (롤백한다).
+        for sql in ("delete from SHP_SHIPMENT_ITEMS", "delete from SHP_INSPECTIONS",
+                    "delete from PRC_PROCESS_HISTORIES", "delete from PRC_PERFORMANCES",
+                    "delete from SHP_LOT_TRACES", "delete from SHP_SHIPMENTS"):
+            cur.execute(sql)
+        c = _chain(cur, hours_mfg=1000.0, hours_o2d=1100.0)
         return run(cd.SQL_MFG_QA), run(cd.SQL_O2D_QA), c
     mfg, o2d, c = _in_rollback(body)
     assert int(mfg["n"]) == 1 and abs(float(mfg["h"]) - 1000.0) < 0.01
@@ -437,8 +534,13 @@ def test_71_시드여부_미정_6건의_판정이_실제_데이터와_맞는다(
     for tid, (_owner, _why, expect) in cd.UNDECIDED_71.items():
         n = int(conn.q1(f"select count(*) as n from {tid}")["n"])
         if expect is None:
-            # PRC_PROCESS_HISTORIES — 개발2 는 '시드 대상' 이라 판정했는데 전제가 막혀 0건이다
-            assert n == 0, (
-                f"{tid} 가 채워졌다 — §7.1 판정(시드 대상)이 실현된 것이므로 리포트를 갱신한다")
+            # PRC_PROCESS_HISTORIES — 개발2 판정은 '시드 대상' 이다. 전제(EST_PROJECTS·BOM)가
+            # 서면서 **판정이 실현됐다**(D-131). 0건이면 전제가 아직 막힌 것이고 그때도 0이 정답이다.
+            if n == 0:
+                assert int(conn.q1("select count(*) as n from SHP_LOT_TRACES")["n"]) == 0, \
+                    f"{tid} 가 0건인데 제품LOT 은 있다 — 시드 대상 판정이 실행되지 않았다"
+            else:
+                assert n >= int(conn.q1("select count(*) as n from SHP_LOT_TRACES")["n"]), \
+                    f"{tid} {n}건이 제품LOT 수보다 적다 — 공정이력이 LOT 당 1건 이상이어야 한다"
         else:
             assert n == expect, f"{tid} 판정({expect}건)과 실제({n}건)가 다르다"

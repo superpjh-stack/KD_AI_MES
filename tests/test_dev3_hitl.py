@@ -113,8 +113,22 @@ def test_승인_경로가_실제로_존재한다():
 
 
 def test_확정_표는_지금_비어_있고_그_사실이_화면에_나온다(client: TestClient):
-    for t in ("EST_QUOTATIONS", "EST_BOM_HEADERS"):
-        n = int(conn.q1(f"select count(*) as n from {t}")["n"])
-        assert n == 0, f"{t} 를 시드하지 않았다 — 단가·코드 그룹 미확보 (D-04·D-47)"
-    assert "미수집" in client.get("/est/012").text
-    assert "미수집" in client.get("/est/013").text
+    """`EST_QUOTATIONS` 는 여전히 0건이다 — 단가 값이 없다(D-04).
+
+    **`EST_BOM_HEADERS` 는 0건 단언에서 빠졌다.** 사용자 지시로 G-08 디지털 스레드를 합성으로
+    채웠고(D-131) BOM 은 그 사슬의 3단계다. 대신 **채워졌으면 합성 표시가 붙어 있어야 한다** —
+    BOM 헤더에는 비고 칸이 없으므로 하위 `EST_BOM_ROUTINGS.REMARK` 와 화면 배지가 진다.
+    """
+    n = int(conn.q1("select count(*) as n from EST_QUOTATIONS")["n"])
+    assert n == 0, "EST_QUOTATIONS 를 시드하지 않았다 — 단가 값 미확보 (D-04)"
+    boms = int(conn.q1("select count(*) as n from EST_BOM_HEADERS")["n"])
+    if boms:
+        marked = int(conn.q1(
+            "select count(*) as n from EST_BOM_HEADERS b where exists "
+            "(select 1 from EST_BOM_ROUTINGS r where r.BOM_ID = b.BOM_ID "
+            " and r.REMARK like '%합성 (D-131)%')")["n"])
+        assert marked == boms, \
+            f"BOM {boms}건 중 합성 표시가 붙은 것이 {marked}건뿐이다 — 표시 없는 합성은 거짓 증거다"
+        assert "합성 데이터 기준 (D-131)" in client.get("/est/013").text, \
+            "013 화면에 합성 데이터 배지가 없다"
+    assert "미수집" in client.get("/est/012").text     # 견적 0건은 그대로다

@@ -11,7 +11,8 @@
 
 **시드하지 않는 것과 그 이유**
   · `EST_COST_RATES` — 단가 값이 정본에 없다. 과거 견적 Excel·구매 실적 확보 미확인 (D-04)
-  · `EST_PROJECTS` — 고객사 코드 그룹이 비어 있다 (D-47). 코드 검증(D-32)을 통과할 수 없다
+  · `EST_PROJECTS` — **개발1 이 넣는다.** 고객사 코드가 사용자 확정(D-139)되어 D-47 차단이
+    풀렸고, 실측 GD 프로젝트를 `db/seed_dev1.py` 가 적재한다 (D-131). 여기서는 건드리지 않는다
   · `DAT_DATASET_SPLITS` — Train/Validation/Test 비율이 정본에 없다. 임의 비율을 넣지 않는다
 """
 from __future__ import annotations
@@ -203,7 +204,9 @@ def main() -> int:
     print()
     print("시드하지 않은 것 — 정본에 값이 없다(지어내지 않는다):")
     print("  · EST_COST_RATES   단가 값 미확보 — 과거 견적 Excel·구매 실적 확인 필요 (D-04)")
-    print("  · EST_PROJECTS     고객사 코드 그룹이 비어 있다 (D-47) — 코드 검증(D-32) 통과 불가")
+    n_pj = conn.q1("select count(*) as n from EST_PROJECTS")["n"]
+    print(f"  · EST_PROJECTS     개발1 이 실측 GD 프로젝트를 넣는다 (D-131 · 고객사 확정 D-139) "
+          f"— 현재 {n_pj} 건. 개발3 시드는 건드리지 않는다")
     print("  · DAT_DATASET_SPLITS  Train/Validation/Test 비율이 정본에 없다")
     print()
     print("런타임 전용 표 — 0건이 정상이다 (G-11):")

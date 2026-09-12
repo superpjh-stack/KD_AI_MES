@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                                      # noqa: E402
+import seed_dev1                                                 # noqa: E402
 import seed_dev2                                                 # noqa: E402
 from conftest import csrf_post                                   # noqa: E402
 from kyungdong.app import kpi                                    # noqa: E402
@@ -32,6 +33,11 @@ from kyungdong.app.util import clock                             # noqa: E402
 PJ = ("PJT-DEV2TEST-001", "PJT-DEV2TEST-002")
 CUSTOMER, ITEM = "CUST-DEV2TEST", "PG10"
 QSTD_PREFIX = "QSTD-DEV2TEST-"
+# 제품LOT 은 **BOM 1건당 1건**이다(D-131) — `seed_dev2.seed_chain` 이 `seed_dev1.thread_rows()` 를
+# 읽으므로 이 픽스처도 상류(도면·BOM·자재LOT)를 함께 세워야 한다. 끝나면 전부 지운다.
+BOM_PREFIX = "BOM-PJT-DEV2TEST-"
+DWG_PREFIX = "DWG-DEV2TEST-"
+LOT_PREFIX = "LOT-DEV2TEST-"
 TEST_ITEMS = (("IT10", "수압시험", "bar"), ("IT20", "기밀시험", "bar"), ("IT30", "진공시험", "mmHg"))
 
 TABLES = ("PRC_WORK_ORDERS", "PRC_PERFORMANCES", "PRC_PROCESS_HISTORIES",
@@ -61,7 +67,14 @@ def _cleanup() -> None:
                "(select WORK_ORDER_ID from PRC_WORK_ORDERS where PROJECT_ID = any(%s))", (pids,))
         conn.x("delete from SHP_LOT_TRACES where PROJECT_ID = any(%s)", (pids,))
         conn.x("delete from PRC_WORK_ORDERS where PROJECT_ID = any(%s)", (pids,))
+        conn.x("delete from EST_BOM_ROUTINGS where BOM_ID in "
+               "(select BOM_ID from EST_BOM_HEADERS where PROJECT_ID = any(%s))", (pids,))
+        conn.x("delete from EST_BOM_ITEMS where BOM_ID in "
+               "(select BOM_ID from EST_BOM_HEADERS where PROJECT_ID = any(%s))", (pids,))
+        conn.x("delete from EST_BOM_HEADERS where PROJECT_ID = any(%s)", (pids,))
+        conn.x("delete from EST_CAD_DRAWINGS where PROJECT_ID = any(%s)", (pids,))
         conn.x("delete from EST_PROJECTS where PROJECT_ID = any(%s)", (pids,))
+    conn.x("delete from INV_MATERIAL_LOTS where LOT_NO like %s", (LOT_PREFIX + "%",))
     conn.x("delete from BAS_QUALITY_STANDARDS where QSTD_CODE like %s", (QSTD_PREFIX + "%",))
     conn.x("delete from BAS_COMMON_CODES where CODE_GROUP = '고객사' and CODE_VALUE = %s",
            (CUSTOMER,))
@@ -92,6 +105,35 @@ def chain():
                "values (%s,%s,%s,%s,%s,%s,%s, now())",
                (no, CUSTOMER, ITEM, f"테스트 프로젝트 {n}", a - timedelta(hours=1400),
                 (a + timedelta(days=5)).date(), "생산"))
+    # 상류(도면 → BOM → 자재LOT) — `seed_dev2.seed_chain` 은 **BOM 1건당 제품LOT 1건**을 만든다.
+    # 자재LOT 은 BOM_ID 컬럼이 없으므로 개발1 과 **같은 규약**으로 SPEC_TEXT 에 투입 BOM 을 적는다.
+    for n, no in enumerate(PJ, 1):
+        pid = int(conn.q1("select PROJECT_ID from EST_PROJECTS where PROJECT_NO = %s",
+                          (no,))["project_id"])
+        conn.x("insert into EST_CAD_DRAWINGS (DRAWING_NO, PROJECT_ID, FILE_TYPE, FILE_PATH, "
+               "ANALYSIS_STATUS, DUPLICATE_YN, CREATED_DT) "
+               "values (%s,%s,'DWG',%s,'대기','N', now())",
+               (f"{DWG_PREFIX}{n:04d}", pid, f"tests/dev2chain/{no}.dwg"))
+        did = int(conn.q1("select DRAWING_ID from EST_CAD_DRAWINGS where DRAWING_NO = %s",
+                          (f"{DWG_PREFIX}{n:04d}",))["drawing_id"])
+        bom_no = f"{BOM_PREFIX}{n:03d}-01"
+        conn.x("insert into EST_BOM_HEADERS (BOM_NO, PROJECT_ID, DRAWING_ID, GEN_METHOD, "
+               "BOM_VERSION, CONFIRM_YN, CYCLE_CHECK_RESULT, CREATED_DT) "
+               "values (%s,%s,%s,'수동','v1.0','N','정상', now())", (bom_no, pid, did))
+        bid = int(conn.q1("select BOM_ID from EST_BOM_HEADERS where BOM_NO = %s",
+                          (bom_no,))["bom_id"])
+        conn.x("insert into EST_BOM_ITEMS (BOM_ID, BOM_LEVEL, ITEM_CODE, REQUIRE_QTY, UOM, "
+               "CREATED_DT) values (%s,1,%s,1,'EA', now())", (bid, ITEM))
+        for code in seed_dev1.ROUTING_PROCESSES:
+            conn.x("insert into EST_BOM_ROUTINGS (BOM_ID, PROCESS_CODE, PROCESS_SEQ, "
+                   "OUTSOURCE_YN, REMARK, CREATED_DT) values (%s,%s,%s,%s,%s, now())",
+                   (bid, code, seed_dev1.PROCESS_SEQ[code],
+                    "Y" if code in seed_dev1.ROUTING_OUTSOURCED else "N",
+                    "tests/test_dev2_chain.py 임시 — 끝나면 지운다"))
+        conn.x("insert into INV_MATERIAL_LOTS (LOT_NO, ITEM_CODE, SPEC_TEXT, CURRENT_QTY, "
+               "LOT_STATUS, CREATED_DT) values (%s,%s,%s,1,'사용중', now())",
+               (f"{LOT_PREFIX}{n:02d}", ITEM,
+                f"{seed_dev1.MARK_SYNTH} · 투입 BOM {bom_no} — tests 임시"))
 
     procs = seed_dev2.process_codes()
     qstd = seed_dev2.quality_standards()
@@ -366,10 +408,25 @@ def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
     ("/shp/016", "SH-"),
     ("/shp/017", "PLOT-"),
     ("/shp/018", "수압시험"),
-    ("/dsh/001", "PJT-DEV2TEST"),
     ("/dsh/004", "PJT-DEV2TEST"),
 ])
 def test_N건_경로에서_그리드가_비지_않는다(chain, path, needle):
     body = _client("SYSADMIN").get(path).text
     assert needle in body, f"{path} 에 {needle} 가 없다"
+
+
+def test_001_공정진행_그리드가_실제_프로젝트를_보여_준다(chain):
+    """001 은 `PROJECT_NO` 오름차순 상위 8건만 그린다 — 시드 프로젝트가 채워지면 테스트
+    프로젝트(`PJT-…`)는 그 8건 밖으로 밀린다. **밀렸다는 사실이 결함이 아니다.**
+    그래서 테스트 전용 번호를 찾지 않고 **화면과 같은 순서로 뽑은 첫 프로젝트**를 확인한다.
+    """
+    row = conn.q1(
+        "select pj.PROJECT_NO from EST_PROJECTS pj "
+        "join SHP_LOT_TRACES lt on lt.PROJECT_ID = pj.PROJECT_ID "
+        "join PRC_PROCESS_HISTORIES h on h.LOT_TRACE_ID = lt.LOT_TRACE_ID "
+        "group by pj.PROJECT_NO order by pj.PROJECT_NO limit 1")
+    assert row is not None, "공정이력이 이어진 프로젝트가 0건이다 — N건 경로를 못 쟀다"
+    body = _client("SYSADMIN").get("/dsh/001").text
+    assert row["project_no"] in body, f"/dsh/001 에 {row['project_no']} 가 없다"
+    assert "공정" in body
     assert '<td class="empty"' not in body or needle in body

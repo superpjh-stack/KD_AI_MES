@@ -132,12 +132,59 @@ def test_통합작업은_수집대상당_1건이다():
 
 
 # ── 지어내지 않았는지 (0건 경로) ──────────────────────────────────────────
-def test_D47_빈_코드그룹을_개발1_시드가_채우지_않았다():
-    """품목·재질·고객사·보관위치·불량유형·클레임유형·원가대상은 화면 입력 마스터다."""
-    for group in ("품목", "재질", "고객사", "보관위치", "불량유형", "클레임유형", "원가대상"):
+def test_D47_정본에_값이_없는_코드그룹은_여전히_비어있다():
+    """재질·보관위치·불량유형·클레임유형·원가대상은 화면 입력 마스터다 (D-47).
+
+    **고객사·품목은 여기서 빠졌다** — 사용자가 확정(D-139)·가설(D-131)로 채우라고 지시했다.
+    그 둘은 아래 두 테스트가 **표시가 붙었는지**로 단언한다(0건 단언을 지우지 않고 뒤집었다).
+    """
+    for group in ("재질", "보관위치", "불량유형", "클레임유형", "원가대상"):
         n = int(conn.q1("select count(*) as n from BAS_COMMON_CODES where CODE_GROUP = %s",
                         (group,))["n"])
         assert n == 0, f"정본에 값이 없는 그룹 '{group}' 을 개발1 시드가 채웠다 (D-47)"
+
+
+def test_고객사_19종은_확정_표시와_역할_확신도를_달고_있다():
+    """사용자 확정 2026-09-12 (D-139). **`가설` 이 아니라 `확정` 이다.**
+
+    ATTR1 = 역할(발주처/수요처) + `확정 (D-139)` · ATTR2 = 확신도(높음/중간/낮음).
+    표시가 없으면 나중에 이 코드가 도입기업 마스터처럼 인용된다 — 그게 거짓 증거다.
+    """
+    rows = conn.q("select CODE_VALUE, CODE_NAME, ATTR1, ATTR2 from BAS_COMMON_CODES "
+                  "where CODE_GROUP = '고객사' order by SORT_ORDER")
+    assert len(rows) == 19, f"발주처 12 + 수요처 7 = 19 종이어야 한다: {len(rows)}"
+    assert {r["code_value"] for r in rows} == {f"CUST-{i:03d}" for i in range(1, 20)}
+    for r in rows:
+        assert r["attr1"], f"{r['code_value']} 의 ATTR1(역할·표시)이 비어 있다"
+        assert r["attr1"].split(" ")[0] in ("발주처", "수요처"), r["attr1"]
+        assert "확정 (D-139)" in r["attr1"], f"{r['code_value']} 에 확정 표시가 없다: {r['attr1']}"
+        assert r["attr2"] in ("높음", "중간", "낮음"), f"{r['code_value']} 확신도: {r['attr2']!r}"
+    # 협력사·관계사·도입기업 본인·사람이름은 고객사가 아니다 — 섞여 들어오면 안 된다
+    names = {r["code_name"] for r in rows}
+    for not_customer in ("케이테크", "경동글로벌텍", "함감속기제작소", "일진기계"):
+        assert not_customer not in names, f"{not_customer} 는 고객사가 아니다"
+
+
+def test_품목_코드는_가설_표시와_견적_출처를_달고_있다():
+    """견적서 품목명세에서만 뽑았다 (가설 D-131). **품목명을 지어내지 않았다.**"""
+    rows = conn.q("select CODE_VALUE, CODE_NAME, ATTR1, ATTR2 from BAS_COMMON_CODES "
+                  "where CODE_GROUP = '품목' order by SORT_ORDER")
+    assert rows, "품목 그룹이 비었다 — 사용자 지시(D-131)대로 채워야 한다"
+    src = {it["name"] for it in seed_dev1.quote_items()[0]}
+    assert len(rows) == len(src), f"견적 실측 {len(src)}종 ≠ 적재 {len(rows)}종"
+    for r in rows:
+        assert "가설 (D-131)" in (r["attr1"] or ""), f"{r['code_value']} 에 가설 표시가 없다"
+        assert "견적" in (r["attr2"] or ""), f"{r['code_value']} 에 출처가 없다: {r['attr2']!r}"
+        assert r["code_name"] in src, f"견적서에 없는 품목명이다: {r['code_name']!r}"
+
+
+def test_합성_선언이_DB_에_한_곳만_있다():
+    """화면 배지·게이트 판정 줄이 **이 선언 한 곳**을 읽는다 — 표시를 지울 수 없게 만든다."""
+    rows = conn.q("select CONFIG_VALUE, DESCRIPTION from SYS_CONFIGS "
+                  "where CONFIG_TYPE = '시스템설정' and CONFIG_KEY = 'SYNTHETIC_THREAD'")
+    assert len(rows) == 1
+    assert rows[0]["config_value"] == "D-131"
+    assert "합성 데이터 기준" in rows[0]["description"]
 
 
 def test_G11_런타임_전용표는_시드가_건드리지_않는다():
@@ -173,5 +220,7 @@ def test_시드가_공통시드_영역을_다시_넣지_않는다():
     # 공통 6그룹은 개발1 이 다시 넣지 않는다 — 개발1 이 새로 만드는 그룹은 'LOT채번' 뿐이다.
     groups = {r["code_group"] for r in conn.q(
         "select distinct CODE_GROUP from BAS_COMMON_CODES")}
-    assert groups == {"공정", "제품군", "검사구분", "공급구분", "외주구간", "설비", "LOT채번"}, groups
+    # 개발1 이 새로 만드는 그룹은 'LOT채번' + 사용자 지시로 채운 '고객사'(D-139) · '품목'(D-131) 이다.
+    assert groups == {"공정", "제품군", "검사구분", "공급구분", "외주구간", "설비",
+                      "LOT채번", "고객사", "품목"}, groups
     assert seed_dev1.seed_numbering.__doc__ and "LOT채번" in seed_dev1.seed_numbering.__doc__

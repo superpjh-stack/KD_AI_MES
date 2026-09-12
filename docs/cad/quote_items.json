@@ -1,0 +1,1507 @@
+{
+ "_meta": {
+  "무엇": "과거 견적서(.xls) 품목명세에서 뽑은 품목명 실측 — BAS_COMMON_CODES '품목' 그룹의 근거",
+  "출처": "/Users/gerardo92/Desktop/26년 제조AI 스마트공장  프로젝트 /01 경동글로벌텍 제조AI 플랫폼 구축 프로젝트/01 경동Data",
+  "원본을 고치지 않았다": true,
+  "파서": "src/kyungdong/cad/quote.py `parse()` — 명세표 머리글(품명·수량·금액) 아래 행만 읽는다",
+  "정규화": "NFC · 머리번호(1-1.) 제거 · 연속 공백 1칸 · 앞뒤 구두점 제거",
+  "제외규칙": "소계·합계·이윤·자재비 등 **집계/원가계정 행**은 품목이 아니라서 뺐다",
+  "지어내지 않았다": "이 목록에 없는 품목명을 시드가 만들지 않는다"
+ },
+ "실측": {
+  "견적 xls 파일": 31,
+  "내용 해시 중복 제거 뒤 고유 문서": 26,
+  "열기 실패": 0,
+  "품목명세 행": 462,
+  "품목명세를 가진 문서": 19,
+  "집계·원가계정으로 제외한 행": 86,
+  "제외한 서로 다른 표기": 20,
+  "채택 품목 종수": 179
+ },
+ "제외목록": [
+  {
+   "이름": "(빈칸)",
+   "행": 24
+  },
+  {
+   "이름": "소 계",
+   "행": 9
+  },
+  {
+   "이름": "SUB TOTAL",
+   "행": 8
+  },
+  {
+   "이름": "OVERHEAD PROFIT",
+   "행": 7
+  },
+  {
+   "이름": "자 재 비",
+   "행": 6
+  },
+  {
+   "이름": "인 건 비",
+   "행": 5
+  },
+  {
+   "이름": "合 計",
+   "행": 4
+  },
+  {
+   "이름": "TOTAL",
+   "행": 4
+  },
+  {
+   "이름": "합 계",
+   "행": 3
+  },
+  {
+   "이름": "가 공 비",
+   "행": 2
+  },
+  {
+   "이름": "연 마 비",
+   "행": 2
+  },
+  {
+   "이름": "이 윤",
+   "행": 2
+  },
+  {
+   "이름": "경 비",
+   "행": 2
+  },
+  {
+   "이름": "총 계",
+   "행": 2
+  },
+  {
+   "이름": "자재비",
+   "행": 1
+  },
+  {
+   "이름": "가공비",
+   "행": 1
+  },
+  {
+   "이름": "인건비",
+   "행": 1
+  },
+  {
+   "이름": "일반 관리비",
+   "행": 1
+  },
+  {
+   "이름": "노 무 비",
+   "행": 1
+  },
+  {
+   "이름": "일 반 관 리 비",
+   "행": 1
+  }
+ ],
+ "items": [
+  {
+   "name": "ACCESSORIES",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "ACID CLEANING",
+   "rows": 6,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "AGITATOR PART MATERIALS",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "AR-1402",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "BAFFLE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "BEARING & HOUSING",
+   "rows": 8,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "BEARING & HOUSING(#62 & #322)",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "BOLT/NUT & GASKET",
+   "rows": 7,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "BS3-NA10",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "BS32/10A",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "CABIN BLIND",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "CHAIN COUPLING",
+   "rows": 5,
+   "files": [
+    "Reactor-견적.xls",
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "CIP BALL : Alfa Laval LKM a/s",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "COLUMN & REFLUX PIPING",
+   "rows": 6,
+   "files": [
+    "(견적)반응기1.0&3.0-KT09012001.xls",
+    "GD2005-02-추출기 견적-200207.xls",
+    "GD2005-02-추출기 견적-200207A.xls"
+   ]
+  },
+  {
+   "name": "COMPOUND GAUGE",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "CONDENSOR",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "CONSUMABLE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "CONSUME",
+   "rows": 8,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "CONTROL BOX",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "D2G4 GERARED MOTOR",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "DOCUMENT & IQ,OQ",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "DOUBLE MECHANICAL SEAL : FLOWSERVE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "DRAIN VALVE : DUKER",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "EBS33/50A",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "EC5500R",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "ELECTRIC COMPONENT for REACTOR",
+   "rows": 2,
+   "files": [
+    "(견적)반응기1.0&3.0-KT09012001.xls"
+   ]
+  },
+  {
+   "name": "EYE BOLT/NUT",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "Eg3 모터",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "FINISHING [IN : Ra 0.4 / OUT : Ra 0.8]",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "GASKET",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "GEARED MOTOR",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "GERARED MOTOR",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "H X 600W X 500D",
+   "rows": 1,
+   "files": [
+    "전기견적-석광.xls"
+   ]
+  },
+  {
+   "name": "IMPELLER : PADDLE TYPE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "INSPECTION & INSTALL",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "INSPECTION(RT & HYDRO.)",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "INSTALL. & TEST RUN",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "INSULATION - COVER",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "INSULATION COVER",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "INSULATION(GLASS WOOL)",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "JACKET BODY",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "JACKET BOTTOM HEAD",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "JACKET END PLATE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "LAB OUR",
+   "rows": 7,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "LABOR COST",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "LABOUR",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "LUBRICATOR",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "MAIN SHAFT",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "MANHOLE ASS'Y",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "MECHANICAL SEAL",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "MODEL:MY4-N",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "MOTOR STAGE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "MP5W",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "NOZZLE for JACKET",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "NOZZLE for SHELL",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "PAINT & ACID CLEANING",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "PAINT& ACID CLEANING",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "PIPING",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "PRESSURE GAUGE",
+   "rows": 5,
+   "files": [
+    "Reactor-견적.xls",
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "PROCESSING COST",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "Pt100 Ohm",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "REACTOR",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "REACTOR FULL SET",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "REACTOR 제작, 설치",
+   "rows": 6,
+   "files": [
+    "GD2005-02-추출기 견적-200207.xls",
+    "GD2005-02-추출기 견적-200207A.xls"
+   ]
+  },
+  {
+   "name": "REACTOR(CONDENSER포함)",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "RUPTURE DISK (MAKER : TANKTECH)",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "S.S316L CONDENSER",
+   "rows": 1,
+   "files": [
+    "(견적)반응기1.0&3.0-KT09012001.xls"
+   ]
+  },
+  {
+   "name": "S.S316L REACTOR",
+   "rows": 2,
+   "files": [
+    "(견적)반응기1.0&3.0-KT09012001.xls"
+   ]
+  },
+  {
+   "name": "S.S316L RECEIVER TANK",
+   "rows": 1,
+   "files": [
+    "(견적)반응기1.0&3.0-KT09012001.xls"
+   ]
+  },
+  {
+   "name": "SAFETY VALVE",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "SAFETY VALVE(#316)",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "SAFETY VALVE(MAKER : SAMYANG)",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SHELL BODY",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SHELL BOTTOM HEAD",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SHELL TOP HEAD",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SIGHT & LIGHT GLASS",
+   "rows": 5,
+   "files": [
+    "Reactor-견적.xls",
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "SIGHT LEVEL GAUGE",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "SPIRAL REINFORCED",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SS400 JACKET CLOSE",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "SS400 JACKET HEAD P.L",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "SS400 JACKET P.L",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "SS400 LUG",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "SS400 REINFORCED F/BAR",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "SS400 SUPPORT FRAME",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "SS400 SUPPORT LUG",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "SS400 보강 평철",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "SS400 자킷",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "SS400 자킷 경판",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STPG/SS400 MOTOR STAGE",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS 400W X 300D X 800H",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "STS304 BASE",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS304 BRACKET",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS304 CONE PLATE",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS304 Flange Clamp",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS304 JACKET CLOSE",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS304 JACKET HEAD P.L",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS304 JACKET P.L",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS304 REINFORCED F/BAR",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS304 SUPPORT LUG",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS304 노즐 & 후렌지",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS304 몸체",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS304 바플",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS304 베아링 하우징",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS304 카플링",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316 ANCHOR IMPELLER",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 BODY P.L",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 BOLL VALVE",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "STS316 BOTTOM 베아링",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316 CHANNEL FLANGE",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 CHANNEL HEAD",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 FLANGE NOZZLE",
+   "rows": 10,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 FLUSH VALVE",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 HANDHOLE P.L",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "STS316 MANHOLE ASS'Y",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 MIDDLE COUPLING",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 NOZZLE ASS'Y",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 PADDLE IMPELLER",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 ROUND IMPELLER",
+   "rows": 2,
+   "files": [
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 SHAFT R/BAR",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 SHAFT SUPPORT",
+   "rows": 4,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 SHELL HEAD P.L",
+   "rows": 7,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 SHELL P.L",
+   "rows": 9,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls",
+    "견적서-REACTOR 일성.xls"
+   ]
+  },
+  {
+   "name": "STS316 TUBE SHEET",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "STS316 멘홀",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 2B P.L",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L Flange",
+   "rows": 2,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L Flange P.L",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L HEAT EXCHANGER 제작",
+   "rows": 5,
+   "files": [
+    "GD2005-02-추출기 견적-200207.xls",
+    "GD2005-02-추출기 견적-200207A.xls"
+   ]
+  },
+  {
+   "name": "STS316L Manhole",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L Sight & Light",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L Socket",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 경판",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 노즐",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 몸체",
+   "rows": 4,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 샤프트",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 시창",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 씨트 후렌지",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS316L 안전변",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 앙카 임페라",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 임페라",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 카플링",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 캡",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS316L 튜부 파이프",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS316L 패들",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "STS316L 후렌지",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "STS316TP SEAMLESS TUBE",
+   "rows": 3,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls",
+    "견적서-REACTOR FULL SET(7,400L)-1.xls",
+    "견적서-REACTOR FULL SET(7,400L).xls"
+   ]
+  },
+  {
+   "name": "SUPPORT LUG",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "SV022IG5a-4",
+   "rows": 1,
+   "files": [
+    "견적(반응기)-석광.xls"
+   ]
+  },
+  {
+   "name": "TANK PART MATERIALS",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "TEMP. SENSOR : d2G4 DOUBLE",
+   "rows": 1,
+   "files": [
+    "Reactor-견적.xls"
+   ]
+  },
+  {
+   "name": "Teflin Packing",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "VACUUM GAUGE",
+   "rows": 1,
+   "files": [
+    "견적서-REACTOR FULL SET(10,000L).xls"
+   ]
+  },
+  {
+   "name": "가스 안전 공사 검사비",
+   "rows": 1,
+   "files": [
+    "견적가로-제출용.xls"
+   ]
+  },
+  {
+   "name": "가스킷, 볼트류",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "경 비 및 기타 재보험료",
+   "rows": 1,
+   "files": [
+    "견적가로.xls"
+   ]
+  },
+  {
+   "name": "경비 및 기타 재 보험료",
+   "rows": 1,
+   "files": [
+    "견적가로-제출용.xls"
+   ]
+  },
+  {
+   "name": "공 과 잡 비",
+   "rows": 1,
+   "files": [
+    "견적서갑지세로.xls"
+   ]
+  },
+  {
+   "name": "공 과 잡 비 및 이 윤",
+   "rows": 2,
+   "files": [
+    "견적가로-제출용.xls",
+    "견적가로.xls"
+   ]
+  },
+  {
+   "name": "공과 잡비",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "메카니칼 씰(베아링 유니트)",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "모터 스테이지",
+   "rows": 3,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls",
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "볼트 및 소모 잡비",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "소모 잡비",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "소모잡자재",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "수압 테스트 및 검사",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "안 전 관 리 비",
+   "rows": 3,
+   "files": [
+    "견적가로-제출용.xls",
+    "견적가로.xls",
+    "견적서갑지세로.xls"
+   ]
+  },
+  {
+   "name": "안전변",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "압력 게이지",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "에너지 관리 공단 검사비",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "연마",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "우레탄 용접 보온",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  },
+  {
+   "name": "운반 설 치",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "운반 설치 및 시운전",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "일반 관리비 및 기타 경비",
+   "rows": 1,
+   "files": [
+    "견적서갑지세로.xls"
+   ]
+  },
+  {
+   "name": "재료비 소계",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "제작 가공",
+   "rows": 1,
+   "files": [
+    "신성 G.L 반응기 타견적.xls"
+   ]
+  },
+  {
+   "name": "콘트롤 시스템",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "탱크 볼 밸브",
+   "rows": 2,
+   "files": [
+    "반응기2000-타견적.xls",
+    "반응기8000-타견적.xls"
+   ]
+  },
+  {
+   "name": "테프론 가스킷",
+   "rows": 1,
+   "files": [
+    "리시버&콘덴샤 (현대 타견적).xls"
+   ]
+  }
+ ]
+}

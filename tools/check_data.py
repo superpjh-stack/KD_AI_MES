@@ -57,6 +57,23 @@ def pct_text(v: float | None) -> str:
     return "판정 불가(분모 0)" if v is None else f"{v} %"
 
 
+# ── 합성 데이터 고지 — **수치와 같은 줄에 붙인다** (goal.md §2.3 · §10-1) ──
+# 사용자 지시로 디지털 스레드를 합성으로 채웠다(D-131). 그러면 게이트 수치는 합성 기준 수치다.
+# **판정 로직·임계값은 건드리지 않는다** — 근거를 붙이는 일이다. 숫자만 떼어 인용되면
+# 그것이 곧 거짓 증거가 되므로, 판정 줄 안에 고지가 함께 실려야 한다.
+# 고지의 출처는 **DB 선언 한 곳**이다(`db/seed_dev1.seed_synthetic_flag`). 검사기가 지어내지 않는다.
+SYNTH_DECL = ("select CONFIG_VALUE from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+              "and CONFIG_KEY = 'SYNTHETIC_THREAD' and USE_YN = 'Y'")
+
+
+def synthetic_note() -> str:
+    """합성 선언이 있으면 `합성 데이터 기준 D-nnn`, 없으면 빈 문자열."""
+    row = conn.q1(SYNTH_DECL)
+    if not row or not row["config_value"]:
+        return ""
+    return f"합성 데이터 기준 {row['config_value']}"
+
+
 # ── 공통 실측 ────────────────────────────────────────────────────────────
 TABLES = sorted(design.tables())            # 정본 함수 (§10-16)
 
@@ -279,6 +296,12 @@ from SHP_LOT_TRACES t
 
 def gate_08() -> None:
     say("── G-08 디지털 스레드 (양방향) · LOT 매핑 성공률 ≥ 85% ──────────")
+    mark = synthetic_note()
+    decl = conn.q1("select DESCRIPTION from SYS_CONFIGS where CONFIG_TYPE = '시스템설정' "
+                   "and CONFIG_KEY = 'SYNTHETIC_THREAD' and USE_YN = 'Y'")
+    say(f"  데이터 출처  {mark or '합성 선언 없음 — SYS_CONFIGS 에 SYNTHETIC_THREAD 가 없다'}")
+    if decl and decl["description"]:
+        say(f"               {decl['description']}")
     broken_fwd = broken_bwd = 0
     measurable = 0
     for label, fwd, bwd, fwd_den, bwd_den in CHAIN:
@@ -304,14 +327,17 @@ def gate_08() -> None:
     if total and linked != declared:
         say(f"  **선언값과 실측이 다르다** — MAPPING_OK_YN 이 실제 연결을 반영하지 않는다")
 
+    # 수치와 합성 고지를 **한 줄에** 싣는다 — 숫자만 떼어 인용되지 못하게 한다.
+    # 임계값(85%)·판정 조건은 그대로다.
+    head = f"{mark} · 표본 {total} · " if mark else ""
     if total == 0:
         verdict("G-08", BLOCKED,
-                f"SHP_LOT_TRACES 0건 · 측정 가능한 사슬 단계 {measurable}/8 — "
+                f"{head}SHP_LOT_TRACES 0건 · 측정 가능한 사슬 단계 {measurable}/8 — "
                 "EST_PROJECTS 0건(D-47·D-56)이 전제라 매핑률 분모가 없다. 0% 도 100% 도 아니다")
     else:
         ok = rate is not None and rate >= THRESHOLD and broken_fwd == 0 and broken_bwd == 0
         verdict("G-08", PASS if ok else FAIL,
-                f"LOT 매핑 {pct_text(rate)} (기준 {THRESHOLD}%) · 사슬 끊김 정방향 {broken_fwd}"
+                f"{head}LOT 매핑 {pct_text(rate)} (기준 {THRESHOLD}%) · 사슬 끊김 정방향 {broken_fwd}"
                 f" · 역방향 {broken_bwd}")
     say()
 
@@ -933,6 +959,10 @@ def main() -> int:
 
     say("경동글로벌텍 제조AI — G-07~G-11 데이터 게이트 (QA2)")
     say("기준: 사업계획서 2.7.4 (정확성·정합성·연계성·LOT 매핑 각 85%) · goal.md §2.2")
+    _mark = synthetic_note()
+    if _mark:
+        say(f"⚠ {_mark} — 이 리포트의 수치는 **합성 데이터로 잰 값**이다. "
+            "성과 실적으로 인용할 수 없다 (goal.md §2.3)")
     say()
     gate_07()
     gate_08()
