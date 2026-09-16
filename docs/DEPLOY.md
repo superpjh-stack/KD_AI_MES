@@ -96,17 +96,28 @@ http://187.52.127.215:8020/dsh/003    → 설비상태 모니터링 (실시간 �
 
 hPanel 방화벽에서 8020 이 열려 있어야 한다. `canon` 이 일치하지 않으면 정본 파일이 이미지에 빠진 것이다.
 
-### 6. 시연 — PLC 시뮬레이터
+### 6. PLC 데이터 자동 생성 — `plc-sim` 사이드카 (D-233)
 
-컨테이너 안에서 돌린다(장비 IP 가 없어 실물은 못 붙는다, D-169). 데이터에는 시뮬레이터 표지가 남는다(D-174).
+도입기업 장비 IP·태그맵이 올 때까지(D-169·D-176) **시뮬레이터 컨테이너가 데이터를 계속 넣는다.**
+`docker-compose.yml` 의 `plc-sim` 서비스 — 앱과 같은 이미지, 앱의 네트워크를 공유(`network_mode: service:app`)해
+`127.0.0.1:8020` 으로 진짜 `POST /api/ingest/plc` 를 보낸다(`--via http` 는 루프백에만 보낸다, D-180).
+기동 순서: 앱 `/health` 대기 → 작업지시 `WO-2017-0002` 를 진행 상태로(시험용 전환, D-226) → 연속 모드.
+
+| 환경변수 | 기본 | 뜻 |
+|---|---|---|
+| `KYUNGDONG_SIM_POLL_SEC` | 5 | 주기(초). 하루 약 17,000주기 → `IF_PLC_SIGNALS` 138k · `DAT_TIMESERIES` 104k · `PRC_EQUIP_SIGNALS` 17k 행 |
+| `KYUNGDONG_SIM_ANOMALY_RATE` | 0.02 | 가동 주기당 알람 에피소드 시작 확률 → 041 알림 |
+| `KYUNGDONG_SIM_FAULT_EVERY` | 0 | N 주기마다 Gateway↔클라우드 단절(버퍼 재전송 시연). 0 = 안 함 |
+| `KYUNGDONG_SIM_WORK_ORDER` | WO-2017-0002 | 신호가 붙는 레이저커팅 작업지시 |
+| `KYUNGDONG_SIM_LOG_EVERY` | 60 | 컨테이너 로그에 N 주기마다 한 줄 |
 
 ```bash
-# Docker Manager → kyungdong-app → Terminal
-python tools/plc_simulator.py --start-work-order WO-2017-0002
-python tools/plc_simulator.py --daemon --via inproc --poll-sec 2 --anomaly-rate 0.05 --fault-every 30
-#   (--via http 는 컨테이너 안에서 자기 자신을 부른다: --base-url http://127.0.0.1:8020)
-python tools/plc_simulator.py --finish-work-order WO-2017-0002
+docker compose -p kyungdong logs -f plc-sim      # 진행 확인
+docker compose -p kyungdong stop plc-sim         # 멈춤 (앱은 그대로) · start 로 재개
 ```
+
+값은 전부 시뮬레이션이다 — `COLLECT_PATH='시뮬레이터(PLC→Gateway)'` 로 남고 화면에 `시뮬레이터 데이터 (D-174)` 배지가 뜬다.
+**실물 PLC 가 붙는 날 이 서비스를 멈추고 시뮬레이터 표지가 붙은 행을 정리한다** — 보존·삭제 정책은 D-17 미확정이라 여기서 정하지 않는다.
 
 ## 프로파일 — dev 로 올렸다. 그 뜻을 알고 써야 한다
 

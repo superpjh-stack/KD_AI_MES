@@ -34,7 +34,8 @@ COPY docs/assumed/ ./docs/assumed/
 COPY docs/cad/ ./docs/cad/
 COPY decisions.md goal.md ./
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY docker/sim-entrypoint.sh /usr/local/bin/sim-entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/sim-entrypoint.sh
 
 # 빠지면 기동이 아니라 화면에서 터진다 — 빌드 때 잡는다.
 RUN test -f docs/design/design.json \

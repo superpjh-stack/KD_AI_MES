@@ -342,9 +342,10 @@ def run_daemon(a, pc, dev: int, base_url: str, path: str) -> int:
         stats["cycles"] += 1
         wo_txt = (f"WO {last_mes['work_order_no']}" if last_mes and last_mes.get("work_order_no")
                   else "작업지시 미매핑")
-        print(f"{t:%H:%M:%S} #{i + 1:<5} {values['RUN_STATUS']:<3} 수량 {values['PRODUCE_QTY']} "
-              f"전류 {float(values['CURRENT_VALUE']):6.2f}A 온도 {float(values['TEMP_VALUE']):5.1f}℃ "
-              f"· {wo_txt}" + (f" · {line}" if line else ""), flush=True)
+        if line or (i % max(1, a.log_every) == 0):
+            print(f"{t:%H:%M:%S} #{i + 1:<5} {values['RUN_STATUS']:<3} 수량 {values['PRODUCE_QTY']} "
+                  f"전류 {float(values['CURRENT_VALUE']):6.2f}A 온도 {float(values['TEMP_VALUE']):5.1f}℃ "
+                  f"· {wo_txt} · 누적 적재 {stats['stored']}" + (f" · {line}" if line else ""), flush=True)
         if a.max_cycles is None or stats["cycles"] < a.max_cycles:
             time.sleep(a.poll_sec)
     st = plcdb.stats(pc)
@@ -412,6 +413,8 @@ def main() -> int:
                    help="시험용: P40 작업지시를 진행 상태로 둔다 + 선언 (D-226)")
     p.add_argument("--finish-work-order", default=None, metavar="WO_NO",
                    help="시험용: 진행으로 뒀던 작업지시를 완료로 되돌리고 선언을 거둔다")
+    p.add_argument("--log-every", type=int, default=1,
+                   help="--daemon 에서 N 주기마다 한 줄만 찍는다 (컨테이너 로그용, 기본 1=매 주기)")
     a = p.parse_args()
     if a.daemon and "--via" not in sys.argv:
         a.via = "http"                     # 연속 모드는 기본이 진짜 HTTP 다 — 장비 인증까지 지난다

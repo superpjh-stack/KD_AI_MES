@@ -29,6 +29,7 @@ services:
 
   app:
     build: .
+    image: kyungdong-app:latest
     container_name: kyungdong-app
     restart: unless-stopped
     depends_on:
@@ -69,6 +70,32 @@ services:
       retries: 5
       # 최초 기동은 스키마 + 시드(표본 40 · CAD 표본 781)까지 한다.
       start_period: 240s
+
+  # ── PLC 시뮬레이터 사이드카 (D-233) — 도입기업 장비 IP 가 올 때까지 데이터를 계속 넣는다.
+  # 앱과 **네트워크 네임스페이스를 공유**한다: `--via http` 는 루프백에만 보내므로(D-180) 127.0.0.1:8020 이어야 한다.
+  # 값은 시뮬레이션이다(COLLECT_PATH 표지 · 화면 배지, D-174). 멈추려면 `docker compose -p kyungdong stop plc-sim`.
+  # 데이터 증가: 5초 주기 = 하루 약 17,000주기 → IF_PLC_SIGNALS 138k행 · DAT_TIMESERIES 104k행 · PRC_EQUIP_SIGNALS 17k행.
+  plc-sim:
+    image: kyungdong-app:latest
+    build: .
+    container_name: kyungdong-plc-sim
+    restart: unless-stopped
+    network_mode: "service:app"
+    depends_on:
+      app:
+        condition: service_healthy
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    environment:
+      KYUNGDONG_PG_DSN: "postgresql://kyungdong:${POSTGRES_PASSWORD}@db:5432/kyungdong_db"
+      KYUNGDONG_ENV: ${KYUNGDONG_ENV:-dev}
+      KYUNGDONG_SIM_WORK_ORDER: ${KYUNGDONG_SIM_WORK_ORDER:-WO-2017-0002}
+      KYUNGDONG_SIM_POLL_SEC: ${KYUNGDONG_SIM_POLL_SEC:-5}
+      KYUNGDONG_SIM_ANOMALY_RATE: ${KYUNGDONG_SIM_ANOMALY_RATE:-0.02}
+      KYUNGDONG_SIM_FAULT_EVERY: ${KYUNGDONG_SIM_FAULT_EVERY:-0}
+      KYUNGDONG_SIM_LOG_EVERY: ${KYUNGDONG_SIM_LOG_EVERY:-60}
+      TZ: Asia/Seoul
+    volumes:
+      - kyungdong-work:/app/work        # PLC 레지스터 파일(장비 메모리) — 재기동해도 미전송분이 남는다
 
 volumes:
   kyungdong-pgdata:
