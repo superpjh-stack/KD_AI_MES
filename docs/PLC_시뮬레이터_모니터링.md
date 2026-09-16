@@ -9,6 +9,15 @@ PLC 쪽을 세워서 수집 전 구간(PLC 레지스터 → Gateway → 수집 A
 
 ## 1. 3분 시연
 
+한 줄로 서버와 시뮬레이터를 **함께** 띄운다 (D-230). Ctrl-C 한 번에 둘 다 내려가고 작업지시도 되돌린다.
+
+```bash
+make demo                                  # 포트 8020 · 2초 주기 · 작업지시 WO-2017-0002
+make demo WO=WO-2017-0009 POLL=1 ANOMALY=0.1 FAULT_EVERY=30
+```
+
+따로 띄우려면:
+
 ```bash
 make run                                   # 터미널 1 — 서버 (포트 8020)
 make plc-wo-start WO=WO-2017-0002          # 터미널 2 — 레이저커팅 작업지시 하나를 진행 상태로 (시험용, D-226)

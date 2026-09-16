@@ -1,6 +1,6 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
-	plc-scan plc-poll plc-status plc-register plc-unregister plc-run plc-wo-start plc-wo-finish check-decisions \
+	plc-scan plc-poll plc-status plc-register plc-unregister plc-run plc-wo-start plc-wo-finish demo check-decisions \
 	run-prod ops-accounts ops-password \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
@@ -68,6 +68,9 @@ plc-register:                   ## 시뮬레이터 장비 IP 등록 + 선언 —
 
 plc-unregister:                 ## 시뮬레이터 IP·선언을 함께 거둔다 → prod 수집은 다시 403 (D-168)
 	uv run python tools/plc_simulator.py --unregister
+
+demo:                           ## 서버 + 시뮬레이터를 함께 띄운다 (D-230) — Ctrl-C 한 번에 둘 다 종료. `make demo WO=… POLL=… ANOMALY=… FAULT_EVERY=…`
+	PORT=$(PORT) WO=$(or $(WO),WO-2017-0002) POLL=$(or $(POLL),2) ANOMALY=$(or $(ANOMALY),0.02) FAULT_EVERY=$(or $(FAULT_EVERY),0) bash tools/demo.sh
 
 plc-run:                        ## 연속 생성 (D-222) — 멈출 때까지 주기마다 PLC→Gateway→수집 API. `make run` 필요. 화면 003·022 가 실시간 갱신
 	uv run python tools/plc_simulator.py --daemon --via http --poll-sec $(or $(POLL),2) \
