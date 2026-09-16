@@ -1,0 +1,43 @@
+{# 근거 문서 1청크 — **읽기 전용**. 인용이 가리키는 실제 본문을 사람이 확인하는 자리다.
+   폐쇄형이라 외부 링크가 없고, `ACCESS_ROLE` 이 막은 문서는 여기까지 오지 못한다(9.2 ⑤). #}
+{% extends "base.html" %}
+{% block title %}근거 문서 #{{ doc.doc_id }} {{ doc.doc_name }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>근거 문서 #{{ doc.doc_id }} — {{ doc.doc_name }}</h1>
+  <div class="meta">
+    AGT_VECTOR_DOCS · 읽기 전용 · <a href="/agt/042">042 사용자 질문이력</a>
+  </div>
+  <p>
+    <span class="badge notice">폐쇄형 — 내부 문서만</span>
+    <span class="badge {{ 'notice' if doc.embedded else 'undetermined' }}">
+      {{ '임베딩 있음 · ' ~ (doc.embed_model or '모델 미기록') if doc.embedded else '임베딩 없음 (D-08) — tsvector_keyword 로 검색됐다' }}</span>
+    {% if doc.access_role %}<span class="badge bad">접근 역할 {{ doc.access_role }}</span>{% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <h2>문서</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>값</th></tr></thead>
+      <tbody>
+        <tr><td>문서명</td><td>{{ doc.doc_name }}</td></tr>
+        <tr><td>문서 구분</td><td>{{ doc.doc_type }}</td></tr>
+        <tr><td>원본 경로</td><td>{{ doc.source_path or '미수집 (D-08)' }}</td></tr>
+        <tr><td>청크 순번</td><td>{{ doc.chunk_seq }}</td></tr>
+        <tr><td>접근 역할</td><td>{{ doc.access_role or '제한 없음' }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>본문</h2>
+  <pre class="src">{{ doc.chunk_text }}</pre>
+  <p class="meta">
+    이 화면은 저장된 청크를 그대로 보여 준다 — 요약하거나 다시 쓰지 않는다.
+    문서 반출은 금지이고 접근은 <code>SYS_ACCESS_LOGS</code> 에 기록된다(9.2 ①).
+  </p>
+</div>
+{% endblock %}

@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "db"))
 import conn                                              # noqa: E402
 from kyungdong.app.util import clock, codes              # noqa: E402
 from kyungdong.cad.archive import PRODUCT_ALIASES        # noqa: E402  (제품군 별칭 정본)
+from kyungdong.cad.quote import is_cost_account          # noqa: E402  (집계/원가계정 판정 정본)
 
 # ─────────────────────────────────────────────────────────────────────────
 # 1. 채번 규칙 — 개발1 이 정하고 공표한다 (goal.md §5 개발1 · interfaces.md §9)
@@ -374,20 +375,37 @@ def seed_customers(admin_id: int | None) -> int:
 
 
 def seed_items(admin_id: int | None) -> tuple[int, dict]:
-    """품목 179종 → `BAS_COMMON_CODES('품목')`. **견적서에 있는 이름만** 쓴다(가설 D-131)."""
+    """품목 179종 → `BAS_COMMON_CODES('품목')`. **견적서에 있는 이름만** 쓴다(가설 D-131).
+
+    명세표에 섞여 들어온 **집계/원가계정 행**(`LABOUR` · `소모 잡비` · `재료비 소계` …)은
+    품목이 아니다 — `cad.quote.is_cost_account()` 가 판정해 `USE_YN='N'` 으로 눕힌다.
+    **지우지 않는다**: `ITEM-nnn` 은 일련번호라 한 건만 빼도 뒤가 전부 밀리고,
+    이미 `INV_RECEIPTS`·`EST_BOM_ITEMS` 가 그 코드를 들고 있다. 드롭다운(`code_options`)은
+    `USE_YN='Y'` 만 읽으므로 화면에서는 사라지고, 기존 참조는 살아 있다. 돌릴 때마다 같은 결과다.
+    """
     items, measured = quote_items()
+    deactivated: list[str] = []
     for i, it in enumerate(items, 1):
+        code = f"ITEM-{i:03d}"
+        cost_account = is_cost_account(it["name"])
+        if cost_account:
+            deactivated.append(f"{code} {it['name']}")
         conn.x(
             "insert into BAS_COMMON_CODES "
             "(CODE_GROUP, CODE_VALUE, CODE_NAME, SORT_ORDER, ATTR1, ATTR2, USE_YN, CREATED_BY, CREATED_DT) "
-            "values ('품목', %s, %s, %s, %s, %s, 'Y', %s, now()) "
+            "values ('품목', %s, %s, %s, %s, %s, %s, %s, now()) "
             "on conflict (CODE_GROUP, CODE_VALUE) do update set "
             "CODE_NAME = excluded.CODE_NAME, SORT_ORDER = excluded.SORT_ORDER, "
-            "ATTR1 = excluded.ATTR1, ATTR2 = excluded.ATTR2, UPDATED_DT = now()",
-            (f"ITEM-{i:03d}", it["name"][:200], i * 10,
-             f"{MARK_HYPO} — 과거 견적서 품목명세 실측(D-118-b). 도입기업 코드체계 미확정",
-             f"견적 {it['rows']}행 · 문서 {len(it['files'])}건", admin_id),
+            "ATTR1 = excluded.ATTR1, ATTR2 = excluded.ATTR2, "
+            "USE_YN = excluded.USE_YN, UPDATED_DT = now()",
+            (code, it["name"][:200], i * 10,
+             (f"{MARK_HYPO} — 견적서 명세표의 집계/원가계정 행이다. 품목이 아니라 사용중지(USE_YN=N)"
+              if cost_account else
+              f"{MARK_HYPO} — 과거 견적서 품목명세 실측(D-118-b). 도입기업 코드체계 미확정"),
+             f"견적 {it['rows']}행 · 문서 {len(it['files'])}건",
+             "N" if cost_account else "Y", admin_id),
         )
+    measured = {**measured, "사용중지(집계·원가계정)": deactivated}
     return len(items), measured
 
 
@@ -598,7 +616,17 @@ def seed_suppliers() -> int:
 
 
 # ── 합성: BOM · 공정구조 · 자재LOT · 입고 · 재고 ─────────────────────────
-def _representative_item(product_group: str, items: list[dict], fallback: int) -> int:
+def _item_pool(items: list[dict]) -> list[int]:
+    """BOM 에 쓸 수 있는 품목의 **원본 인덱스**. 집계/원가계정 행은 자재가 아니라 뺀다.
+
+    코드(`ITEM-nnn`)는 원본 순번 그대로 유지한다 — 빼서 다시 매기면 이미 참조하는
+    `INV_RECEIPTS`·`EST_BOM_ITEMS` 가 조용히 다른 품목을 가리킨다.
+    """
+    return [i for i, it in enumerate(items) if not is_cost_account(it["name"])]
+
+
+def _representative_item(product_group: str, items: list[dict], fallback: int,
+                         pool: list[int]) -> int:
     """BOM 레벨1 대표 품목 — 제품군 별칭이 이름에 들어간 **견적 품목**을 고른다.
 
     **품목명을 지어내지 않는다.** 별칭에 걸리는 것이 없으면(진공건조기·누체필터가 그렇다)
@@ -606,10 +634,10 @@ def _representative_item(product_group: str, items: list[dict], fallback: int) -
     """
     for alias in PRODUCT_ALIASES.get(product_group, ()):  # 정본 별칭표 (cad/archive.py)
         up = alias.upper()
-        for i, it in enumerate(items):
-            if up in it["name"].upper():
+        for i in pool:
+            if up in items[i]["name"].upper():
                 return i
-    return fallback % len(items)
+    return pool[fallback % len(pool)]
 
 
 def seed_boms(admin_id: int | None, pids: dict[str, int],
@@ -619,6 +647,7 @@ def seed_boms(admin_id: int | None, pids: dict[str, int],
     제품LOT 전역 순번은 **(프로젝트번호, BOM번호) 오름차순**이고 `BREAKS` 가 그 순번에 박힌다.
     """
     items, _ = quote_items()
+    pool = _item_pool(items)
     spec = (f"{MARK_SYNTH} — BOM 구성은 견적 품목명을 배분한 것이다. "
             "실제 소요 관계·규격의 원천이 없다(D-05)")
     routing_remark = (f"{MARK_SYNTH} — 사업계획서 1.3 의 10공정 중 제조 7공정을 폈다. "
@@ -680,13 +709,24 @@ def seed_boms(admin_id: int | None, pids: dict[str, int],
         b["bom_id"] = bom_id
 
         # 레벨1 대표 품목 + 레벨2 자재 — **품목 코드는 견적 실측 목록에서만 고른다**
-        top = _representative_item(b["product_group"], items, idx)
+        top = _representative_item(b["product_group"], items, idx, pool)
         chosen = [top]
         for i in range(BOM_SUB_ITEMS):
-            j = (idx * 7 + i * 13 + 1) % len(items)
-            while j in chosen:
-                j = (j + 1) % len(items)
-            chosen.append(j)
+            k = (idx * 7 + i * 13 + 1) % len(pool)
+            while pool[k] in chosen:
+                k = (k + 1) % len(pool)
+            chosen.append(pool[k])
+        # **직전 시드가 고른 품목이 남아 있으면 지운다.** 넣기만 하고 걷어내지 않으면 BOM 이
+        # 11행에서 12·13행으로 불어나고, 한 번 집계/원가계정 행을 골랐던 자국이 그대로 남는다.
+        # 참조는 자기 자신(PARENT_ITEM_ID)뿐이라 먼저 끊고 지운다.
+        keep = [f"ITEM-{j + 1:03d}" for j in chosen]
+        conn.x("update EST_BOM_ITEMS set PARENT_ITEM_ID = null where BOM_ID = %s "
+               "and PARENT_ITEM_ID in (select BOM_ITEM_ID from EST_BOM_ITEMS "
+               "                       where BOM_ID = %s and not (ITEM_CODE = any(%s)))",
+               (bom_id, bom_id, keep))
+        conn.x("delete from EST_BOM_ITEMS where BOM_ID = %s and not (ITEM_CODE = any(%s))",
+               (bom_id, keep))
+
         parent_id = None
         for level, j in enumerate(chosen):
             item_code = f"ITEM-{j + 1:03d}"
@@ -1012,6 +1052,11 @@ def main() -> int:
     print(f"                  집계·원가계정 {item_measured['집계·원가계정으로 제외한 행']}행"
           f"({item_measured['제외한 서로 다른 표기']}표기)은 품목이 아니라 제외했다"
           f" — 근거 docs/cad/quote_items.json")
+    _off = item_measured["사용중지(집계·원가계정)"]
+    print(f"                  제외규칙을 빠져나간 {len(_off)}종은 USE_YN='N' 으로 눕혔다 "
+          f"(코드는 남긴다 — INV_RECEIPTS·EST_BOM_ITEMS 가 참조한다):")
+    for _c in _off:
+        print(f"                    · {_c}")
     print()
     print("【실측】원본 아카이브 폴더 구조 — 지어내지 않았다")
     print(f"  수주 프로젝트     {len(pids)} 건  (파싱된 GD 프로젝트 {pj['실측']['파싱된 프로젝트']}건 중"

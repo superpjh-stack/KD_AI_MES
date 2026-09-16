@@ -1,8 +1,97 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{% from "_macros.html" import csrf_field with context %}
+{#
+  018 검사결과관리 — **검사 합격은 사람이 승인한 결과만 반영한다** (G-24 · TD4-018).
+  · 측정값 없이는 등록되지 않는다. 판정은 기준이 있으면 기준이, 없으면 담당자가 정한다.
+  · 등록 권한(출하물류관리 W)이 없으면 폼을 **잠그고 그 사실을 적는다** (G-28).
+#}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
-{{ kit.listing(current, td3, wired, current.path, mock.grid_columns, rows, empty_note,
-               {}, badges|default([]), notes|default([]), cards|default([])) }}
+{{ kit.head(current, td3, badges) }}
+{{ kit.cards(cards) }}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {'등록': {'type': 'submit', 'form': 'insp-form', 'primary': true}}) }}
+      {{ kit.pager(page, rows|length) }}
+      <p class="d2-note">제품 LOT 을 누르면 024 공정이력조회로 간다 (G-08).</p>
+    </div>
+
+    <div class="card">
+      <h2>검사결과 등록 — 수압·기밀·진공</h2>
+      <form id="insp-form" class="d2-filters d2-pop" method="post" action="{{ current.path }}">{{ csrf_field() }}
+        <input type="hidden" name="back" value="{{ back }}">
+        <div class="d2-f">
+          <label for="i-lot">제품 LOT</label>
+          <select id="i-lot" name="lot_trace_id" required {% if not can_write %}disabled{% endif %}>
+            {% for l in lots %}
+            <option value="{{ l.lot_trace_id }}">{{ l.product_lot_no }} · {{ l.project_no }} · {{ l.product_group }}</option>
+            {% else %}
+            <option value="" disabled selected>검사 대상 제품 LOT 0 건</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="i-type">검사구분</label>
+          <select id="i-type" name="inspect_type" required {% if not can_write %}disabled{% endif %}>
+            {% for code, name in inspect_types.items() %}
+            <option value="{{ code }}">{{ name }} ({{ code }})</option>
+            {% else %}
+            <option value="" disabled selected>검사구분 코드 0건 — 미확정 (D-26)</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="i-std">품질기준</label>
+          <select id="i-std" name="qstd_id" required {% if not can_write %}disabled{% endif %}>
+            {% for s in standards %}
+            <option value="{{ s.qstd_id }}">{{ s.qstd_code }} · {{ s.inspect_item }} · {{ s.product_group }}{% if s.spec_min is not none or s.spec_max is not none %} · 기준 {{ s.spec_min if s.spec_min is not none else '—' }}~{{ s.spec_max if s.spec_max is not none else '—' }}{% endif %}</option>
+            {% else %}
+            <option value="" disabled selected>품질기준 0건 — 미확정 (D-26)</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="i-val">측정값</label>
+          <input id="i-val" name="measured_value" inputmode="decimal" required {% if not can_write %}disabled{% endif %}>
+        </div>
+        <div class="d2-f">
+          <label for="i-uom">단위</label>
+          <input id="i-uom" name="uom" placeholder="기준의 단위를 따른다" {% if not can_write %}disabled{% endif %}>
+        </div>
+        <div class="d2-f">
+          <label for="i-judge">판정 (기준 수치가 없을 때)</label>
+          <select id="i-judge" name="judge_result" {% if not can_write %}disabled{% endif %}>
+            <option value="{{ pass_label }}">{{ pass_label }}</option>
+            <option value="{{ fail_label }}">{{ fail_label }}</option>
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="i-reason">불합격 사유</label>
+          <input id="i-reason" name="reject_reason" {% if not can_write %}disabled{% endif %}>
+        </div>
+        <div class="d2-f">
+          <label for="i-report">성적서 번호</label>
+          <input id="i-report" name="report_no" {% if not can_write %}disabled{% endif %}>
+        </div>
+        <button class="d2-btn pri" type="submit" {% if not can_write %}disabled{% endif %}>등록</button>
+      </form>
+      <p class="d2-note">
+        {% if can_write %}
+        검사자(INSPECTOR_ID)는 <b>지금 로그인한 계정</b>으로 기록된다 — 승인 이력 없는 합격 판정은 결함이다 (G-24).
+        품질기준에 허용 상·하한이 있으면 <b>측정값이 판정을 정한다</b>. 기준 수치가 비어 있으면(D-131) 고른 판정을 기록하되
+        <b>측정값은 그래도 필수</b>다. 불합격이면 사유가 있어야 한다 — 없으면 <b>422</b>.
+        {% else %}
+        현재 역할은 <b>출하물류관리 등록 권한이 없다</b> — 폼이 잠겨 있고, 보내더라도 <b>403</b> 이다 (G-28).
+        {% endif %}
+      </p>
+    </div>
+  </div>
+  {{ kit.side(td3, notes) }}
+</div>
 {% endblock %}

@@ -275,22 +275,36 @@ class QualityKpi:
     shipment_cnt: int
     claim_cnt: int
     claim_rate: float | None       # 클레임 발생률(%)
+    unmeasured_cnt: int = 0        # 측정값(MEASURED_VALUE) 없이 판정만 있는 검사 건수
     official = False
 
     @property
     def note(self) -> str:
         return NOT_OFFICIAL_NOTE
 
+    @property
+    def pass_rate_caveat(self) -> str:
+        """합격률 옆에 붙는 단서 — **측정값 없이 판정만 있는 건수**.
+
+        합격률의 분자·분모에는 들어가지만 그 판정을 뒷받침하는 실측치가 없다. 0건이면
+        단서를 붙이지 않는다 — 없는 경고를 띄우면 있는 경고가 안 읽힌다(§10-14).
+        002 · 044 · 현황판이 **이 한 문장**을 함께 쓴다.
+        """
+        if not self.unmeasured_cnt:
+            return ""
+        return f"측정값 없는 판정 {self.unmeasured_cnt:,}건 포함"
+
 
 def quality(period: str | None = None) -> QualityKpi:
     """검사·실적·클레임 집계. 분모가 0이면 비율은 `None` 이고 화면은 `미수집` 을 낸다."""
     import conn
     ins = conn.q1(
-        "select count(*) as cnt, count(*) filter (where JUDGE_RESULT = '합격') as pass_cnt "
+        "select count(*) as cnt, count(*) filter (where JUDGE_RESULT = '합격') as pass_cnt, "
+        "count(*) filter (where MEASURED_VALUE is null) as unmeasured "
         "from SHP_INSPECTIONS "
         "where (%(period)s::text is null or to_char(INSPECT_DT, 'YYYY-MM') = %(period)s)",
         {"period": period},
-    ) or {"cnt": 0, "pass_cnt": 0}
+    ) or {"cnt": 0, "pass_cnt": 0, "unmeasured": 0}
     perf = conn.q1(
         "select coalesce(sum(GOOD_QTY), 0) as good_qty, coalesce(sum(DEFECT_QTY), 0) as defect_qty "
         "from PRC_PERFORMANCES "
@@ -320,4 +334,5 @@ def quality(period: str | None = None) -> QualityKpi:
         shipment_cnt=int(shp["cnt"] or 0),
         claim_cnt=int(clm["cnt"] or 0),
         claim_rate=ratio_pct(clm["cnt"], shp["cnt"]),
+        unmeasured_cnt=int(ins.get("unmeasured") or 0),
     )

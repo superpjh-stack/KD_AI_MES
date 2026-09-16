@@ -17,9 +17,10 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from .bas import (anchor_label, can_write, code_names, code_options, dt, guard,  # noqa: F401
-                  lot_link, opt_num, paginate, project_link, redirect,
-                  require_fields, screen_page, search_spec, undetermined, val)
+from .bas import (anchor_label, can_act, can_write, code_names, code_options, dt, guard,  # noqa: F401
+                  lot_link, opt_date, opt_datetime, opt_int, opt_num, paginate, project_link,
+                  redirect, require_act, require_fields, screen_page, search_spec,
+                  undetermined, val)
 from ..util import clock, codes, csrf, http
 
 import conn                                              # noqa: E402  (bas 가 db 경로를 넣는다)
@@ -32,10 +33,27 @@ INSPECT_RESULTS = ("합격", "불합격", "보류")
 INPUT_DEVICES = ("스마트패드", "현장POP", "Web")
 SYNC_STATES = ("미전송", "전송", "오류")
 HIST_TYPES = ("입고", "투입", "반출", "반입", "출하")
+VERIFY_RESULTS = ("정합", "오류", "검사 판정 없음", "MTC 미첨부")
 
 # Excel 적재 헤더 — `IF_ERP_RECEIPTS` + `INV_MATERIAL_LOTS` 컬럼에 1:1 로 대응한다.
 EXCEL_COLUMNS = ("ERP전표번호", "품목코드", "재질", "두께mm", "공급처코드", "공급처명",
                  "입고수량", "중량kg", "MTC번호", "입고일시", "검사판정")
+# 선택 열 — 없어도 적재된다. 있으면 `EST_PROJECTS.PROJECT_NO` 로 검증해 디지털 스레드에 잇는다(G-08).
+EXCEL_OPTIONAL = ("프로젝트번호",)
+
+# 집계·재전송·적재는 "POP·패드 입력"(현장 작업자) 범위가 아니다 — 승인 권한 또는 아래 역할만.
+DATA_OPS_ROLES = ("PRODUCTION", "QUALITY", "SYSADMIN")
+
+
+def _project_id(project_no: str | None) -> int | None:
+    """프로젝트(수주)번호 → ID. 주어졌는데 없으면 **422** — 조용히 NULL 로 떨어뜨리지 않는다."""
+    no = (project_no or "").strip()
+    if not no:
+        return None
+    row = conn.q1("select PROJECT_ID from EST_PROJECTS where PROJECT_NO = %s", (no,))
+    if not row:
+        raise http.fail("validation", f"프로젝트(수주)번호 '{no}' 가 EST_PROJECTS 에 없다")
+    return int(row["project_id"])
 
 
 def _opts(values) -> list[dict[str, str]]:
@@ -133,12 +151,12 @@ async def receipt(request: Request):
     scr, td3 = guard(request, sid)
     q = request.query_params
     where, params = ["1=1"], []
-    if q.get("day"):
-        where.append("r.RECEIPT_DT::date = %s"); params.append(q["day"])
+    if opt_date(q, "day"):
+        where.append("r.RECEIPT_DT::date = %s::date"); params.append(opt_date(q, "day"))
     if q.get("no"):
         where.append("r.RECEIPT_NO ilike %s"); params.append(f"%{q['no']}%")
-    if q.get("sup"):
-        where.append("r.SUPPLIER_ID = %s"); params.append(q["sup"])
+    if opt_int(q, "sup") is not None:
+        where.append("r.SUPPLIER_ID = %s"); params.append(opt_int(q, "sup"))
     if q.get("item"):
         where.append("l.ITEM_CODE = %s"); params.append(q["item"])
     if q.get("lot"):
@@ -193,6 +211,8 @@ async def receipt(request: Request):
                     "품목코드·재질은 공통코드에 있는 값만 저장된다(D-32 — 어기면 422). "
                     "MTC(재질성적서) 번호는 입고검사 근거다. 저장은 LOT·입고·재고·이력을 한 트랜잭션으로 쓴다.",
             "fields": [
+                {"label": "프로젝트(수주)번호", "name": "project_no",
+                 "placeholder": "선택 — EST_PROJECTS 에 있는 번호만 (G-08)"},
                 {"label": "공급처", "name": "supplier_id", "required": True, "options": _suppliers()},
                 {"label": "품목코드", "name": "item_code", "required": True, "options": items},
                 {"label": "재질", "name": "material", "options": materials},
@@ -233,16 +253,18 @@ async def receipt_save(request: Request):
     qty = opt_num(f, "receipt_qty")
     if qty is None or qty <= 0:
         raise http.fail("validation", "입고수량은 0보다 커야 한다")
-    if not conn.q1("select 1 as x from INV_SUPPLIERS where SUPPLIER_ID = %s and USE_YN='Y'",
-                   (v["supplier_id"],)):
+    supplier_id = opt_int(f, "supplier_id")
+    if supplier_id is None or not conn.q1(
+            "select 1 as x from INV_SUPPLIERS where SUPPLIER_ID = %s and USE_YN='Y'",
+            (supplier_id,)):
         raise http.fail("validation", f"공급처 {v['supplier_id']} 를 찾을 수 없다")
 
-    raw = (f.get("receipt_dt") or "").strip()
     # 시간 기준일은 앵커다 — `datetime.now()` 를 기본값으로 쓰지 않는다(§10-3).
-    when = datetime.fromisoformat(raw) if raw else clock.anchor()
+    when = opt_datetime(f, "receipt_dt") or clock.anchor()
+    project_id = _project_id(f.get("project_no"))
 
     with conn.tx() as cur:
-        _receive(cur, supplier_id=int(v["supplier_id"]), item_code=v["item_code"],
+        _receive(cur, supplier_id=supplier_id, item_code=v["item_code"], project_id=project_id,
                  material=material, thickness=opt_num(f, "thickness_mm"),
                  weight=opt_num(f, "weight_kg"), qty=qty,
                  mtc_no=(f.get("mtc_no") or "").strip() or None, inspect=inspect,
@@ -264,10 +286,10 @@ async def material_history(request: Request):
         where.append("l.LOT_NO ilike %s"); params.append(f"%{q['lot']}%")
     if q.get("item"):
         where.append("l.ITEM_CODE = %s"); params.append(q["item"])
-    if q.get("from"):
-        where.append("h.EVENT_DT >= %s"); params.append(q["from"])
-    if q.get("to"):
-        where.append("h.EVENT_DT < (%s::date + 1)"); params.append(q["to"])
+    if opt_date(q, "from"):
+        where.append("h.EVENT_DT >= %s::date"); params.append(opt_date(q, "from"))
+    if opt_date(q, "to"):
+        where.append("h.EVENT_DT < (%s::date + 1)"); params.append(opt_date(q, "to"))
     if q.get("kind"):
         where.append("h.HIST_TYPE = %s"); params.append(q["kind"])
     if q.get("proc"):
@@ -332,21 +354,26 @@ def _excel_rows(raw: bytes) -> list[dict[str, Any]]:
     if missing:
         raise http.fail("validation",
                         f"Excel 헤더 누락: {missing} — 필요한 열은 {list(EXCEL_COLUMNS)}")
-    idx = {c: header.index(c) for c in EXCEL_COLUMNS}
+    cols = list(EXCEL_COLUMNS) + [c for c in EXCEL_OPTIONAL if c in header]
+    idx = {c: header.index(c) for c in cols}
     out = []
     for r in rows[1:]:
         if r is None or all(c is None or str(c).strip() == "" for c in r):
             continue
-        out.append({c: (r[idx[c]] if idx[c] < len(r) else None) for c in EXCEL_COLUMNS})
+        out.append({c: (r[idx[c]] if idx[c] < len(r) else None) for c in cols})
     return out
 
 
-def _as_dt(value: Any) -> datetime:
+def _as_dt(value: Any, field: str = "입고일시") -> datetime:
     if isinstance(value, datetime):
         return value
     if value is None or str(value).strip() == "":
         return clock.anchor()             # 기준일은 앵커다 (§10-3)
-    return datetime.fromisoformat(str(value).strip())
+    try:
+        return datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        raise http.fail("validation",
+                        f"{field}: 값 형식이 잘못됐다 (YYYY-MM-DD HH:MM) {value!r}") from None
 
 
 def _as_num(value: Any, field: str) -> float | None:
@@ -364,16 +391,25 @@ async def receipt_data(request: Request):
     scr, td3 = guard(request, sid)
     q = request.query_params
     where, params = ["1=1"], []
-    if q.get("from"):
-        where.append("r.RECEIPT_DT >= %s"); params.append(q["from"])
-    if q.get("to"):
-        where.append("r.RECEIPT_DT < (%s::date + 1)"); params.append(q["to"])
+    if opt_date(q, "from"):
+        where.append("r.RECEIPT_DT >= %s::date"); params.append(opt_date(q, "from"))
+    if opt_date(q, "to"):
+        where.append("r.RECEIPT_DT < (%s::date + 1)"); params.append(opt_date(q, "to"))
     if q.get("no"):
         where.append("r.RECEIPT_NO ilike %s"); params.append(f"%{q['no']}%")
     if q.get("erp"):
         where.append("e.ERP_DOC_NO ilike %s"); params.append(f"%{q['erp']}%")
     if q.get("sync"):
         where.append("r.ERP_SYNC_STATUS = %s"); params.append(q["sync"])
+    # 검증 결과 — 화면의 `verdict()` 와 **같은 순서**로 SQL 이 판정한다(둘이 다르면 필터가 거짓말한다).
+    verify_sql = ("case when e.ERROR_MSG is not null then '오류' "
+                  "     when r.INSPECT_RESULT is null then '검사 판정 없음' "
+                  "     when r.MTC_NO is null or r.MTC_NO = '' then 'MTC 미첨부' "
+                  "     else '정합' end")
+    if q.get("verify"):
+        if q["verify"] not in VERIFY_RESULTS:
+            raise http.fail("validation", f"검증 결과는 {VERIFY_RESULTS} 중 하나다: {q['verify']!r}")
+        where.append(f"{verify_sql} = %s"); params.append(q["verify"])
     cond = " and ".join(where)
     # ERP 연계 이력은 품목·수량·일자로 맞춘다 — 전표번호를 입고에 들고 있지 않기 때문이다(D-07).
     join = ("from INV_RECEIPTS r "
@@ -389,7 +425,7 @@ async def receipt_data(request: Request):
     rows = conn.q(
         f"select r.RECEIPT_NO, r.RECEIPT_QTY, r.ERP_SYNC_STATUS, r.INSPECT_RESULT, r.MTC_NO, "
         f"e.ERP_DOC_NO, e.IF_STATUS, e.ERROR_MSG, e.IF_DT {join} where {cond} "
-        f"order by r.RECEIPT_DT desc limit %s offset %s", [*params, size, off])
+        f"order by r.RECEIPT_DT desc, r.RECEIPT_NO desc limit %s offset %s", [*params, size, off])
 
     def verdict(r) -> Any:
         """검증 결과 — 실측이다. 판정 근거가 없으면 미확정을 낸다."""
@@ -415,26 +451,35 @@ async def receipt_data(request: Request):
                   for i, c in enumerate(checks, 1)]
     if_total = int(conn.q1("select count(*) as n from IF_ERP_RECEIPTS")["n"])
     if_fail = int(conn.q1("select count(*) as n from IF_ERP_RECEIPTS where IF_STATUS='실패'")["n"])
+    ops_ok = can_act(request, sid, DATA_OPS_ROLES)
+
+    # Excel 적재 결과 — POST 가 `?loaded=&failed=` 로 돌려보낸다. 안 읽으면 결과가 사라진다.
+    result_notice = []
+    loaded, failed = opt_int(q, "loaded"), opt_int(q, "failed")
+    if loaded is not None or failed is not None:
+        result_notice.append({"kind": "bad" if (failed or 0) else "notice",
+                              "text": f"Excel 적재 결과 — 적재 {loaded or 0}건 · 실패 {failed or 0}건"
+                                      + (" (실패 사유는 IF_ERP_RECEIPTS 오류 메시지)" if failed else "")})
 
     return screen_page(
         request, sid, _loaded=(scr, td3),
         search=search_spec(td3, request, [
             ("from", "date"), ("no", "text"), ("erp", "text"),
-            ("sync", "text", _opts(SYNC_STATES)), ("verify", "text")]),
+            ("sync", "text", _opts(SYNC_STATES)), ("verify", "text", _opts(VERIFY_RESULTS))]),
         rows=grid, total=total, pager=pager, grid_title="입고 연계",
         empty_notice=http.not_collected("D-07") + " — 입고가 0건이다. 아래 Excel 적재가 정식 입력 경로다.",
         cards=[{"label": "입고", "value": f"{total} 건"},
                {"label": "ERP 연계 이력", "value": f"{if_total} 건"},
                {"label": "연계 실패", "value": f"{if_fail} 건"},
                {"label": "품질검증", "value": f"{len(checks)} 건"}],
-        notices=[{"kind": "bad",
+        notices=result_notice + [{"kind": "bad",
                   "text": "ERP(이카운트) 보유·연계 범위가 사업계획서 안에서 상충한다 (D-07) — "
                           "실 연동은 범위 밖이다. Excel 적재를 정식 입력으로 두고 "
                           "IF_ERP_RECEIPTS 에 이력을 남긴다"}],
         form={
             "title": "Excel 적재 (정식 입력 경로 — D-07)", "action": "/inv/007",
-            "submit": "적재", "upload": True,
-            "note": f"헤더: {' · '.join(EXCEL_COLUMNS)}. "
+            "submit": "적재", "upload": True, "enabled": ops_ok,
+            "note": f"헤더: {' · '.join(EXCEL_COLUMNS)} (선택: {' · '.join(EXCEL_OPTIONAL)}). "
                     "행마다 품목코드·재질을 공통코드로 검증하고(D-32), 성공·실패를 "
                     "IF_ERP_RECEIPTS 에 남긴다. 실패 행은 적재하지 않는다 — 조용히 넘기지 않는다(G-30).",
             "fields": [{"label": "Excel 파일(.xlsx)", "name": "file", "type": "file", "required": True}],
@@ -449,8 +494,10 @@ async def receipt_data(request: Request):
         }],
         disabled_note="'재전송'·'표준화' 는 아래 버튼으로 실행한다. 엑셀 다운로드는 미구현이다(G-30).",
         extra_actions=[
-            {"label": "정합성 검증", "action": "/inv/007", "name": "action", "value": "verify"},
-            {"label": "ERP 재전송", "action": "/inv/007", "name": "action", "value": "resend"},
+            {"label": "정합성 검증", "action": "/inv/007", "name": "action", "value": "verify",
+             "enabled": ops_ok},
+            {"label": "ERP 재전송", "action": "/inv/007", "name": "action", "value": "resend",
+             "enabled": ops_ok},
         ],
     )
 
@@ -462,6 +509,7 @@ async def receipt_data_action(request: Request):
     csrf.require(request, form.get("_csrf"))
     guard(request, sid, write=True)
     action = (form.get("action") or "upload").strip()
+    require_act(request, sid, DATA_OPS_ROLES, f"입고 데이터 {action}")
     user_id = getattr(getattr(request.state, "session", None), "user_id", None)
 
     if action == "verify":
@@ -489,11 +537,21 @@ async def receipt_data_action(request: Request):
         sup_name = str(r["공급처명"] or "").strip()
         erp_no = str(r["ERP전표번호"] or "").strip()
         judge = str(r["검사판정"] or "").strip() or None
-        when = _as_dt(r["입고일시"])
+        when = _as_dt(r["입고일시"], f"{i}행 입고일시")
         qty = _as_num(r["입고수량"], f"{i}행 입고수량")
+        project_no = str(r.get("프로젝트번호") or "").strip()
+        project_id = None
 
         problem = None
-        if not item:
+        if project_no:
+            prow = conn.q1("select PROJECT_ID from EST_PROJECTS where PROJECT_NO = %s", (project_no,))
+            if prow:
+                project_id = int(prow["project_id"])
+            else:
+                problem = f"프로젝트번호 '{project_no}' 가 EST_PROJECTS 에 없다 (G-08)"
+        if problem:
+            pass
+        elif not item:
             problem = "품목코드 누락"
         elif not codes.validate_code("품목", item):
             problem = f"품목코드 '{item}' 가 공통코드 그룹 '품목' 에 없다 (D-32)"
@@ -532,6 +590,7 @@ async def receipt_data_action(request: Request):
                 supplier_id = cur.fetchone()["supplier_id"]
 
             _receive(cur, supplier_id=supplier_id, item_code=item, material=material,
+                     project_id=project_id,
                      thickness=_as_num(r["두께mm"], f"{i}행 두께"),
                      weight=_as_num(r["중량kg"], f"{i}행 중량"), qty=qty,
                      mtc_no=str(r["MTC번호"] or "").strip() or None, inspect=judge,
@@ -611,8 +670,8 @@ async def supplier_quality(request: Request):
     where, params = ["1=1"], []
     if q.get("period"):
         where.append("sq.EVAL_PERIOD = %s"); params.append(q["period"])
-    if q.get("sup"):
-        where.append("sq.SUPPLIER_ID = %s"); params.append(q["sup"])
+    if opt_int(q, "sup") is not None:
+        where.append("sq.SUPPLIER_ID = %s"); params.append(opt_int(q, "sup"))
     if q.get("type"):
         where.append("s.SUPPLY_TYPE = %s"); params.append(q["type"])
     if q.get("grade"):
@@ -676,7 +735,8 @@ async def supplier_quality(request: Request):
             "007 Excel 적재가 유일한 유입 경로다.",
         }],
         disabled_note="'평가산출' 은 아래 버튼으로 실행한다. 리포트·엑셀은 미구현이다(G-30).",
-        extra_actions=[{"label": "평가산출", "action": "/inv/008", "name": "action", "value": "evaluate"}],
+        extra_actions=[{"label": "평가산출", "action": "/inv/008", "name": "action", "value": "evaluate",
+                        "enabled": can_act(request, sid, DATA_OPS_ROLES)}],
     )
 
 
@@ -686,6 +746,7 @@ async def supplier_quality_evaluate(request: Request):
     form = await request.form()
     csrf.require(request, form.get("_csrf"))
     guard(request, sid, write=True)
+    require_act(request, sid, DATA_OPS_ROLES, "공급처 평가산출")
     if (form.get("action") or "evaluate").strip() != "evaluate":
         raise http.fail("validation", "알 수 없는 동작")
 

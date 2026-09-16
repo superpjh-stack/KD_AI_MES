@@ -75,6 +75,26 @@ def _visible_menu(role_code: str) -> list[tuple[str, list[nav.Screen]]]:
     return out
 
 
+def _header_clock() -> dict[str, str]:
+    """헤더의 **현재일시**(TD3 layout_rules 헤더 항목)와 **기준일시**(시드 앵커, §10-3).
+
+    둘은 다른 시계다 — 현재일시는 DB `now()`, 기준일시는 `SYS_CONFIGS` 앵커. 화면 건수를
+    읽는 사람이 "왜 2020년 데이터가 최신인가" 를 헤더에서 바로 알 수 있어야 한다(D-211).
+    DB 를 못 읽으면 `—` 다 — 503 화면 자체는 떠야 하므로 여기서 다시 터뜨리지 않는다.
+    """
+    from .util import clock
+    out = {"now": "—", "anchor": "—"}
+    try:
+        out["now"] = clock.real_now().strftime("%Y-%m-%d %H:%M")
+    except Exception:                # noqa: BLE001 — DB 장애는 G-30 이 503 으로 드러낸다
+        return out
+    try:
+        out["anchor"] = clock.anchor().strftime("%Y-%m-%d %H:%M")
+    except Exception:                # noqa: BLE001 — 앵커 없음은 시드 문제, 헤더는 뜬다
+        pass
+    return out
+
+
 def _followups(request: Request) -> list:
     """이 화면에 걸린 **미비 항목**. 경로로 화면을 찾고 `decisions.md` 에서 읽는다(D-188).
 
@@ -92,7 +112,12 @@ def _followups(request: Request) -> list:
 
 
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
-    role = getattr(request.state, "role_code", None) or "SYSADMIN"
+    # **prod 비인증은 빈 역할("")이고 메뉴가 없다** (D-211). 전에는 `or "SYSADMIN"` 이라
+    # 로그인 화면이 관리자 메뉴 45줄을 통째로 내보냈다 — 인증 전에 화면 지도가 새는 것이다.
+    # `None` 은 미들웨어를 거치지 않은 직접 호출(도구·테스트)이라 dev 기본 역할로 둔다.
+    role = getattr(request.state, "role_code", None)
+    if role is None:
+        role = "SYSADMIN"
     s = settings()
     # 로그인한 계정 (D-206). 운영 화면은 **누가 보고 있는지**와 **나가는 길**이 있어야 한다.
     # 세션이 없으면 `None` 이고, dev 에서는 그 사실을 배지로 드러낸다 — 자동 로그인을
@@ -101,7 +126,9 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
     tpl = _env.get_template(name)
     html = tpl.render(
         request=request,
-        menu=_visible_menu(role),
+        menu=_visible_menu(role) if role else [],
+        is_prod=s.is_prod,
+        header_clock=_header_clock(),
         role=rbac.roles().get(role),
         system_name="경동글로벌텍 제조AI 시스템",
         env=s.env,

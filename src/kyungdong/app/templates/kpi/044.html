@@ -10,6 +10,14 @@
   <p class="d2-note">{{ not_official }}</p>
 </div>
 {{ kit.cards(cards) }}
+{# 집계 기간 — 라우터의 `?period=` 를 받는 입력이 없어 화면에서 기간을 바꿀 수 없었다. #}
+<form class="d2-filters" method="get" action="{{ current.path }}">
+  <div class="d2-f">
+    <label for="k-period">집계 기간</label>
+    <input id="k-period" name="period" value="{{ period }}" placeholder="YYYY-MM · 비우면 전체">
+  </div>
+  <button class="d2-btn pri" type="submit">조회</button>
+</form>
 <div class="d2-wrap">
   <div class="d2-main">
     {{ kit.bars(chart_title, chart, '', empty_note) }}

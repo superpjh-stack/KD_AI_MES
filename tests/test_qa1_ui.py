@@ -177,9 +177,11 @@ def test_버튼_높이_실측을_남긴다():
     lst = (APP_DIR / "templates" / "bas" / "_list.html").read_text()
     assert "min-height:36px" in kit.replace(" ", ""), "개발2 버튼 min-height 가 바뀌었다"
     assert re.search(r"\.d1-btns button\{[^}]*padding:7px 14px", lst), "개발1 버튼 패딩이 바뀌었다"
-    # 좁은 폭 미디어쿼리에 **버튼** 규칙은 없다 — 이 사실을 실측으로 박는다.
-    assert "button" not in media_block(), \
-        "좁은 폭 버튼 규칙이 생겼다 — outputs/qa1-기능계약.md 의 실측을 갱신하라"
+    # 좁은 폭 미디어쿼리의 **버튼** 규칙 — `min-height:44px` 는 정본 수치가 아니라 **가설(D-211)** 이다.
+    # 값이 바뀌면 outputs/qa1-기능계약.md 의 실측도 함께 갱신한다.
+    btn = re.search(r"button\{([^}]*)\}", media_block())
+    assert btn and "min-height:44px" in btn.group(1), \
+        "좁은 폭 버튼 규칙이 바뀌었다 — outputs/qa1-기능계약.md 의 실측을 갱신하라"
 
 
 # ── 계약 ↔ 코드 대조 ────────────────────────────────────────────────────

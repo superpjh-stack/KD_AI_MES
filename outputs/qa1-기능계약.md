@@ -332,7 +332,7 @@ uv run pytest -q tests/test_qa1_ui.py
 
 | 항목 | 사유 |
 |---|---|
-| **터치 단말 버튼 크기** | **정본에 수치 목표가 없다.** TD3 standard_note 3 은 “터치 입력에 맞춘 큰 버튼” 이라고만 적었고 px 를 정하지 않았다. 남의 기준(44px·48dp)을 끌어와 FAIL 을 만들지 않는다(§10-18). **실측만 남긴다** — 개발2 `.d2-btn` `min-height:36px`(padding 8/14, font 13) · 개발1 `.d1-btns button` padding 7/14 + font 14 ⇒ 약 **38px**, `min-height` 없음. **좁은 폭 미디어쿼리에 버튼 규칙이 아예 없다** — 터치 단말에서도 데스크톱과 같은 크기다. 목표치를 착수 시 확정해야 판정할 수 있다. |
+| **터치 단말 버튼 크기** | **정본에 수치 목표가 없다.** TD3 standard_note 3 은 “터치 입력에 맞춘 큰 버튼” 이라고만 적었고 px 를 정하지 않았다. 남의 기준(44px·48dp)을 끌어와 FAIL 을 만들지 않는다(§10-18). **실측만 남긴다** — 개발2 `.d2-btn` `min-height:36px`(padding 8/14, font 13) · 개발1 `.d1-btns button` padding 7/14 + font 14 ⇒ 약 **38px**, `min-height` 없음. ~~좁은 폭 미디어쿼리에 버튼 규칙이 아예 없다~~ → **2026-09-16 갱신(D-211)**: `app.css` 전역 `button{min-height:36px}` · `input,select{min-height:34px}`, 좁은 폭(≤900px)에서 `button{min-height:44px}` · `input,select{min-height:40px}`. **44px 는 정본 수치가 아니라 가설**이다 — 목표치를 착수 시 확정해야 판정할 수 있다는 결론은 그대로다. |
 | **폰 폭 400px 실제 렌더** | **브라우저가 없다.** CSS 를 읽어 판정했고 위 5개 정적 조건은 전부 통과다. 다만 `main.content` 가 세로 플렉스 + `align-items:flex-start` 라 **교차축 폭이 fit-content** 다 — 표가 전부 `.tablewrap` 안이라 이론상 안전하지만 **실제 픽셀은 확인하지 못했다.** 브라우저가 생기면 400px 에서 `document.documentElement.scrollWidth` 를 재야 한다. |
 | **G-빌드 · 게이트 전체 수치** | **QA2 가 동시에 쓰고 있었다**(§10-17). 15:19 측정 중 `db/schema.sql`·`tools/check_{data,ingest}.py`·`tests/test_qa2_*.py` 가 바뀌고 **DB 가 중간에 초기화됐다** — 그 순간 내 RBAC 테스트가 19건 실패했다가 재실행 시 295건 전부 통과했다. 아래 두 값 모두 **참고값**이다. 조용한 창에서 다시 재야 한다. |
 

@@ -332,11 +332,18 @@ def test_G29_권한_거부는_오류로_남는다():
 
 
 def test_G29_감사는_가드_한_곳에서만_부른다():
-    """16화면에 흩뿌리면 한 곳이 빠질 때 통째로 빠진다 — QA3 가 잡은 결함이다(D-97)."""
+    """16화면에 흩뿌리면 한 곳이 빠질 때 통째로 빠진다 — QA3 가 잡은 결함이다(D-97).
+
+    `dsh._audit()` 래퍼가 생겨(쓰기는 커밋 뒤에 남긴다) 호출 지점은 늘었지만 **정본 `audit()`
+    을 부르는 곳은 여전히 한 곳**이다 — 세는 대상을 래퍼가 아니라 `audit()` 자체로 바꾼다.
+    """
     for name in ("dsh", "prc", "shp", "kpi"):
         src = (ROOT / f"src/kyungdong/app/routers/{name}.py").read_text()
-        calls = len(re.findall(r"(?<!def )audit\(request", src))
-        assert calls == (2 if name == "dsh" else 0), f"{name}.py 의 audit() 호출 {calls}"
+        calls = len(re.findall(r"(?<![_\w])audit\(request", src))
+        assert calls == (1 if name == "dsh" else 0), f"{name}.py 의 audit() 호출 {calls}"
+        if name != "dsh":
+            # 다른 모듈은 `dsh` 의 가드·컨텍스트를 거쳐서만 감사를 남긴다.
+            assert "from ..util.audit import" not in src, f"{name}.py 가 감사 모듈을 직접 쓴다"
 
 
 # ── G-26 CSRF (DEF-QA3-001) ────────────────────────────────────────────

@@ -37,6 +37,16 @@
 .d2-btn{font:13px/1.4 inherit;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--fg);cursor:pointer;min-height:36px}
 .d2-btn.pri{background:#1f5fa8;border-color:#1f5fa8;color:#fff;font-weight:600}
 .d2-btn:disabled{color:#98a1ad;background:#f3f5f7;cursor:not-allowed}
+.d2-card a{color:inherit;text-decoration:none}
+.d2-card a:hover .v{text-decoration:underline}
+.d2-range{display:flex;gap:4px;min-width:0}
+.d2-range input{flex:1 1 0;min-width:0}
+.d2-pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut);margin-top:6px}
+.d2-pager a{padding:6px 10px;border:1px solid var(--line);border-radius:6px;text-decoration:none}
+/* 현장POP·스마트패드 터치 입력 — 손가락 목표 48px 이상 */
+.d2-pop input,.d2-pop select{min-height:48px;font-size:16px;padding:8px 10px}
+.d2-pop .d2-btn{min-height:52px;font-size:16px;padding:10px 20px}
+.d2-pop .d2-f{flex:1 1 220px}
 .d2-tabs{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--mut);margin-bottom:6px}
 .d2-tabs span::after{content:" ›";color:#c3c9d2}
 .d2-tabs span:last-child::after{content:""}
@@ -79,7 +89,19 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
     {% set w = wired.get(f) %}
     <div class="d2-f">
       <label for="f-{{ loop.index }}">{{ f }}</label>
-      {% if w %}
+      {% if w and w.options %}
+      <select id="f-{{ loop.index }}" name="{{ w.name }}">
+        <option value="">전체</option>
+        {% for ov, ol in w.options %}<option value="{{ ov }}" {% if ov == w.value %}selected{% endif %}>{{ ol }}</option>{% endfor %}
+      </select>
+      {% elif w and w.to %}
+      <div class="d2-range">
+        <input id="f-{{ loop.index }}" name="{{ w.name }}" value="{{ w.value or '' }}"
+               placeholder="{{ w.hint or '' }}">
+        <input name="{{ w.to.name }}" value="{{ w.to.value or '' }}"
+               placeholder="{{ w.to.hint or '' }}" aria-label="{{ f }} 종료">
+      </div>
+      {% elif w %}
       <input id="f-{{ loop.index }}" name="{{ w.name }}" value="{{ w.value or '' }}"
              placeholder="{{ w.hint or '' }}">
       {% else %}
@@ -101,9 +123,11 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
 <div class="d2-cards">
   {% for c in items %}
   <div class="d2-card {{ 'off' if c.off else '' }}">
+    {% if c.href %}<a href="{{ c.href }}" title="상세 화면으로 이동">{% endif %}
     <span class="k">{{ c.label }}</span>
     <span class="v">{{ c.value }}</span>
     {% if c.sub %}<span class="s">{{ c.sub }}</span>{% endif %}
+    {% if c.href %}</a>{% endif %}
   </div>
   {% endfor %}
 </div>
@@ -149,7 +173,7 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
   <ul class="d2-prog">
     {% for it in items %}
     <li>
-      <div class="lab"><span>{{ it.label }}</span><span>{{ it.text or (it.percent ~ ' %') }}</span></div>
+      <div class="lab"><span>{% if it.href %}<a href="{{ it.href }}">{{ it.label }}</a>{% else %}{{ it.label }}{% endif %}</span><span>{{ it.text or (it.percent ~ ' %') }}</span></div>
       <div class="trk"><div class="fil" style="width:{{ it.percent if it.percent <= 100 else 100 }}%"></div></div>
     </li>
     {% endfor %}
@@ -205,6 +229,16 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
 {% endmacro %}
 
 
+{# ── 페이징 — 총 건수와 쪽 번호를 숨기지 않는다 ───────────────────────── #}
+{% macro pager(p, shown) %}
+<div class="d2-pager">
+  <span>총 <b>{{ '{:,}'.format(p.total) }}</b> 건 · {{ p.page }}/{{ p.pages }} 쪽 · 이 쪽 {{ shown }} 건 (쪽당 {{ p.size }})</span>
+  {% if p.prev %}<a href="{{ p.prev }}">이전</a>{% endif %}
+  {% if p.next %}<a href="{{ p.next }}">다음</a>{% endif %}
+</div>
+{% endmacro %}
+
+
 {# ── 우측 설명 패널 (layout_rules: 화면 목적·처리 절차·연계 ID·체크) ────── #}
 {% macro side(td3, notes=[]) %}
 <aside class="card d2-side">
@@ -227,13 +261,13 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
 {# ── 대시보드 본문 — 001~004 · 043 · 044 가 같은 뼈대를 쓴다 ──────────────
    카드 → 차트 → 진행률 → 우측 설명 패널. 조회 조건은 두지 않는다(현황판과 같은 레이아웃). #}
 {% macro dashboard(current, td3, cards_items, chart_title, chart, list_title, progress_items,
-                   badges=[], empty_note='', notes=[]) %}
+                   badges=[], empty_note='', notes=[], list_empty_note='') %}
 {{ head(current, td3, badges) }}
 {{ cards(cards_items) }}
 <div class="d2-wrap">
   <div class="d2-main">
     {{ bars(chart_title, chart, '', empty_note) }}
-    {{ progress(list_title, progress_items, empty_note) }}
+    {{ progress(list_title, progress_items, list_empty_note or empty_note) }}
   </div>
   {{ side(td3, notes) }}
 </div>
@@ -242,7 +276,7 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
 
 {# ── 목록 화면 본문 — 021~025 · 016~019 · 045 가 같은 뼈대를 쓴다 ────────── #}
 {% macro listing(current, td3, wired, action, columns, rows, empty_note,
-                 buttons_enabled={}, badges=[], notes=[], cards_items=[]) %}
+                 buttons_enabled={}, badges=[], notes=[], cards_items=[], page=none) %}
 {{ head(current, td3, badges) }}
 {% if cards_items %}{{ cards(cards_items) }}{% endif %}
 {{ filters(td3.mockup.search_fields if td3.mockup and td3.mockup.search_fields else [], wired, action) }}
@@ -251,7 +285,8 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="card">
       {{ grid(columns, rows, empty_note) }}
       {{ actions(td3.mockup.buttons if td3.mockup and td3.mockup.buttons else [], buttons_enabled) }}
-      <p class="d2-note">조회 {{ rows|length }} 건 · 열 {{ columns|length }} (TD3 layout_rules 최대 7)</p>
+      {% if page %}{{ pager(page, rows|length) }}{% else %}
+      <p class="d2-note">조회 {{ rows|length }} 건 · 열 {{ columns|length }} (TD3 layout_rules 최대 7)</p>{% endif %}
     </div>
   </div>
   {{ side(td3, notes) }}

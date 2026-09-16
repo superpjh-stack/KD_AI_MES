@@ -12,9 +12,10 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Request
 
-from .bas import (anchor_label, code_names, code_options, dt, guard, paginate,  # noqa: F401
-                  redirect, require_fields, screen_page, search_spec, undetermined, val)
-from .sys import _record_download
+from .bas import (anchor_label, code_names, code_options, dt, guard, opt_date,  # noqa: F401
+                  paginate, redirect, require_fields, screen_page, search_spec,
+                  undetermined, val)
+from .sys import _record_download, download_row_cnt
 from .. import design
 from ..util import clock, csrf, http
 
@@ -66,8 +67,8 @@ async def integration(request: Request):
         where.append("j.JOB_TYPE = %s"); params.append(q["jtype"])
     if q.get("result"):
         where.append("g.RESULT_CODE = %s"); params.append(q["result"])
-    if q.get("from"):
-        where.append("g.START_DT >= %s"); params.append(q["from"])
+    if opt_date(q, "from"):
+        where.append("g.START_DT >= %s::date"); params.append(opt_date(q, "from"))
     cond = " and ".join(where)
     join = ("from DAT_INTEGRATION_JOBS j "
             "join DAT_SOURCES s on s.SOURCE_ID = j.SOURCE_ID "
@@ -217,39 +218,55 @@ async def data_search(request: Request):
     scr, td3 = guard(request, sid)
     q = request.query_params
     kind = q.get("kind") or ""
-    rows: list[list[object]] = []
+    if kind and kind not in DATA_TYPES:
+        raise http.fail("validation", f"데이터 구분은 {DATA_TYPES} 중 하나다: {kind!r}")
+    frm = opt_date(q, "from")
 
+    # **두 원천을 SQL 에서 합친다.** 각각 `limit 100` 을 걸고 파이썬에서 이어 붙이면 그리드가
+    # 200건에서 잘리고 `total` 도 200 을 넘지 못해 **쪽 넘김이 거짓말한다**. UNION ALL 로
+    # 하나의 집합을 만들어 `count(*)` 로 총건수를 세고, `limit/offset` 은 SQL 이 건다.
+    # 정렬 동률은 원천·이름으로 풀어 쪽을 넘겨도 같은 행이 두 번 나오지 않게 한다.
+    parts, params = [], []
     if kind in ("", "시계열"):
         w, p = ["1=1"], []
-        if q.get("from"):
-            w.append("MEASURE_DT >= %s"); p.append(q["from"])
+        if frm:
+            w.append("MEASURE_DT >= %s::date"); p.append(frm)
         if q.get("flag"):
+            if q["flag"] not in QUALITY_FLAGS:
+                raise http.fail("validation", f"품질 플래그는 {QUALITY_FLAGS} 중 하나다: {q['flag']!r}")
             w.append("QUALITY_FLAG = %s"); p.append(q["flag"])
         if q.get("equip"):
             w.append("EQUIP_CODE = %s"); p.append(q["equip"])
-        for r in conn.q(
-                f"select TAG_NAME, EQUIP_CODE, MEASURE_DT, MEASURE_VALUE, UOM, QUALITY_FLAG "
-                f"from DAT_TIMESERIES where {' and '.join(w)} order by MEASURE_DT desc limit 100", p):
-            rows.append(["시계열", undetermined("D-06"), r["tag_name"], r["measure_dt"],
-                         f"{r['measure_value']:,.4f}" if r["measure_value"] is not None
-                         else undetermined("D-06"),
-                         val(r["quality_flag"], "D-06")])
-
+        parts.append("select '시계열' as src, TAG_NAME as name, MEASURE_DT as evt_dt, "
+                     "       to_char(MEASURE_VALUE, 'FM999,999,999,990.0000') as measure, "
+                     "       QUALITY_FLAG as extra "
+                     f"from DAT_TIMESERIES where {' and '.join(w)}")
+        params += p
     if kind in ("", "비정형"):
         w, p = ["1=1"], []
-        if q.get("from"):
-            w.append("INGESTED_DT >= %s"); p.append(q["from"])
-        for r in conn.q(
-                f"select OBJ_TYPE, ORIGIN_FILE_NAME, INGESTED_DT from DAT_LAKE_OBJECTS "
-                f"where {' and '.join(w)} order by INGESTED_DT desc limit 100", p):
-            rows.append(["비정형", undetermined("D-05"), r["origin_file_name"],
-                         r["ingested_dt"], "-", val(r["obj_type"], "D-05")])
+        if frm:
+            w.append("INGESTED_DT >= %s::date"); p.append(frm)
+        parts.append("select '비정형' as src, ORIGIN_FILE_NAME as name, INGESTED_DT as evt_dt, "
+                     "       null as measure, OBJ_TYPE as extra "
+                     f"from DAT_LAKE_OBJECTS where {' and '.join(w)}")
+        params += p
+    # 정형(3번째 구분)은 이 화면의 원천이 아직 없다 — 빈 집합을 만들어 0건으로 정직하게 센다.
+    union = " union all ".join(parts) if parts else (
+        "select null::text as src, null::text as name, null::timestamp as evt_dt, "
+        "null::text as measure, null::text as extra where false")
 
-    rows.sort(key=lambda r: r[3], reverse=True)
-    total = len(rows)
+    total = int(conn.q1(f"select count(*) as n from ({union}) u", params)["n"])
     pager, size, off = paginate(request, total)
-    grid = [[str(off + i), r[1], r[0], r[2], dt(r[3]), r[4], r[5]]
-            for i, r in enumerate(rows[off:off + size], 1)]
+    rows = conn.q(f"select * from ({union}) u "
+                  f"order by evt_dt desc nulls last, src, name limit %s offset %s",
+                  [*params, size, off])
+    grid = [[str(off + i),
+             undetermined("D-06" if r["src"] == "시계열" else "D-05"),
+             r["src"], r["name"], dt(r["evt_dt"]),
+             r["measure"] if r["measure"] is not None else
+             ("-" if r["src"] == "비정형" else undetermined("D-06")),
+             val(r["extra"], "D-06" if r["src"] == "시계열" else "D-05")]
+            for i, r in enumerate(rows, 1)]
 
     ts_total = int(conn.q1("select count(*) as n from DAT_TIMESERIES")["n"])
     lake_total = int(conn.q1("select count(*) as n from DAT_LAKE_OBJECTS")["n"])
@@ -259,8 +276,17 @@ async def data_search(request: Request):
 
     return screen_page(
         request, sid, _loaded=(scr, td3),
+        # 칸 수는 정본 그대로 5개다(줄이지 않는다). 다만 **받지 않는 칸은 받지 않는다고 적는다.**
+        #  · 제품 LOT: `DAT_TIMESERIES`·`DAT_LAKE_OBJECTS` 에 제품 LOT 을 잇는 열이 없다.
+        #    이으려면 SHP_LOT_TRACES(개발2)와 수집 태그 매핑(개발3)이 서야 한다 — D-06 차단.
+        #    렌더만 하고 무시하면 "걸렀는데 안 걸러진" 화면이 된다 → 입력을 막고 사유를 붙인다.
+        #  · 세 번째 칸의 정본 라벨은 '공정' 인데 붙어 있는 선택지는 **설비 코드**다
+        #    (`DAT_TIMESERIES.EQUIP_CODE`). 라벨을 정본대로 두되 무엇을 고르는지 밝힌다.
         search=search_spec(td3, request, [
-            ("lot", "text"), ("from", "date"), ("equip", "text", code_options("설비")),
+            ("lot", "text", {"disabled": "제품 LOT 연결이 서 있지 않다 (D-06)",
+                             "badge": undetermined("D-06")["text"]}),
+            ("from", "date"),
+            ("equip", "text", {"options": code_options("설비"), "label_note": "설비 코드"}),
             ("kind", "text", _opts(DATA_TYPES)), ("flag", "text", _opts(QUALITY_FLAGS))]),
         rows=grid, total=total, pager=pager, grid_title="통합 데이터",
         empty_notice=http.not_collected("D-06") +
@@ -275,7 +301,13 @@ async def data_search(request: Request):
                   "text": "데이터 연계율 목표 85% 이상 (사업계획서 2.7.4 ⓷) — 위 값은 실측이다"},
                  {"kind": "undetermined",
                   "text": "제품 LOT 연결은 SHP_LOT_TRACES(개발2)와 수집 태그 매핑(개발3)이 있어야 "
-                          "성립한다 — 지금은 미확정으로 표시한다 (D-06)"}],
+                          "성립한다 — 지금은 미확정으로 표시한다 (D-06)"},
+                 {"kind": "bad",
+                  "text": "그래서 '제품 LOT 번호' 조회칸은 **입력을 받지 않는다** — 거르지 못하는 "
+                          "칸을 열어 두면 걸렀다고 오해하게 된다 (D-06)"},
+                 {"kind": "notice",
+                  "text": "정본 라벨 '공정' 칸이 고르는 것은 DAT_TIMESERIES.EQUIP_CODE 의 "
+                          "**설비 코드**다 — 라벨 옆에 그대로 밝혀 둔다"}],
         disabled_note="'연계 분석' 은 LOT 연계율 카드가 실측으로 보여준다. 엑셀은 미구현이다(G-30).",
     )
 
@@ -382,8 +414,8 @@ async def downloads(request: Request):
     scr, td3 = guard(request, sid)
     q = request.query_params
     where, params = ["1=1"], []
-    if q.get("from"):
-        where.append("d.DOWNLOAD_DT >= %s"); params.append(q["from"])
+    if opt_date(q, "from"):
+        where.append("d.DOWNLOAD_DT >= %s::date"); params.append(opt_date(q, "from"))
     if q.get("user"):
         where.append("u.LOGIN_ID ilike %s"); params.append(f"%{q['user']}%")
     if q.get("cat"):
@@ -399,7 +431,10 @@ async def downloads(request: Request):
     pager, size, off = paginate(request, total)
     rows = conn.q(
         f"select d.DOWNLOAD_DT, u.LOGIN_ID, d.DATA_CATEGORY, d.FILE_FORMAT, d.ROW_CNT, "
-        f"d.APPROVED_YN {join} where {cond} order by d.DOWNLOAD_DT desc limit %s offset %s",
+        # 같은 초에 여러 건이 들어오면 정렬이 흔들려 쪽을 넘길 때 같은 행이 되풀이된다 —
+        # `DOWNLOAD_ID` 를 2차 키로 박아 순서를 고정한다.
+        f"d.APPROVED_YN {join} where {cond} "
+        f"order by d.DOWNLOAD_DT desc, d.DOWNLOAD_ID desc limit %s offset %s",
         [*params, size, off])
     grid = [[str(off + i), dt(r["download_dt"]), r["login_id"], r["data_category"],
              r["file_format"], val(r["row_cnt"], "D-17"), r["approved_yn"]]
@@ -427,7 +462,8 @@ async def downloads(request: Request):
                   "text": "CAD 도면·견적·BOM·원가 정보는 핵심 지적 자산이다 — "
                           "반출 기준과 권한 통제를 적용한다 (9.2 ① · SF-TD3-036 체크)"},
                  {"kind": "notice",
-                  "text": "권한 없는 역할의 반출은 403 이고 이력도 남지 않는다 (G-28)"}],
+                  "text": "권한 없는 역할의 반출은 403 이다. **거절도 이력을 남긴다** — "
+                          "APPROVED_YN='N' 으로 기록한다 (9.2 ① 접근 로그 · G-28)"}],
         panels=[{
             "title": "역할별 반출 권한 (SYS_ROLE_PERMISSIONS.DOWNLOAD_YN)",
             "columns": ["No", "역할", "업무영역", "조회", "반출"],
@@ -460,5 +496,6 @@ async def downloads_record(request: Request):
         raise http.fail("validation", f"데이터 구분은 {DATA_CATEGORIES} 중 하나다")
     if v["fmt"] not in FILE_FORMATS:
         raise http.fail("validation", f"파일 형식은 {FILE_FORMATS} 중 하나다")
-    _record_download(request, sid, v["category"], v["fmt"], 0)
+    # 반출 건수를 0 으로 적지 않는다 — 통제 기록의 요점은 **얼마나 나갔는가** 다 (9.2 ①).
+    _record_download(request, sid, v["category"], v["fmt"], download_row_cnt(v["category"]))
     return redirect("/dat/036")

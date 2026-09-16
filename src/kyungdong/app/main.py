@@ -15,6 +15,7 @@ from urllib.parse import quote, urlparse
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import design, nav
 from .settings import settings
@@ -87,8 +88,13 @@ async def attach_role(request: Request, call_next):
         return denied
 
     response = await call_next(request)
+    is_static = request.url.path.startswith("/static/")
     for k, v in security.headers().items():
+        if is_static and k == "Cache-Control":
+            continue                  # 정적 CSS 는 캐시해도 된다 — 업무 데이터가 아니다 (D-211)
         response.headers.setdefault(k, v)
+    if is_static:
+        response.headers["Cache-Control"] = "public, max-age=3600"
     if new_csrf_cookie:
         response.set_cookie(csrf.COOKIE, new_csrf_cookie,
                             httponly=True, samesite="lax", secure=settings().is_prod)
@@ -131,9 +137,16 @@ def _login_redirect(request: Request) -> RedirectResponse | None:
     if path.startswith("/api"):
         return None                       # 기계 경로 — 401/403 으로 답한다
     if not _wants_html(request):
-        return None                       # fetch·XHR 은 리다이렉트로 답하지 않는다
+        # fetch·XHR 은 리다이렉트로 답하지 않는다 — 그렇다고 **그냥 열어 주지도 않는다**.
+        # 전에는 여기서 `None` 을 돌려줘 `/board` 처럼 권한 가드를 건너뛰는 경로가
+        # 비인증 non-HTML GET 으로 그대로 렌더됐다(공통 감사 실측, D-211). 401 이 맞다.
+        case = http.BY_KEY["unauthenticated"]
+        return render(request, "_error.html", status_code=case.status, status=case.status,
+                      message=case.message, detail="로그인이 필요하다")
     nxt = path + (("?" + request.url.query) if request.url.query else "")
-    return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
+    # 쿠키는 있는데 세션이 없으면 **만료**다 — 로그인 화면이 그 이유를 말한다(D-211).
+    reason = "&reason=expired" if request.cookies.get(session.COOKIE) else ""
+    return RedirectResponse(f"/login?next={quote(nxt, safe='')}{reason}", status_code=303)
 
 
 def _screen_for(path: str):
@@ -189,17 +202,38 @@ async def health() -> JSONResponse:
 # ── 공통 화면 (td3.common_screens 4종) ───────────────────────────────────
 @app.get("/")
 async def main_screen(request: Request):
+    """메인시안 — TD3 common_screens.common 목업 그대로: **KPI 카드 4종 + 월별 리드타임 추이 +
+    프로젝트 진행률 목록**. 전에는 정본 문장과 개발 수치(화면 45·테이블 68)만 보였다 — 사용자가
+    처음 만나는 화면이 개발자 페이지였다(D-210).
+
+    값은 전부 DB 실측이다. 정본에 산식이 없는 두 칸(납기 위험 · 진행률)은 산식을 화면에 적고
+    `가설` 배지를 단다 — 지어낸 값이 아니라 **지어낸 산식**임을 드러낸다.
+    """
+    from . import home
     chk = design.selfcheck()
     return render(request, "common.html",
                   common=design.common_screens()["common"],
+                  home=home.build(),
                   counts={k: got for k, (got, _w, _o) in chk.items()})
 
 
 @app.get("/login")
 async def login_screen(request: Request):
+    """로그인 화면. **이미 로그인한 세션이면 로그인 상태(비밀번호 변경·로그아웃)를 보여 준다** —
+    전에는 GET 이 항상 빈 로그인 폼을 그려 prod 에서 비밀번호 변경 폼에 닿을 길이 없었다(D-211).
+    유휴 만료로 돌아온 요청(`?reason=expired`)은 그 사실을 알린다."""
     s = settings()
+    sess = getattr(request.state, "session", None)
+    signed_in = None
+    if sess is not None:
+        signed_in = {"login_id": sess.login_id, "role_code": sess.role_code, "sid": sess.sid}
+    notice = ""
+    if request.query_params.get("reason") == "expired":
+        notice = f"세션이 만료됐다 — 유휴 {s.h('SESSION_IDLE_MINUTES').value}분 초과. 다시 로그인한다"
     return render(request, "login.html",
                   common=design.common_screens()["login"],
+                  signed_in=signed_in, notice=notice,
+                  idle_minutes=s.h("SESSION_IDLE_MINUTES"),
                   policy=[s.h(k) for k in ("PASSWORD_MIN_LEN", "PASSWORD_CHANGE_CYCLE_DAYS",
                                            "LOGIN_FAIL_MAX", "SESSION_IDLE_MINUTES")])
 
@@ -260,6 +294,25 @@ async def on_http_error(request: Request, exc: HTTPException):
                   status=exc.status_code,
                   message=d.get("message") or (case.message if case else "오류"),
                   detail=d.get("detail", ""))
+
+
+@app.exception_handler(StarletteHTTPException)
+async def on_routing_error(request: Request, exc: StarletteHTTPException):
+    """라우팅 404·405 — Starlette 가 던지는 **부모** 예외라 위 핸들러가 못 잡았다.
+    실측: `/nope`·`/inv/999` 가 `{"detail":"Not Found"}` JSON 으로 새고 있었다(D-211).
+    기계 경로(`/api/*`)는 JSON 그대로, 화면 경로는 오류 계약 화면으로 낸다."""
+    if request.url.path.startswith("/api"):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    d = exc.detail if isinstance(exc.detail, dict) else {}
+    case = http.BY_KEY.get(d.get("key", ""))
+    message = d.get("message") or (case.message if case else (
+        "요청한 화면이 없다" if exc.status_code == 404 else
+        "허용되지 않는 방법이다" if exc.status_code == 405 else "오류"))
+    detail = d.get("detail", "") or (
+        f"{request.url.path} 는 화면 45·공통 5 어디에도 없다 — 좌측 메뉴에서 고른다"
+        if exc.status_code == 404 else "")
+    return render(request, "_error.html", status_code=exc.status_code,
+                  status=exc.status_code, message=message, detail=detail)
 
 
 @app.exception_handler(Exception)

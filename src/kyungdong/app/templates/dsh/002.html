@@ -3,5 +3,13 @@
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
-{{ kit.dashboard(current, td3, cards, chart_title, chart, list_title, progress, badges, empty_note, notes|default([])) }}
+{{ kit.dashboard(current, td3, cards, chart_title, chart, list_title, progress, badges, empty_note, notes|default([]), list_empty_note|default('')) }}
+<div class="card">
+  <h2>이상 LOT — 불합격 판정이 있는 제품 LOT</h2>
+  {% if bad_lot_list %}
+  <ul class="d2-prog">
+    {% for b in bad_lot_list %}<li><a href="{{ b.href }}">{{ b.lot_no }}</a> · 불합격 {{ b.n }}건 → 024 공정이력조회</li>{% endfor %}
+  </ul>
+  {% else %}<p class="meta">이상 LOT 0 건 — 불합격 판정이 없다 (0건은 정답이다, G-11)</p>{% endif %}
+</div>
 {% endblock %}

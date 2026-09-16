@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -39,14 +40,27 @@ class Answer:
     query_id: int | None = None
     tools_used: list[str] = field(default_factory=list)
     llm_state: llm.LlmState | None = None
+    lookups: list[dict[str, Any]] = field(default_factory=list)
+    context: dict[str, str] = field(default_factory=dict)
 
     @property
     def sources(self) -> list[str]:
+        """**실제로 검색된 문서명만.** 운영 DB 조회는 문서가 아니므로 여기 섞지 않는다."""
         return citations.sources(self.evidence)
 
     @property
+    def db_refs(self) -> list[str]:
+        """화면 조회조건으로 **실제로 조회한** 운영 DB 근거 (TD5 표 + 건수)."""
+        return [f"{o['table']} {o['value']} {o['count']}행" for o in self.lookups]
+
+    @property
     def evidence_line(self) -> str:
-        return citations.evidence_line(self.evidence)
+        """근거줄. **문서 근거가 0건이면 DB 조회를 근거로 승격하지 않는다** (G-22).
+
+        0건 분기의 문구는 `근거: 확인된 자료 없음` 그대로여야 한다 — DB 행이 있다고
+        문서 근거가 생긴 것이 아니다. 조회 결과는 화면의 별도 표로 따로 보인다.
+        """
+        return citations.evidence_line(self.evidence, self.db_refs if self.evidence else ())
 
 
 def resolve_user(role_code: str) -> int | None:
@@ -82,8 +96,32 @@ def _log(question: str, agent_type: str, user_id: int | None, answer_text: str,
     return int(row["query_id"]) if row else None
 
 
+def _lookups(agent_type: str, context: dict[str, str], role_code: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """화면 조회조건(자재 LOT · 제품 LOT · 출하번호) → **실제 도구 호출**.
+
+    빈 칸은 부르지 않는다. 부른 것만 `tools_used` 에 남는다 — 전에는 정의 11종을 통째로
+    적어 "이 도구를 썼다" 가 거짓이었다. 도구가 오류를 내면 **그 사실을 그대로** 싣는다.
+    """
+    out: list[dict[str, Any]] = []
+    used: list[str] = []
+    for spec in tools.CONTEXT_TOOLS.get(agent_type, ()):
+        value = (context.get(spec["key"]) or "").strip()
+        if not value:
+            continue
+        args = {**spec["fixed"], spec["arg"]: value}
+        payload = json.loads(tools.execute(spec["tool"], args,
+                                           agent_type=agent_type, role_code=role_code))
+        used.append(spec["tool"])
+        rows = (payload.get("result") or {}).get(spec["rows"]) or []
+        out.append({"tool": spec["tool"], "label": spec["label"], "value": value,
+                    "table": spec["table"], "rows": rows, "count": len(rows),
+                    "error": payload.get("error", ""),
+                    "note": (payload.get("result") or {}).get("note", "")})
+    return out, used
+
+
 def ask(question: str, *, agent_type: str = "통합", user_id: int | None = None,
-        role_code: str = "") -> Answer:
+        role_code: str = "", context: dict[str, str] | None = None) -> Answer:
     if agent_type not in AGENT_TYPES:
         raise http.fail("validation", f"Agent 구분 어휘 위반: {agent_type!r} (TD5 {AGENT_TYPES})")
     q = (question or "").strip()
@@ -97,6 +135,8 @@ def ask(question: str, *, agent_type: str = "통합", user_id: int | None = None
 
     evidence, mode = retrieval.search(q, agent_type=agent_type, role_code=role_code)
     score = retrieval.confidence(evidence)
+    ctx = {k: v for k, v in (context or {}).items() if v}
+    lookups, used = _lookups(agent_type, ctx, role_code)
     ms = int((time.perf_counter() - started) * 1000)
 
     # ② · ③ 근거가 없거나 임계 미만 — **LLM 을 부르지 않는다**
@@ -108,6 +148,7 @@ def ask(question: str, *, agent_type: str = "통합", user_id: int | None = None
             notice=(f"근거 0건 — {http.NOTICE_RAG_NO_EVIDENCE}" if not evidence
                     else f"신뢰도 {score:.4f} < 임계 {threshold} ({s.h('RAG_CONFIDENCE_MIN').badge})"),
             handover=prompts.HANDOVER_NOTE, llm_state=llm.state(),
+            lookups=lookups, tools_used=used, context=ctx,
         )
         ans.query_id = _log(q, agent_type, user_id, text, evidence, ms, queried_dt)
         return ans
@@ -119,20 +160,32 @@ def ask(question: str, *, agent_type: str = "통합", user_id: int | None = None
         _log(q, agent_type, user_id, f"{st.badge} — {st.reason}", evidence, ms, queried_dt)
         raise http.fail("llm_unconfigured", st.reason)
 
-    context = "\n\n".join(f"[{e.doc_name} #{e.chunk_seq}] {e.chunk_text}" for e in evidence)
-    text = llm.complete(prompts.AGENT_INSTRUCTIONS, q, context)
+    blocks = [f"[{e.doc_name} #{e.chunk_seq}] {e.chunk_text}" for e in evidence]
+    # 화면 조회조건은 **조회한 결과만** 맥락에 넣는다. 값만 넣고 조회하지 않으면
+    # 모델이 그 LOT 를 아는 것처럼 답한다.
+    blocks += [f"[운영 DB {o['table']} · {o['label']} {o['value']}] {o['count']}행: {o['rows']}"
+               for o in lookups]
+    if ctx.get("area"):
+        blocks.append(f"[조회 조건] 대상 업무영역 = {ctx['area']} (검색 범위 표기 — 문서 근거가 아니다)")
+    text = llm.complete(prompts.AGENT_INSTRUCTIONS, q, "\n\n".join(blocks))
     ms = int((time.perf_counter() - started) * 1000)
     ans = Answer(question=q, agent_type=agent_type, text=text, evidence=evidence, mode=mode,
                  confidence=score, threshold=threshold, response_ms=ms, grounded=True,
-                 llm_state=st, tools_used=[t["name"] for t in tools.definitions(agent_type)])
+                 llm_state=st, tools_used=used, lookups=lookups, context=ctx)
     ans.query_id = _log(q, agent_type, user_id, text, evidence, ms, queried_dt)
     return ans
 
 
 # ── 화면 042 사용자 질문이력 ──────────────────────────────────────────────
-def history(*, agent_type: str | None = None, user_id: int | None = None,
-            keyword: str | None = None, limit: int = 50,
-            offset: int = 0) -> list[dict[str, Any]]:
+_HISTORY_SRC = "from AGT_QUERY_LOGS l left join SYS_USERS u on u.USER_ID = l.USER_ID "
+
+FEEDBACK_MIN, FEEDBACK_MAX = 1, 5
+
+
+def _history_where(*, agent_type: str | None = None, user_id: int | None = None,
+                   login_id: str | None = None, keyword: str | None = None,
+                   score: int | None = None, period_sql: str | None = None,
+                   period_params: list[Any] | None = None) -> tuple[str, list[Any]]:
     conds, params = [], []
     if agent_type:
         conds.append("l.AGENT_TYPE = %s")
@@ -140,17 +193,72 @@ def history(*, agent_type: str | None = None, user_id: int | None = None,
     if user_id:
         conds.append("l.USER_ID = %s")
         params.append(user_id)
+    if login_id:
+        conds.append("u.LOGIN_ID ilike %s")
+        params.append(f"%{login_id}%")
     if keyword:
         conds.append("l.QUESTION_TEXT ilike %s")
         params.append(f"%{keyword}%")
-    where = ("where " + " and ".join(conds) + " ") if conds else ""
-    params.append(max(1, min(limit, 200)))
-    params.append(max(0, offset))
+    if score is not None:
+        conds.append("l.FEEDBACK_SCORE = %s")
+        params.append(score)
+    if period_sql:
+        conds.append(period_sql)
+        params += list(period_params or [])
+    return (("where " + " and ".join(conds) + " ") if conds else ""), params
+
+
+def history(*, limit: int = 50, offset: int = 0, **f: Any) -> list[dict[str, Any]]:
+    where, params = _history_where(**f)
     return conn.q(
         "select l.QUERY_ID, l.QUERIED_DT, l.AGENT_TYPE, l.QUESTION_TEXT, l.ANSWER_TEXT, "
         "       l.REF_DOC_IDS, l.RESPONSE_MS, l.FEEDBACK_SCORE, u.LOGIN_ID "
-        "from AGT_QUERY_LOGS l left join SYS_USERS u on u.USER_ID = l.USER_ID "
-        f"{where}order by l.QUERIED_DT desc, l.QUERY_ID desc limit %s offset %s", params)
+        f"{_HISTORY_SRC}{where}order by l.QUERIED_DT desc, l.QUERY_ID desc limit %s offset %s",
+        [*params, max(1, min(limit, 200)), max(0, offset)])
+
+
+def history_count(**f: Any) -> int:
+    where, params = _history_where(**f)
+    row = conn.q1(f"select count(*) as n {_HISTORY_SRC}{where}", params)
+    return int(row["n"]) if row else 0
+
+
+def query_log(query_id: int) -> dict[str, Any] | None:
+    """질의 1건. 화면 042 상세보기가 쓴다."""
+    return conn.q1(
+        "select l.QUERY_ID, l.QUERIED_DT, l.AGENT_TYPE, l.QUESTION_TEXT, l.ANSWER_TEXT, "
+        "       l.REF_DOC_IDS, l.RESPONSE_MS, l.FEEDBACK_SCORE, l.USER_ID, u.LOGIN_ID "
+        f"{_HISTORY_SRC}where l.QUERY_ID = %s", (query_id,))
+
+
+def ref_docs(ref_doc_ids: str | None, role_code: str = "") -> list[dict[str, Any]]:
+    """`REF_DOC_IDS` 에 적힌 **그 문서들**. 검색과 같은 `ACCESS_ROLE` 통제를 지난다.
+
+    기록에 없는 문서를 보태지 않는다 — 근거는 질의 시점에 실제로 읽은 것뿐이다.
+    """
+    ids = [int(x) for x in str(ref_doc_ids or "").split(",") if x.strip().isdigit()]
+    if not ids:
+        return []
+    return conn.q(
+        "select DOC_ID, DOC_TYPE, DOC_NAME, SOURCE_PATH, CHUNK_SEQ, CHUNK_TEXT, ACCESS_ROLE "
+        "from AGT_VECTOR_DOCS where DOC_ID = any(%s) "
+        "  and (ACCESS_ROLE is null or ACCESS_ROLE = %s) order by DOC_ID, CHUNK_SEQ",
+        (ids, role_code or ""))
+
+
+def set_feedback(query_id: int, score: int, user_id: int | None = None) -> int:
+    """`FEEDBACK_SCORE` 를 쓰는 **유일한 경로**. 어휘 밖 점수는 422 (§2.5).
+
+    TD5 에 평가자 컬럼이 없다 — 질의 주인만 자기 질의를 평가한다(D-nn 제안).
+    """
+    if score < FEEDBACK_MIN or score > FEEDBACK_MAX:
+        raise http.fail("validation",
+                        f"사용자 평가는 {FEEDBACK_MIN}~{FEEDBACK_MAX} 점이다: {score}")
+    row = conn.q1("select QUERY_ID from AGT_QUERY_LOGS where QUERY_ID = %s", (query_id,))
+    if row is None:
+        raise http.fail("validation", f"질의 {query_id} 가 없다")
+    return conn.x("update AGT_QUERY_LOGS set FEEDBACK_SCORE = %s where QUERY_ID = %s",
+                  (score, query_id))
 
 
 def history_stats() -> dict[str, Any]:

@@ -376,23 +376,71 @@ def test_승인_권한이_없으면_출하_확정은_403(chain):
     assert r.status_code == 403
 
 
+def _pass_all_three(ltid: int, when) -> None:
+    """수압·기밀·진공 **3종 전부 합격**을 넣는다 — 출하 게이트가 요구하는 최소 상태다(G-24)."""
+    for itype, item, _uom in TEST_ITEMS:
+        qstd = int(conn.q1(
+            "select QSTD_ID from BAS_QUALITY_STANDARDS where QSTD_CODE like %s "
+            "and INSPECT_TYPE = %s order by QSTD_ID limit 1",
+            (QSTD_PREFIX + "%", itype))["qstd_id"])
+        conn.x("insert into SHP_INSPECTIONS (LOT_TRACE_ID, QSTD_ID, INSPECT_ITEM, JUDGE_RESULT, "
+               "INSPECT_DT, CREATED_DT) values (%s,%s,%s,'합격',%s, now())",
+               (ltid, qstd, item, when))
+
+
+def test_검사_3종_중_하나라도_빠지면_출하_등록은_422(chain):
+    """수압만 합격한 LOT 은 출하 대상이 아니다 — **하지 않은 검사**를 통과로 보지 않는다(G-24)."""
+    pid = _project_ids()[0]
+    lot_no = "PLOT-DEV2TEST-PARTIAL"
+    conn.x("insert into SHP_LOT_TRACES (PRODUCT_LOT_NO, PROJECT_ID, CURRENT_PROCESS, "
+           "TRACE_STATUS, MAPPING_OK_YN, CREATED_DT) values (%s,%s,'P80','검사','Y', now()) "
+           "on conflict (PRODUCT_LOT_NO) do nothing", (lot_no, pid))
+    ltid = int(conn.q1("select LOT_TRACE_ID from SHP_LOT_TRACES where PRODUCT_LOT_NO = %s",
+                       (lot_no,))["lot_trace_id"])
+    qstd = int(conn.q1("select QSTD_ID from BAS_QUALITY_STANDARDS where QSTD_CODE like %s "
+                       "and INSPECT_TYPE = 'IT10' order by QSTD_ID limit 1",
+                       (QSTD_PREFIX + "%",))["qstd_id"])
+    conn.x("insert into SHP_INSPECTIONS (LOT_TRACE_ID, QSTD_ID, INSPECT_ITEM, JUDGE_RESULT, "
+           "INSPECT_DT, CREATED_DT) values (%s,%s,'수압시험','합격',%s, now())",
+           (ltid, qstd, chain["anchor"]))
+    try:
+        c = _client("PRODUCTION")
+        r = csrf_post(c, "/shp/016", {"lot_trace_id": ltid, "ship_qty": 1})
+        assert r.status_code == 422, r.text[:400]
+        assert "기밀" in r.text and "진공" in r.text, r.text[:600]
+        # 후보 목록에도 뜨면 안 된다 — 목록과 422 가 갈리면 사용자는 버그로 읽는다
+        assert lot_no not in c.get("/shp/016").text
+
+        # 반대 방향: 3종을 채우면 등록된다
+        _pass_all_three(ltid, chain["anchor"])
+        ok = csrf_post(c, "/shp/016", {"lot_trace_id": ltid, "ship_qty": 2},
+                       follow_redirects=False)
+        assert ok.status_code == 303, ok.text[:400]
+        item = conn.q1("select SHIP_QTY, SHIPMENT_ID from SHP_SHIPMENT_ITEMS "
+                       "where LOT_TRACE_ID = %s", (ltid,))
+        assert int(item["ship_qty"]) == 2, "출하 수량이 폼 값이 아니라 1 로 박혀 있다"
+    finally:
+        conn.x("delete from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s", (ltid,))
+        conn.x("delete from SHP_SHIPMENTS where SHIPMENT_ID not in "
+               "(select SHIPMENT_ID from SHP_SHIPMENT_ITEMS) and PROJECT_ID = %s", (pid,))
+        conn.x("delete from SHP_INSPECTIONS where LOT_TRACE_ID = %s", (ltid,))
+        conn.x("delete from SHP_LOT_TRACES where LOT_TRACE_ID = %s", (ltid,))
+
+
 def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
     """확정 시각이 있어야 LEADTIME_O2D 가 나온다. 승인 이력 없는 확정은 결함이다 (G-24)."""
     pid = _project_ids()[0]
     lot_no = "PLOT-DEV2TEST-OK"
-    qstd = int(conn.q1("select QSTD_ID from BAS_QUALITY_STANDARDS where QSTD_CODE like %s "
-                       "order by QSTD_ID limit 1", (QSTD_PREFIX + "%",))["qstd_id"])
     conn.x("insert into SHP_LOT_TRACES (PRODUCT_LOT_NO, PROJECT_ID, CURRENT_PROCESS, "
            "TRACE_STATUS, MAPPING_OK_YN, CREATED_DT) values (%s,%s,'P90','포장','Y', now()) "
            "on conflict (PRODUCT_LOT_NO) do nothing", (lot_no, pid))
     ltid = int(conn.q1("select LOT_TRACE_ID from SHP_LOT_TRACES where PRODUCT_LOT_NO = %s",
                        (lot_no,))["lot_trace_id"])
-    conn.x("insert into SHP_INSPECTIONS (LOT_TRACE_ID, QSTD_ID, INSPECT_ITEM, JUDGE_RESULT, "
-           "INSPECT_DT, CREATED_DT) values (%s,%s,'수압시험','합격',%s, now())",
-           (ltid, qstd, chain["anchor"]))
+    _pass_all_three(ltid, chain["anchor"])          # 출하 게이트는 3종 전부를 요구한다
     try:
         c = _client("SYSADMIN")
-        r = csrf_post(c, "/shp/016", {"lot_trace_id": ltid}, follow_redirects=False)
+        r = csrf_post(c, "/shp/016", {"lot_trace_id": ltid, "ship_qty": 1},
+                      follow_redirects=False)
         assert r.status_code == 303, r.text[:400]
         sid = int(conn.q1(
             "select SHIPMENT_ID from SHP_SHIPMENT_ITEMS where LOT_TRACE_ID = %s",
@@ -405,10 +453,14 @@ def test_승인하면_출하_확정_시각과_승인자가_남는다(chain):
         assert r.status_code == 303, r.text[:400]
         done = conn.q1("select SHIP_DT, APPROVER_ID, SHIP_STATUS, OTD_YN from SHP_SHIPMENTS "
                        "where SHIPMENT_ID = %s", (sid,))
-        assert done["ship_dt"] == chain["anchor"]         # 시간 앵커 기준 (§10-3)
+        # **확정 시각은 실시각이다** — 앵커는 시드 생성 기준일이지 "지금" 이 아니다(§10-3 · D-213).
+        now = clock.real_now()
+        assert abs((done["ship_dt"] - now).total_seconds()) < 60, (
+            f"확정 시각 {done['ship_dt']} 이 실시각 {now} 과 1분 넘게 벌어졌다 — 앵커를 찍었는가")
         assert done["approver_id"] is not None            # 승인 이력
         assert done["ship_status"] == "완료"
-        assert done["otd_yn"] in ("Y", "N")
+        due = conn.q1("select DUE_DT from SHP_SHIPMENTS where SHIPMENT_ID = %s", (sid,))["due_dt"]
+        assert done["otd_yn"] == ("Y" if (due is None or now.date() <= due) else "N")
 
         # 두 번 확정하면 422
         again = csrf_post(c, "/shp/016/approve", {"shipment_id": sid}, follow_redirects=False)
@@ -435,18 +487,29 @@ def test_N건_경로에서_그리드가_비지_않는다(chain, path, needle):
     assert needle in body, f"{path} 에 {needle} 가 없다"
 
 
-def test_001_공정진행_그리드가_실제_프로젝트를_보여_준다(chain):
-    """001 은 `PROJECT_NO` 오름차순 상위 8건만 그린다 — 시드 프로젝트가 채워지면 테스트
-    프로젝트(`PJT-…`)는 그 8건 밖으로 밀린다. **밀렸다는 사실이 결함이 아니다.**
-    그래서 테스트 전용 번호를 찾지 않고 **화면과 같은 순서로 뽑은 첫 프로젝트**를 확인한다.
+def test_001_공정진행_그리드가_진행중_프로젝트만_보여_준다(chain):
+    """001 '공정 진행률' 은 **진행 중(`PROJECT_STATUS <> '완료'`) 프로젝트**만 그린다 —
+    완료된 것을 진행률에 올리면 항상 100% 가 채워져 화면이 아무것도 말하지 않는다(§10-14).
+    진행 중이 0건이면 '미수집' 이 아니라 **진행 중 0건**이라고 적어야 한다.
     """
     row = conn.q1(
         "select pj.PROJECT_NO from EST_PROJECTS pj "
         "join SHP_LOT_TRACES lt on lt.PROJECT_ID = pj.PROJECT_ID "
         "join PRC_PROCESS_HISTORIES h on h.LOT_TRACE_ID = lt.LOT_TRACE_ID "
+        "where pj.PROJECT_STATUS <> '완료' "
         "group by pj.PROJECT_NO order by pj.PROJECT_NO limit 1")
-    assert row is not None, "공정이력이 이어진 프로젝트가 0건이다 — N건 경로를 못 쟀다"
     body = _client("SYSADMIN").get("/dsh/001").text
-    assert row["project_no"] in body, f"/dsh/001 에 {row['project_no']} 가 없다"
     assert "공정" in body
-    assert '<td class="empty"' not in body or needle in body
+    if row is None:
+        assert "진행 중 프로젝트 0 건" in body, "진행 중 0건인데 그렇게 말하지 않는다"
+        assert "미수집" not in body.split("공정 진행률")[-1][:400]
+    else:
+        assert row["project_no"] in body, f"/dsh/001 에 {row['project_no']} 가 없다"
+    # 완료 프로젝트는 진행률 목록에 오르지 않는다
+    done = conn.q1("select PROJECT_NO from EST_PROJECTS where PROJECT_STATUS = '완료' "
+                   "order by PROJECT_NO limit 1")
+    if done is not None:
+        import re as _re
+        panel = _re.search(r"공정 진행률.*?</ul>|공정 진행률.*?</div>", body, _re.S)
+        assert panel is None or done["project_no"] not in panel.group(0), (
+            f"완료 프로젝트 {done['project_no']} 가 진행률 목록에 있다")

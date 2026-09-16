@@ -749,6 +749,11 @@ def gate_24(client: TestClient) -> None:
         # SHP_SHIPMENTS 에 행을 만드는 경로 — 확정(SHIP_DT·APPROVER_ID)이 아니라 '승인대기' 생성이다.
         ("POST", "/shp/016", {"lot_trace_id": "999999", "plan_dt": ""},
          "출하물류관리", "write"),
+        # SHP_INSPECTIONS 의 유일한 쓰기 경로 — 018 검사결과 등록. 판정은 품질기준이 정하고
+        # 검사자는 로그인 계정이다(G-24). 등록 권한 없는 역할은 403 이어야 한다.
+        ("POST", "/shp/018", {"lot_trace_id": "999999", "inspect_type": "수압시험",
+                              "qstd_id": "999999", "measured_value": "1"},
+         "출하물류관리", "write"),
     ]
     bad: list[str] = []
     for method, path, form, area, kind in probes:

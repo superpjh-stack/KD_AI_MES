@@ -14,6 +14,10 @@
     </table>
   </div>
   <p class="meta">
+    그리드 <b>치수값</b> 칸에는 단위 컬럼이 없다(TD5 <code>DIMENSION_VALUE</code>) —
+    {{ unit_note or '단위 선언이 없다 — 도면 단위를 그대로 읽는다' }}
+  </p>
+  <p class="meta">
     `CONFIRM_YN` 을 바꾸는 코드 경로는 <code>cad.pipeline.review_object()</code> 하나뿐이고,
     <b>{{ area }} 승인 권한이 없으면 403</b> 이다. 현재 역할({{ role.name if role else '-' }})의 승인 권한:
     <b>{{ '있음' if can_approve else '없음' }}</b>.

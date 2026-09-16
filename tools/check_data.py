@@ -863,7 +863,10 @@ def gate_10_simulated() -> bool:
 #
 # 그래서 판정은 **카드 값(`span.v`)** 을 보고 한다. 보조설명(`span.s`)에 '0건' 이 들어 있다는
 # 이유로 비율 카드를 건수 카드로 오인하면 ②·③ 을 거꾸로 잡는다.
-GRID_NOTICE = re.compile(r"(미수집|미확정|미구성|미구현|D-\d+)")
+# 빈 그리드의 문구 — 차단·미확정 표지(미수집·미확정·미구성·미구현·D-nnn) **또는**
+# "0 건 — 사유" 처럼 조회는 됐고 결과가 0 임을 사유와 함께 적은 것(§10-14 · D-221).
+# 0 이 정답인 곳에 '미수집' 을 요구하면 거짓 표시가 된다 — 사유 없는 "0 건" 만은 여전히 조용한 빈칸이다.
+GRID_NOTICE = re.compile(r"(미수집|미확정|미구성|미구현|D-\d+|\b0 ?건 — \S)")
 _TD_EMPTY = re.compile(r'<td[^>]*class="[^"]*\bempty\b[^"]*"[^>]*>(.*?)</td>', re.S | re.I)
 _TBODY = re.compile(r"<tbody>(.*?)</tbody>", re.S | re.I)
 _TR = re.compile(r"<tr\b.*?</tr>", re.S | re.I)

@@ -141,7 +141,11 @@ def test_prod에서는_개발용_역할전환이_안_먹는다():
     settings.cache_clear()
     try:
         r = client.get("/inv/005?as=SYSADMIN")
-        assert r.status_code == 403, "prod 인데 쿼리 한 줄로 관리자 화면이 열렸다"
+        # 미인증 non-HTML 요청은 **401** 이다(D-211) — 전에는 권한 가드까지 내려가 403 이었다.
+        # 어느 쪽이든 화면은 열리지 않는다. 401 이 맞는 이유는 D-204 와 같다: 미인증에 403 을
+        # 주면 "권한이 부족한" 줄 안다.
+        assert r.status_code == 401, "prod 인데 쿼리 한 줄로 관리자 화면이 열렸다"
+        assert "로그인이 필요" in r.text
     finally:
         for k, v in (("KYUNGDONG_ENV", old_env), ("KYUNGDONG_SESSION_SECRET", old_secret)):
             if v is None:

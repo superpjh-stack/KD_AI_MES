@@ -45,15 +45,41 @@ def models(**filters: Any) -> list[dict[str, Any]]:
         f"{where}order by m.MODEL_NAME, m.MODEL_VERSION", params)
 
 
-def train_runs(model_id: int | None = None) -> list[dict[str, Any]]:
-    sql = ("select r.TRAIN_RUN_ID, m.MODEL_NAME, m.MODEL_VERSION, r.START_DT, r.END_DT, "
-           "       r.TRAIN_CNT, r.VALID_CNT, r.TEST_CNT, r.VALID_METRIC, r.OVERFIT_RESULT, r.RUN_STATUS "
-           "from EST_ML_TRAIN_RUNS r join EST_ML_MODELS m on m.MODEL_ID = r.MODEL_ID ")
-    params: list[Any] = []
+_RUN_SRC = ("from EST_ML_TRAIN_RUNS r join EST_ML_MODELS m on m.MODEL_ID = r.MODEL_ID ")
+
+
+def _run_where(model_id: int | None = None, **f: Any) -> tuple[str, list[Any]]:
+    """화면 014 조회조건 → where. **받은 조건은 전부 붙인다** — 받아 놓고 안 쓰지 않는다."""
+    conds, params = [], []
     if model_id:
-        sql += "where r.MODEL_ID = %s "
+        conds.append("r.MODEL_ID = %s")
         params.append(model_id)
-    return conn.q(sql + "order by r.START_DT desc, r.TRAIN_RUN_ID desc limit 100", params)
+    for col, key in (("m.MODEL_NAME", "model_name"), ("m.MODEL_TYPE", "model_type"),
+                     ("m.MODEL_VERSION", "model_version"), ("m.DEPLOY_STATUS", "deploy_status")):
+        v = f.get(key)
+        if v:
+            conds.append(f"{col} = %s")
+            params.append(v)
+    if f.get("period_sql"):
+        conds.append(str(f["period_sql"]))
+        params += list(f.get("period_params") or [])
+    return (("where " + " and ".join(conds) + " ") if conds else ""), params
+
+
+def train_runs(model_id: int | None = None, *, limit: int = 100, offset: int = 0,
+               **f: Any) -> list[dict[str, Any]]:
+    where, params = _run_where(model_id, **f)
+    return conn.q(
+        "select r.TRAIN_RUN_ID, m.MODEL_NAME, m.MODEL_VERSION, r.START_DT, r.END_DT, "
+        "       r.TRAIN_CNT, r.VALID_CNT, r.TEST_CNT, r.VALID_METRIC, r.OVERFIT_RESULT, r.RUN_STATUS "
+        f"{_RUN_SRC}{where}order by r.START_DT desc, r.TRAIN_RUN_ID desc limit %s offset %s",
+        [*params, max(1, min(limit, 200)), max(0, offset)])
+
+
+def train_runs_count(model_id: int | None = None, **f: Any) -> int:
+    where, params = _run_where(model_id, **f)
+    row = conn.q1(f"select count(*) as n {_RUN_SRC}{where}", params)
+    return int(row["n"]) if row else 0
 
 
 def predictions(target_type: str | None = None) -> list[dict[str, Any]]:
@@ -67,9 +93,16 @@ def predictions(target_type: str | None = None) -> list[dict[str, Any]]:
     return conn.q(sql + "order by p.PREDICTED_DT desc, p.PREDICT_ID desc limit 100", params)
 
 
-def shap_factors(*, quote_no: str | None = None, feature_name: str | None = None,
-                 rank_no: int | None = None) -> list[dict[str, Any]]:
-    """`EST_SHAP_FACTORS` 는 `EST_ML_PREDICTIONS`(런타임 전용)를 FK 로 본다 — 예측 없이 행이 없다."""
+_SHAP_SRC = (
+    "from EST_SHAP_FACTORS s "
+    "left join EST_ML_PREDICTIONS p on p.PREDICT_ID = s.PREDICT_ID "
+    "left join EST_QUOTATIONS q on q.QUOTE_ID = p.TARGET_ID and p.TARGET_TYPE = '견적원가' ")
+
+
+def _shap_where(*, quote_no: str | None = None, feature_name: str | None = None,
+                rank_no: int | None = None, target_type: str | None = None,
+                period_sql: str | None = None,
+                period_params: list[Any] | None = None) -> tuple[str, list[Any]]:
     conds, params = [], []
     if feature_name:
         conds.append("s.FEATURE_NAME = %s")
@@ -77,17 +110,32 @@ def shap_factors(*, quote_no: str | None = None, feature_name: str | None = None
     if rank_no:
         conds.append("s.RANK_NO = %s")
         params.append(rank_no)
-    if quote_no:
-        conds.append("q.QUOTE_NO = %s")
-        params.append(quote_no)
-    where = ("where " + " and ".join(conds) + " ") if conds else ""
+    if quote_no:                              # 견적번호는 부분 일치 — 화면 015 조회조건
+        conds.append("q.QUOTE_NO ilike %s")
+        params.append(f"%{quote_no}%")
+    if target_type:
+        conds.append("p.TARGET_TYPE = %s")
+        params.append(target_type)
+    if period_sql:
+        conds.append(period_sql)
+        params += list(period_params or [])
+    return (("where " + " and ".join(conds) + " ") if conds else ""), params
+
+
+def shap_factors(*, limit: int = 100, offset: int = 0, **f: Any) -> list[dict[str, Any]]:
+    """`EST_SHAP_FACTORS` 는 `EST_ML_PREDICTIONS`(런타임 전용)를 FK 로 본다 — 예측 없이 행이 없다."""
+    where, params = _shap_where(**f)
     return conn.q(
         "select s.SHAP_ID, s.PREDICT_ID, q.QUOTE_NO, s.FEATURE_NAME, s.SHAP_VALUE, s.RANK_NO, "
         "       s.IMPACT_DIRECTION, s.EXPERT_MATCH_YN, s.OPTIMIZE_COMMENT "
-        "from EST_SHAP_FACTORS s "
-        "left join EST_ML_PREDICTIONS p on p.PREDICT_ID = s.PREDICT_ID "
-        "left join EST_QUOTATIONS q on q.QUOTE_ID = p.TARGET_ID and p.TARGET_TYPE = '견적원가' "
-        f"{where}order by s.PREDICT_ID desc, s.RANK_NO limit 100", params)
+        f"{_SHAP_SRC}{where}order by s.PREDICT_ID desc, s.RANK_NO limit %s offset %s",
+        [*params, max(1, min(limit, 200)), max(0, offset)])
+
+
+def shap_count(**f: Any) -> int:
+    where, params = _shap_where(**f)
+    row = conn.q1(f"select count(*) as n {_SHAP_SRC}{where}", params)
+    return int(row["n"]) if row else 0
 
 
 def readiness() -> dict[str, Any]:

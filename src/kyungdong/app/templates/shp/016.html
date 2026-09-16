@@ -14,19 +14,35 @@
       {{ kit.grid(mock.grid_columns, rows, empty_note) }}
       {{ kit.actions(mock.buttons, {'등록': {'type': 'submit', 'form': 'ship-form', 'primary': true},
                                     '출하승인': {'type': 'submit', 'form': 'approve-form', 'primary': true}}) }}
-      <p class="d2-note">조회 {{ rows|length }} 건 · 프로젝트번호를 누르면 024 공정이력조회로 간다.</p>
+      {{ kit.pager(page, rows|length) }}
+      <p class="d2-note">프로젝트번호를 누르면 024 공정이력조회로 간다.
+        <b>지연</b>은 저장된 상태가 아니라 파생값이다 — 납기 미준수 확정(OTD_YN=N)이거나 미확정인데 납기일이 지난 건이다.</p>
     </div>
 
     <div class="card">
-      <h2>출하 등록 — 검사 합격 LOT 만 선택할 수 있다</h2>
-      <form id="ship-form" class="d2-filters" method="post" action="{{ current.path }}">{{ csrf_field() }}
+      <h2>출하 등록 — 수압·기밀·진공 세 검사를 모두 합격한 LOT 만 선택할 수 있다</h2>
+      <form id="ship-form" class="d2-filters d2-pop" method="post" action="{{ current.path }}">{{ csrf_field() }}
+        <input type="hidden" name="back" value="{{ back }}">
         <div class="d2-f">
           <label for="s-lot">출하 대상 제품 LOT</label>
           <select id="s-lot" name="lot_trace_id" required>
             {% for c in candidates %}
-            <option value="{{ c.lot_trace_id }}">{{ c.product_lot_no }} · {{ c.project_no }} {{ c.project_name }}</option>
+            <option value="{{ c.lot_trace_id }}" data-customer="{{ c.customer_code }}">{{ c.product_lot_no }} · {{ c.project_no }} {{ c.project_name }}</option>
+            {% else %}
+            <option value="" disabled selected>출하 대상 LOT 0 건</option>
             {% endfor %}
           </select>
+        </div>
+        <div class="d2-f">
+          <label for="s-cust">고객사</label>
+          <select id="s-cust" name="customer_code">
+            <option value="">선택한 LOT 의 프로젝트 고객사</option>
+            {% for c in customers %}<option value="{{ c.code_value }}">{{ c.code_name }} ({{ c.code_value }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="d2-f">
+          <label for="s-qty">출하 수량</label>
+          <input id="s-qty" name="ship_qty" value="1" inputmode="numeric" required>
         </div>
         <div class="d2-f">
           <label for="s-plan">출하 예정일</label>
@@ -34,14 +50,19 @@
         </div>
         <button class="d2-btn pri" type="submit">등록</button>
       </form>
-      {% if not candidates %}
-      <p class="d2-note">출하 대상 LOT 이 <b>0 건</b>이다 — 검사 합격 판정을 받은 미출하 LOT 만 여기에 나온다(G-24).</p>
-      {% endif %}
+      <p class="d2-note">
+        고객사를 비우면 그 제품 LOT 이 속한 <b>프로젝트의 고객사</b>로 등록한다. 다른 고객사를 고르면 <b>422</b> 다 —
+        수주 사슬이 끊기기 때문이다(G-08). 출하 수량은 <b>1 이상의 정수</b>여야 한다.
+        {% if not candidates %}<br>출하 대상 LOT 이 <b>0 건</b>이다 — 수압·기밀·진공
+        {% if inspect_types %}({{ inspect_types.values()|join(' · ') }}){% endif %}
+        판정이 모두 합격인 미출하 LOT 만 여기에 나온다(G-24).{% endif %}
+      </p>
     </div>
 
     <div class="card">
       <h2>출하 확정(승인) — 승인 권한이 필요하다</h2>
-      <form id="approve-form" class="d2-filters" method="post" action="{{ current.path }}/approve">{{ csrf_field() }}
+      <form id="approve-form" class="d2-filters d2-pop" method="post" action="{{ current.path }}/approve">{{ csrf_field() }}
+        <input type="hidden" name="back" value="{{ back }}">
         <div class="d2-f">
           <label for="s-ship">승인 대기 출하</label>
           <select id="s-ship" name="shipment_id" required>
@@ -55,6 +76,7 @@
       <p class="d2-note">
         {% if can_approve %}현재 역할은 <b>승인 권한이 있다</b>.{% else %}현재 역할은 <b>승인 권한이 없다</b> — 확정을 누르면 <b>403</b> 이다 (G-24 · G-28).{% endif %}
         확정 시각(SHIP_DT)과 승인자(APPROVER_ID)를 기록해야 수주출하 리드타임(LEADTIME_O2D)이 산출된다.
+        확정 시각은 <b>실시각</b>(DB now())이다 — 시드 기준일(앵커)이 아니다 (§10-3).
       </p>
     </div>
   </div>

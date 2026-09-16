@@ -45,6 +45,13 @@
       {% endfor %}
     </p>
     <div class="meta">질의 내용은 {{ question_field }} 칸에 넣는다. 질의·응답·근거·응답시간은 AGT_QUERY_LOGS 에 100% 기록된다.</div>
+    {% if context_fields %}
+    <div class="meta">
+      나머지 칸은 <b>운영 DB 조회 조건</b>으로 쓰인다 —
+      {% for c in context_fields %}{{ c.field }}{% if not loop.last %} · {% endif %}{% endfor %}.
+      비워 두면 그 조회를 하지 않는다(빈 칸으로 전체를 훑지 않는다).
+    </div>
+    {% endif %}
   </form>
 </div>
 
@@ -68,7 +75,8 @@
       <thead><tr><th>문서</th><th>구분</th><th>청크</th><th>점수</th><th>본문</th></tr></thead>
       <tbody>
         {% for e in answer.evidence %}
-        <tr><td>{{ e.doc_name }}</td><td>{{ e.doc_type }}</td><td>{{ e.chunk_seq }}</td>
+        <tr><td><a href="/agt/doc/{{ e.doc_id }}">{{ e.doc_name }}</a></td>
+            <td>{{ e.doc_type }}</td><td>{{ e.chunk_seq }}</td>
             <td>{{ '%.4f'|format(e.score) }}</td><td>{{ e.snippet }}</td></tr>
         {% else %}
         <tr><td class="empty" colspan="5">근거 0건 — 검색되지 않은 문서명·조항을 지어내지 않는다</td></tr>
@@ -77,13 +85,37 @@
     </table>
   </div>
   <p class="meta">{{ answer.evidence_line }}</p>
-  <p class="meta">질의이력 기록: {% if answer.query_id %}AGT_QUERY_LOGS #{{ answer.query_id }}{% else %}
+  {% if answer.lookups %}
+  <h2>조회한 운영 데이터 ({{ answer.lookups|length }} 건) — 문서 근거와 구분한다</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>조회조건</th><th>값</th><th>TD5 표</th><th>도구</th><th>건수</th></tr></thead>
+      <tbody>
+        {% for o in answer.lookups %}
+        <tr><td>{{ o.label }}</td><td>{{ o.value }}</td><td>{{ o.table }}</td>
+            <td>{{ o.tool }}</td>
+            <td>{{ o.count }}{% if o.error %} — <span class="badge bad">{{ o.error }}</span>{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    이것은 <b>운영 DB 조회 결과</b>이지 문서 근거가 아니다 — 근거 0건이면 근거줄은
+    그대로 `확인된 자료 없음` 이다. 조회 건수가 0 이면 그 LOT·번호로 나온 행이 없다는 뜻이다.
+  </p>
+  {% endif %}
+  {% if answer.context.area %}
+  <p class="meta">대상 업무영역 조건: <b>{{ answer.context.area }}</b> — 검색 범위 표기이고 문서 근거가 아니다.</p>
+  {% endif %}
+  <p class="meta">실제로 호출한 도구:
+    {{ answer.tools_used|join(' · ') if answer.tools_used else '없음 — 검색만 했다' }}</p>
+  <p class="meta">질의이력 기록: {% if answer.query_id %}<a href="/agt/042/{{ answer.query_id }}">AGT_QUERY_LOGS #{{ answer.query_id }}</a>{% else %}
     기록 실패 — 로그인 사용자를 확인할 수 없다(AGT_QUERY_LOGS.USER_ID 는 NOT NULL FK){% endif %}</p>
 </div>
 {% endif %}
 
 <div class="card">
-  <h2>이 Agent 가 쓰는 도구 (D-20 재배선)</h2>
+  <h2>이 Agent 가 쓸 수 있는 도구 (D-20 재배선) — 정의이고 호출 기록이 아니다</h2>
   <div class="tablewrap">
     <table>
       <thead><tr><th>도구</th><th>TD5 테이블</th></tr></thead>

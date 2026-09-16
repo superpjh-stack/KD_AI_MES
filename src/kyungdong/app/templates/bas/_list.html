@@ -95,6 +95,8 @@
       <div class="d1-cond">
         {% for f in search %}
         <label>{{ f.label }}
+          {# `disabled` 인 칸은 값을 받지 않는다 — name 을 떼서 쿼리에 실리지 않게 한다.
+             사유 배지를 옆에 붙인다. 렌더만 하고 무시하면 화면이 거짓말한다. #}
           {% if f.options is defined %}
           <select name="{{ f.name }}">
             <option value="">전체</option>
@@ -102,9 +104,12 @@
             <option value="{{ o.value }}" {% if o.value == f.value %}selected{% endif %}>{{ o.label }}</option>
             {% endfor %}
           </select>
+          {% elif f.disabled %}
+          <input type="{{ f.type|default('text') }}" value="" disabled title="{{ f.disabled }}">
           {% else %}
           <input type="{{ f.type|default('text') }}" name="{{ f.name }}" value="{{ f.value|default('') }}">
           {% endif %}
+          {% if f.badge %}<span class="badge undetermined">{{ f.badge }}</span>{% endif %}
         </label>
         {% endfor %}
       </div>
@@ -121,10 +126,17 @@
       <form method="post" action="{{ a.action }}" style="display:inline">
         {{ csrf_field() }}
         <input type="hidden" name="{{ a.name }}" value="{{ a.value }}">
-        <button type="submit" {% if not can_write %}disabled{% endif %}>{{ a.label }}</button>
+        {# `a.enabled` 가 False 면 역할 매트릭스 셀이 그 동작까지는 허락하지 않는다는 뜻이다(G-28).
+           서버도 같은 판정으로 403 을 낸다 — 버튼만 잠그고 라우터를 열어 두지 않는다. #}
+        <button type="submit"
+                {% if not can_write or a.enabled is false %}disabled{% endif %}
+                title="{% if a.enabled is false %}{{ a.note|default('이 동작 권한이 없다 (G-28)') }}{% endif %}">{{ a.label }}</button>
       </form>
       {% endfor %}
     </div>
+    {% for a in extra_actions if a.enabled is false %}
+    <p class="d1-note">{{ a.label }} — {{ a.note|default('이 동작 권한이 없다 (G-28)') }}</p>
+    {% endfor %}
     {% endif %}
     {% if disabled_note %}<p class="d1-note">{{ disabled_note }}</p>{% endif %}
   </div>
@@ -135,10 +147,22 @@
     <h2>{{ grid_title|default('목록') }} — {{ total|default(rows|length) }} 건</h2>
     {{ grid(columns, rows, empty_notice) }}
     {% if pager and pager.pages > 1 %}
+    {# 쪽 번호를 전부 그리지 않는다 — /sys/027 은 739쪽이라 앵커 739개가 한 줄에 쏟아졌다.
+       첫 쪽 · 현재 쪽 ±5 · 마지막 쪽만 그린다(최대 13개). 건너뛴 구간은 `…` 로 표시한다. #}
+    {% set lo = [1, pager.page - 5]|max %}
+    {% set hi = [pager.pages, pager.page + 5]|min %}
     <p class="d1-note">
-      {% for p in range(1, pager.pages + 1) %}
+      {% if lo > 1 %}
+        <a href="{{ pager.base }}page=1">1</a>
+        {% if lo > 2 %}…{% endif %}
+      {% endif %}
+      {% for p in range(lo, hi + 1) %}
         {% if p == pager.page %}<b>{{ p }}</b>{% else %}<a href="{{ pager.base }}page={{ p }}">{{ p }}</a>{% endif %}
       {% endfor %}
+      {% if hi < pager.pages %}
+        {% if hi < pager.pages - 1 %}…{% endif %}
+        <a href="{{ pager.base }}page={{ pager.pages }}">{{ pager.pages }}</a>
+      {% endif %}
       · {{ pager.page }}/{{ pager.pages }} 쪽 (쪽당 {{ pager.size }}건)
     </p>
     {% endif %}
@@ -171,10 +195,13 @@
         {% endfor %}
       </div>
       <div class="d1-btns">
-        <button type="submit" {% if not can_write %}disabled{% endif %}>{{ form.submit }}</button>
+        <button type="submit"
+                {% if not can_write or form.enabled is false %}disabled{% endif %}>{{ form.submit }}</button>
       </div>
       {% if not can_write %}
       <p class="d1-note">등록·수정 권한이 없다 — 조회만 가능하다 (G-28).</p>
+      {% elif form.enabled is false %}
+      <p class="d1-note">{{ form.note_forbidden|default('이 동작 권한이 없다 — 역할 매트릭스 셀이 여기까지는 허락하지 않는다 (G-28).') }}</p>
       {% endif %}
       {% if form.note %}<p class="d1-note">{{ form.note }}</p>{% endif %}
     </form>

@@ -62,6 +62,22 @@ ITEM_HEADER = (re.compile(r"^(품명|품\s*명|DESCRIPTION|內驛|내역|품목)
                re.compile(r"^(수량|수\s*량|Q'?TY|數量)"),
                re.compile(r"^(금액|금\s*액|PRICE|AMOUNT|金額)"))
 
+# 명세표 안에 섞여 있는 **집계 행·원가계정 행**. 품목이 아니다 — `BAS_COMMON_CODES('품목')` 에
+# 들어가면 005 입고등록 드롭다운이 "LABOUR"·"소모 잡비" 를 자재로 내놓는다(DEF).
+# **정확일치가 아니라 정규화 패턴이다** — 원본은 `소 계` · `LAB OUR` · `공 과 잡 비 및 이 윤`
+# 처럼 자간을 벌려 적는다. 공백을 전부 떼고 대문자로 올린 뒤 본다.
+NOT_AN_ITEM = re.compile(
+    r"(소계|합계|총계|잡비|경비|관리비|이윤|재보험료|인건비|노무비|"
+    r"LABOU?R|COST|SUBTOTAL|TOTAL|OVERHEAD)", re.I)
+# 머리글 되풀이 행 — 품목명 칸에 머리글이 다시 찍힌 경우.
+_ITEM_HEADER_ECHO = ("DESCRIPTION", "품명", "내역", "품목", "ITEM")
+
+
+def is_cost_account(name: str) -> bool:
+    """이 이름이 품목이 아니라 **집계/원가계정** 이면 True. 공백 무시 · 대소문자 무시."""
+    t = _sq(name).upper()
+    return (not t) or t in _ITEM_HEADER_ECHO or bool(NOT_AN_ITEM.search(t))
+
 # 한자 수사 — 갖은자(대사) 포함. 원본에 壹貳參肆伍陸柒捌玖 와 阡(千)·佰(百)이 섞여 나온다.
 _HAN_DIGIT = {"零": 0, "〇": 0,
               "一": 1, "壹": 1, "壱": 1, "二": 2, "貳": 2, "弐": 2, "三": 3, "參": 3, "叁": 3,
@@ -237,7 +253,7 @@ def _items(sheet, r: int, cells: list[Any], xlrd) -> list[QuoteItem]:
         qty = float(row[c_qty].value) if row[c_qty].ctype == xlrd.XL_CELL_NUMBER else None
         if not name or amt is None:
             continue
-        if _sq(name) in ("DESCRIPTION", "품명", "내역"):   # 영문 부제 행
+        if is_cost_account(name):      # 머리글 되풀이 · 집계/원가계정 행 — 품목이 아니다
             continue
         out.append(QuoteItem(name=name[:200], spec=None, qty=qty, uom=None,
                              unit_price=None, amount=amt))

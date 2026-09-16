@@ -1,0 +1,91 @@
+{# 042 질의 상세 — 질의·응답·**그때 실제로 읽은 근거**와 사용자 평가.
+   근거는 `AGT_QUERY_LOGS.REF_DOC_IDS` 에 적힌 문서뿐이다 — 다시 검색해서 채우지 않는다. #}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field with context %}
+{% block title %}{{ screen.no }} 질의 #{{ log.query_id }} — {{ system_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ screen.no }} {{ screen.name }} — 질의 #{{ log.query_id }}</h1>
+  <div class="meta">
+    {{ screen.area }} · {{ screen.requirement_id }} ↔ {{ screen.id }} ↔ {{ screen.program_id }} ·
+    <a href="/agt/042">목록으로</a>
+  </div>
+  <p>{% for b in badges %}<span class="badge {{ b.kind }}">{{ b.text }}</span> {% endfor %}</p>
+</div>
+
+<div class="card">
+  <h2>질의</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>값</th></tr></thead>
+      <tbody>
+        <tr><td>질의 일시</td><td>{{ log.queried_dt }}</td></tr>
+        <tr><td>사용자</td><td>{{ log.login_id or '-' }}</td></tr>
+        <tr><td>Agent 구분</td><td>{{ log.agent_type }}</td></tr>
+        <tr><td>응답 시간(ms)</td><td>{{ log.response_ms if log.response_ms is not none else '미수집 (D-09)' }}</td></tr>
+        <tr><td>사용자 평가</td><td>{{ log.feedback_score if log.feedback_score is not none else '미수집 (D-09)' }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <pre class="src">{{ log.question_text }}</pre>
+</div>
+
+<div class="card">
+  <h2>응답</h2>
+  <pre class="src">{{ log.answer_text or '미수집 (D-08) — 응답 본문이 기록되지 않았다' }}</pre>
+</div>
+
+<div class="card">
+  <h2>근거 문서 ({{ docs|length }} 건)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>문서</th><th>구분</th><th>원본 경로</th><th>청크</th><th>본문</th></tr></thead>
+      <tbody>
+        {% for d in docs %}
+        <tr>
+          <td><a href="/agt/doc/{{ d.doc_id }}">{{ d.doc_name }}</a></td>
+          <td>{{ d.doc_type }}</td>
+          <td>{{ d.source_path or '미수집 (D-08)' }}</td>
+          <td>{{ d.chunk_seq }}</td>
+          <td>{{ d.chunk_text }}</td>
+        </tr>
+        {% else %}
+        <tr><td class="empty" colspan="5">근거 0건 — 검색되지 않은 문서명·조항을 지어내지 않는다</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if hidden %}
+  <p class="meta">
+    <span class="badge bad">접근 통제</span>
+    이 질의의 근거 중 {{ hidden|length }} 건은 <b>이 역할로 볼 수 없다</b>(ACCESS_ROLE) —
+    문서 번호 {{ hidden|join(', ') }}. 검색과 같은 통제를 상세 화면에도 건다 (9.2 ⑤).
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>사용자 평가 (AGT_QUERY_LOGS.FEEDBACK_SCORE)</h2>
+  {% if can_score %}
+  <form method="post" action="/agt/042/{{ log.query_id }}/feedback">{{ csrf_field() }}
+    <p>
+      <label for="score">평가 점수</label>
+      <select id="score" name="score" required>
+        <option value="">선택</option>
+        {% for s in scores %}
+        <option value="{{ s }}"{% if log.feedback_score == s %} selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">평가 저장</button>
+    </p>
+  </form>
+  {% else %}
+  <p><button type="button" disabled title="AI Agent 통합관리 조회 권한 없음 (G-28)">평가 저장</button></p>
+  {% endif %}
+  <p class="meta">
+    점수는 {{ scores[0] }}~{{ scores[-1] }} 다 — 그 밖의 값은 422 다(§2.5).
+    <b>목표치는 사업계획서에 없다(D-09)</b> — 평균을 목표 달성으로 읽지 않는다.
+    TD5 에 평가자 컬럼이 없어 <b>누가 매겼는지는 `SYS_ACCESS_LOGS` 변경 기록</b>에만 남는다.
+  </p>
+</div>
+{% endblock %}

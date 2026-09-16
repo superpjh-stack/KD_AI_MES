@@ -1,28 +1,155 @@
 {% extends "base.html" %}
 {% block title %}메인 — {{ system_name }}{% endblock %}
 {% block content %}
+{# 메인시안 — TD3 common_screens.common 목업: 상단 KPI 카드 4종 + 중앙 차트 + 우측 프로젝트 진행 목록.
+   차트는 인라인 SVG 다(CSP default-src 'self' — D-50). 미디어쿼리는 app.css 한 곳에만 둔다(§10-13). #}
+<style>
+.hm-cards{display:flex;flex-wrap:wrap;gap:10px}
+.hm-card{flex:1 1 170px;min-width:0;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fff}
+.hm-card .k{font-size:12px;color:var(--mut);display:block}
+.hm-card .v{font-size:24px;font-weight:650;letter-spacing:-.01em;display:block;margin-top:2px;word-break:break-all}
+.hm-card .s{font-size:11px;color:var(--mut);display:block;margin-top:3px}
+.hm-card.off .v{color:var(--mut);font-weight:500;font-size:16px}
+.hm-wrap{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.hm-main{flex:1 1 480px;min-width:0}
+.hm-side{flex:1 1 300px;min-width:0}
+.hm-chart{width:100%;height:auto;display:block}
+.hm-bar{fill:#1f5fa8}
+.hm-axis{stroke:var(--line);stroke-width:1}
+.hm-target{stroke:#b3261e;stroke-width:1;stroke-dasharray:4 3}
+.hm-tick{font-size:9px;fill:#5b6470}
+.hm-val{font-size:9px;fill:#1c2024}
+.hm-prog{list-style:none;margin:0;padding:0}
+.hm-prog li{margin:0 0 9px}
+.hm-prog .lab{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:3px}
+.hm-prog .trk{height:9px;border-radius:5px;background:#eef2f7;overflow:hidden}
+.hm-prog .fil{height:100%;background:#1f5fa8;border-radius:5px}
+.hm-short{display:flex;flex-wrap:wrap;gap:6px}
+.hm-short a{display:inline-block;padding:8px 12px;border:1px solid var(--line);border-radius:6px;text-decoration:none;color:var(--fg);background:#fff;font-size:13px;min-height:36px}
+.hm-short a:hover{background:#eef2f7}
+.hm-eq td.ok{color:#1f7a3a}.hm-eq td.stale{color:var(--bad)}
+</style>
+
 <div class="card">
   <h1>{{ common.name }}</h1>
-  <div class="meta">{{ common.path }}</div>
-  <pre class="src">{{ common['items'] }}</pre>
-  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
+  <div class="meta">{{ common.path }} · 채널 {{ common.channels }} · 기준일시 {{ home.anchor.strftime('%Y-%m-%d %H:%M') }}</div>
+  <p class="meta" style="margin:6px 0 0">{{ common['items'] }}</p>
 </div>
+
+{# ── 상단 KPI 카드 4종 ─────────────────────────────────────────────── #}
 <div class="card">
-  <h2>성과지표 2종 (사업계획서 1.5 확정값 — D-21)</h2>
-  <div class="tablewrap"><table>
-    <thead><tr><th>코드</th><th>지표</th><th>기존</th><th>목표</th><th>개선</th><th>가중치</th><th>산식</th></tr></thead>
-    <tbody>
-      <tr><td>LEADTIME_MFG</td><td>제조 리드타임</td><td>1,320 h</td><td>1,080 h</td><td>−18.2%</td><td>0.5</td><td>작업지시 확정 ~ 포장완료 평균 소요시간</td></tr>
-      <tr><td>LEADTIME_O2D</td><td>수주출하 리드타임</td><td>1,440 h</td><td>1,200 h</td><td>−16.7%</td><td>0.5</td><td>출하시각 − 수주확정시각</td></tr>
-    </tbody>
-  </table></div>
-  <p class="meta">측정근거: 2025년 생산 일지(수주출하는 3개월분). 실적 산출은 개발2 `app/kpi.py` 한 곳에서만 한다.</p>
+  <div class="hm-cards">
+    {% for c in home.cards %}
+    <div class="hm-card{% if c.off %} off{% endif %}">
+      <span class="k">{{ c.label }}{% if c.hyp %} <span class="badge undetermined">가설 ({{ home.decision }})</span>{% endif %}</span>
+      <span class="v">{{ c.value }}</span>
+      <span class="s">{{ c.sub }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="meta" style="margin:8px 0 0">
+    리드타임 2종은 사업계획서 1.5 성과지표와 <b>동일한 산식</b>이다(<code>app/kpi.py</code> 한 곳).
+    {{ home.due_risk_formula }}.
+  </p>
 </div>
+
+<div class="hm-wrap">
+  {# ── 중앙 차트 — 월별 리드타임 추이 ──────────────────────────────── #}
+  <div class="hm-main">
+    <div class="card">
+      <h2 style="margin-top:0">{{ home.chart.title }}</h2>
+      {% set bars = home.chart.bars %}
+      {% if bars %}
+        {% set W = 640 %}{% set H = 200 %}{% set L = 44 %}{% set B = 28 %}
+        {% set vals = bars|map(attribute='value')|list %}
+        {% set vmax = [vals|max, home.chart.base]|max %}
+        {% set n = bars|length %}
+        {% set slot = (W - L - 8) / n %}
+        <svg class="hm-chart" viewBox="0 0 {{ W }} {{ H }}" role="img" aria-label="{{ home.chart.title }}">
+          <line class="hm-axis" x1="{{ L }}" y1="{{ H - B }}" x2="{{ W - 4 }}" y2="{{ H - B }}"/>
+          <line class="hm-axis" x1="{{ L }}" y1="8" x2="{{ L }}" y2="{{ H - B }}"/>
+          {% set ty = 8 + (H - B - 8) * (1 - home.chart.target / vmax) %}
+          <line class="hm-target" x1="{{ L }}" y1="{{ ty }}" x2="{{ W - 4 }}" y2="{{ ty }}"/>
+          <text class="hm-tick" x="{{ L + 2 }}" y="{{ ty - 3 }}">목표 {{ '%.0f'|format(home.chart.target) }} h</text>
+          {% for b in bars %}
+            {% set bh = (H - B - 8) * (b.value / vmax) %}
+            {% set x = L + loop.index0 * slot + slot * 0.15 %}
+            <rect class="hm-bar" x="{{ x }}" y="{{ H - B - bh }}" width="{{ slot * 0.7 }}" height="{{ bh }}"/>
+            <text class="hm-val" x="{{ x + slot * 0.35 }}" y="{{ H - B - bh - 3 }}" text-anchor="middle">{{ '%.0f'|format(b.value) }}</text>
+            <text class="hm-tick" x="{{ x + slot * 0.35 }}" y="{{ H - B + 12 }}" text-anchor="middle">{{ b.label }}</text>
+          {% endfor %}
+        </svg>
+        <p class="meta">막대 = 그 달에 포장완료된 작업지시의 평균 제조 리드타임(h) · 표본 {{ bars|map(attribute='n')|sum }} 건 · 최근 {{ n }}개월(표본 있는 달만). 점선 = 목표.</p>
+      {% else %}
+        <p class="meta">미수집 — 포장완료 표본 0건. 작업지시 확정~포장완료가 기록되면 여기에 쌓인다.</p>
+      {% endif %}
+    </div>
+
+    {# ── 설비 가동 상태 — 수집 지점 2개소 범위 (D-06) ─────────────────── #}
+    <div class="card">
+      <h2 style="margin-top:0">설비 가동 상태 <span class="badge notice">수집 지점 2개소 — D-06</span></h2>
+      {% set eq = home.equipment %}
+      {% if eq.devices %}
+      <div class="tablewrap"><table class="hm-eq">
+        <thead><tr><th>수집 지점</th><th>구분</th><th>프로토콜</th><th>마지막 수집시각</th><th>상태</th><th>신호 건수</th></tr></thead>
+        <tbody>
+        {% for d in eq.devices %}
+        <tr>
+          <td>{{ d.device_name }}</td><td>{{ d.device_type }}</td><td>{{ d.protocol }}</td>
+          <td>{{ d.last_collect_dt.strftime('%Y-%m-%d %H:%M:%S') if d.last_collect_dt else '—' }}</td>
+          <td class="{{ 'stale' if d.stale else 'ok' }}">{{ d.notice if d.notice else '수집 중' }}</td>
+          <td>{{ '{:,}'.format(d.signal_cnt) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      <p class="meta">기준 {{ eq.checked_at.strftime('%Y-%m-%d %H:%M:%S') }} · 중단 판정 임계 {{ eq.stale_sec }}초 {{ eq.stale_badge }} · Gateway 버퍼 대기 {{ eq.buffer_pending }} 건. 갱신 실패 시 마지막 수집시각을 그대로 둔다. 상세는 <a href="/dsh/003">003 설비상태 모니터링</a>.</p>
+      {% else %}
+      <p class="meta">미수집 (D-06) — 수집 장비가 등록되지 않았다. <a href="/sys/029">029 시스템 설정</a>에서 PLC·현장POP 를 등록한다.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── 우측 프로젝트 진행 목록 ──────────────────────────────────────── #}
+  <div class="hm-side">
+    <div class="card">
+      <h2 style="margin-top:0">프로젝트 진행률 <span class="badge undetermined">가설 ({{ home.decision }})</span></h2>
+      {% if home.progress %}
+      <ul class="hm-prog">
+        {% for p in home.progress %}
+        <li>
+          <div class="lab">
+            <span><a href="/prc/024?project={{ p.project_no }}">{{ p.project_no }}</a> {{ p.name }}
+              <span class="badge {{ 'notice' if p.status == '완료' else 'undetermined' }}">{{ p.status }}</span></span>
+            <span>{% if p.percent is not none %}{{ p.percent }} % ({{ p.done }}/{{ p.total }}){% else %}작업지시 없음{% endif %}</span>
+          </div>
+          <div class="trk"><div class="fil" style="width:{{ p.percent or 0 }}%"></div></div>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="meta">{{ home.progress_formula }}. 진행 중 프로젝트를 먼저, 완료는 납기 역순. 프로젝트번호를 누르면 024 공정이력조회(디지털 스레드)로 간다.</p>
+      {% else %}
+      <p class="meta">미수집 — 등록된 프로젝트가 0건이다. <a href="/est/010">010 CAD 도면분석</a>에서 시작한다.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">바로가기</h2>
+      <div class="hm-short">
+        {% for shortcut, screens in menu %}{% if screens %}
+          <a href="{{ screens[0].path }}">{{ shortcut }} · {{ screens[0].no }} {{ screens[0].name }}</a>
+        {% endif %}{% endfor %}
+      </div>
+      <p class="meta">권한이 있는 업무영역만 보인다(G-28). 각 영역의 첫 화면으로 간다.</p>
+    </div>
+  </div>
+</div>
+
 <div class="card">
-  <h2>화면 현황</h2>
-  <p>업무영역 <b>{{ counts.areas }}</b> · 화면 <b>{{ counts.screens }}</b> · 프로그램 <b>{{ counts.programs }}</b> ·
-     테이블 <b>{{ counts.tables }}</b> · 컬럼 <b>{{ counts.columns }}</b> ·
-     요구사항 기능 <b>{{ counts.functional }}</b> + 비기능 <b>{{ counts.nonfunctional }}</b></p>
-  <p class="meta">이 숫자가 goal.md 표와 다르면 정본이 바뀐 것이다 — 발견자가 decisions.md 에 적는다(§0.2).</p>
+  <h2 style="margin-top:0">검토 사항</h2>
+  <p class="meta">{{ common.checks }}</p>
+  <p class="meta">정본 규모 — 업무영역 {{ counts.areas }} · 화면 {{ counts.screens }} · 프로그램 {{ counts.programs }} ·
+     테이블 {{ counts.tables }} · 컬럼 {{ counts.columns }} · 요구사항 기능 {{ counts.functional }} + 비기능 {{ counts.nonfunctional }}
+     (goal.md 표와 다르면 정본이 바뀐 것이다 — decisions.md 에 적는다).</p>
 </div>
 {% endblock %}

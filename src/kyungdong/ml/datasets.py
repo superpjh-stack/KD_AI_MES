@@ -19,7 +19,7 @@ RULE_STAGES = ("필터링", "변환", "정제", "통합", "축소")
 SOURCE_TYPES = ("CAD도면", "견적이력", "공정실적")
 
 
-def datasets(**f: Any) -> list[dict[str, Any]]:
+def _dataset_where(**f: Any) -> tuple[str, list[Any]]:
     conds, params = [], []
     for col, key in (("DATASET_NAME", "dataset_name"), ("TARGET_MODEL", "target_model"),
                      ("DATASET_VERSION", "dataset_version"), ("DATASET_STATUS", "dataset_status")):
@@ -27,13 +27,27 @@ def datasets(**f: Any) -> list[dict[str, Any]]:
         if v:
             conds.append(f"d.{col} = %s")
             params.append(v)
-    where = ("where " + " and ".join(conds) + " ") if conds else ""
+    if f.get("period_sql"):                  # 화면 037 '기간' — 받아 놓고 안 쓰지 않는다
+        conds.append(str(f["period_sql"]))
+        params += list(f.get("period_params") or [])
+    return (("where " + " and ".join(conds) + " ") if conds else ""), params
+
+
+def datasets(*, limit: int = 100, offset: int = 0, **f: Any) -> list[dict[str, Any]]:
+    where, params = _dataset_where(**f)
     return conn.q(
         "select d.DATASET_ID, d.DATASET_NAME, d.TARGET_MODEL, d.DATASET_VERSION, d.TOTAL_CNT, "
         "       d.EXCLUDED_CNT, d.BALANCE_RESULT, d.DATASET_STATUS, d.CREATED_DT, "
         "       (select count(*) from DAT_DATASET_ITEMS i where i.DATASET_ID = d.DATASET_ID) as items, "
         "       (select count(*) from DAT_DATASET_SPLITS s where s.DATASET_ID = d.DATASET_ID) as splits "
-        f"from DAT_TRAIN_DATASETS d {where}order by d.DATASET_NAME, d.DATASET_VERSION", params)
+        f"from DAT_TRAIN_DATASETS d {where}order by d.DATASET_NAME, d.DATASET_VERSION "
+        "limit %s offset %s", [*params, max(1, min(limit, 200)), max(0, offset)])
+
+
+def datasets_count(**f: Any) -> int:
+    where, params = _dataset_where(**f)
+    row = conn.q1(f"select count(*) as n from DAT_TRAIN_DATASETS d {where}", params)
+    return int(row["n"]) if row else 0
 
 
 def splits(dataset_id: int | None = None) -> list[dict[str, Any]]:

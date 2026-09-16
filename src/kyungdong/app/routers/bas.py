@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import sys
+from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlencode
 from typing import Any, Iterable, Sequence
 
 from fastapi import APIRouter, Request
@@ -106,7 +108,17 @@ def search_spec(td3: dict, request: Request,
         f: dict[str, Any] = {"label": label, "name": name, "type": kind,
                              "value": request.query_params.get(name, "")}
         if len(item) > 2:
-            f["options"] = item[2]
+            if isinstance(item[2], dict):        # {"disabled": "사유"} — 입력을 받지 않는 칸
+                f.update(item[2])
+            else:
+                f["options"] = item[2]
+        # '기간' 한 칸에 시작일 하나만 받는다(정본 칸 수 고정). 라벨이 모호해 시작일임을 밝힌다.
+        if kind == "date" and name == "from":
+            f["label"] = f"{label} (시작일)"
+        # **라벨 본문은 정본에서만 온다.** 정본 라벨과 실제로 고르는 대상이 어긋날 때는
+        # 라벨을 갈아치우지 않고 괄호로 무엇을 고르는지 덧붙인다 — 화면이 거짓말하지 않게.
+        if f.pop("label_note", None):
+            f["label"] = f"{f['label']} ({item[2]['label_note']})"
         out.append(f)
     return out
 
@@ -144,7 +156,7 @@ def paginate(request: Request, total: int) -> tuple[dict[str, Any], int, int]:
     pages = max(1, -(-total // size))
     page = min(page, pages)
     keep = [(k, v) for k, v in request.query_params.multi_items() if k != "page"]
-    base = "?" + "".join(f"{k}={v}&" for k, v in keep)
+    base = "?" + (urlencode(keep) + "&" if keep else "")
     return {"page": page, "size": size, "pages": pages, "base": base}, size, (page - 1) * size
 
 
@@ -206,6 +218,60 @@ def opt_num(form: Any, name: str) -> float | None:
         return float(v)
     except ValueError:
         raise http.fail("validation", f"{name} 은 숫자다: {v!r}") from None
+
+
+# 타입이 있는 컬럼에 들어가는 조회값·입력값은 **여기서** 걸러 422 를 낸다.
+# 문자열을 그대로 SQL 에 넘기면 Postgres 캐스트 오류가 500 으로 터진다(계약 §2.5 는 422).
+def opt_int(src: Any, name: str) -> int | None:
+    v = (src.get(name) or "").strip()
+    if not v:
+        return None
+    try:
+        return int(v)
+    except ValueError:
+        raise http.fail("validation", f"{name}: 값 형식이 잘못됐다 (정수) {v!r}") from None
+
+
+def opt_date(src: Any, name: str) -> str | None:
+    """`YYYY-MM-DD` 만 받는다. 돌려주는 값은 ISO 문자열(SQL `::date` 캐스트가 안전하다)."""
+    v = (src.get(name) or "").strip()
+    if not v:
+        return None
+    try:
+        return date.fromisoformat(v).isoformat()
+    except ValueError:
+        raise http.fail("validation", f"{name}: 값 형식이 잘못됐다 (YYYY-MM-DD) {v!r}") from None
+
+
+def opt_datetime(src: Any, name: str) -> datetime | None:
+    v = (src.get(name) or "").strip()
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(v)
+    except ValueError:
+        raise http.fail("validation", f"{name}: 값 형식이 잘못됐다 (YYYY-MM-DDTHH:MM) {v!r}") from None
+
+
+def role_code(request: Request) -> str:
+    return getattr(request.state, "role_code", "") or ""
+
+
+def can_act(request: Request, sid: str, roles: Sequence[str]) -> bool:
+    """역할 매트릭스 셀 문구가 넓게 해석되는 동작(집계·재전송·계정 생성)을 좁힌다.
+
+    `rbac._WRITE` 는 '입력'·'설정' 도 쓰기로 읽는다 — 현장 작업자의 "POP·패드 입력" 은
+    데이터 입력이지 ERP 재전송·평가산출이 아니고, 공급기업 담당의 "설정 지원" 은 계정 생성이
+    아니다. 승인 권한이 있거나 지정 역할이면 허용한다(정본 해석 — 대장 등재 대상).
+    """
+    role = role_code(request)
+    area = nav.by_id()[sid].area
+    return rbac.can_approve(role, area) or role in roles
+
+
+def require_act(request: Request, sid: str, roles: Sequence[str], what: str) -> None:
+    if not can_act(request, sid, roles):
+        raise http.fail("forbidden", f"{what} 권한 없음 (역할 {role_code(request) or '없음'})")
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -292,6 +358,7 @@ async def quality_standards_save(request: Request):
     codes.require_code("BAS_QUALITY_STANDARDS", "PRODUCT_GROUP", v["product_group"])
     codes.require_code("BAS_QUALITY_STANDARDS", "INSPECT_TYPE", v["inspect_type"])
 
+    apply_from = opt_date(f, "apply_from")
     lo, hi = opt_num(f, "spec_min"), opt_num(f, "spec_max")
     if lo is not None and hi is not None and lo > hi:
         raise http.fail("validation", f"상·하한 역전: {lo} > {hi}")
@@ -306,7 +373,7 @@ async def quality_standards_save(request: Request):
         (v["qstd_code"], v["product_group"], v["inspect_type"], v["inspect_item"],
          (f.get("standard_spec") or "").strip() or None, lo, hi,
          (f.get("uom") or "").strip() or None, (f.get("judge_rule") or "").strip() or None,
-         v["apply_from"], _user_id(request)))
+         apply_from, _user_id(request)))
     return redirect("/bas/030")
 
 
@@ -500,6 +567,10 @@ async def common_codes_save(request: Request):
     csrf.require(request, f.get("_csrf"))
     guard(request, sid, write=True)
     v = require_fields(f, ("code_group", "code_value", "code_name"))
+    known = set(KNOWN_GROUPS) | {r["code_group"] for r in conn.q(
+        "select distinct CODE_GROUP from BAS_COMMON_CODES")}
+    if v["code_group"] not in known:
+        raise http.fail("validation", f"알 수 없는 코드 그룹: {v['code_group']!r} — 화면의 그룹만 허용한다")
     if conn.q1("select 1 as x from BAS_COMMON_CODES where CODE_GROUP = %s and CODE_VALUE = %s",
                (v["code_group"], v["code_value"])):
         raise http.fail("validation",
@@ -512,13 +583,13 @@ async def common_codes_save(request: Request):
         if not row:
             raise http.fail("validation", f"상위 코드 '{parent}' 가 그룹 '{v['code_group']}' 에 없다")
         parent_id = row["code_id"]
-    sort = f.get("sort_order")
+    sort = opt_int(f, "sort_order")
     conn.x(
         "insert into BAS_COMMON_CODES "
         "(CODE_GROUP, CODE_VALUE, CODE_NAME, PARENT_CODE_ID, SORT_ORDER, ATTR1, ATTR2, "
         " USE_YN, CREATED_BY, CREATED_DT) values (%s,%s,%s,%s,%s,%s,%s,'Y',%s, now())",
         (v["code_group"], v["code_value"], v["code_name"], parent_id,
-         int(sort) if (sort or "").strip() else None,
+         sort,
          (f.get("attr1") or "").strip() or None, (f.get("attr2") or "").strip() or None,
          _user_id(request)))
     return redirect(f"/bas/032?grp={v['code_group']}")

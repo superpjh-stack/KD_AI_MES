@@ -5,24 +5,37 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}{{ system_name }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/app.css">
+{% block head %}{% endblock %}
 </head>
-<body>
+<body{% if kiosk %} class="kiosk"{% endif %}>
 {% from "_macros.html" import csrf_field with context %}
+{# ── 헤더 — TD3 layout_rules: 시스템명 · 화면명 · 사용자명 · 권한 · 현재일시 · 로그아웃 (D-211) #}
 <header class="top">
-  <span class="sys">{{ system_name }}</span>
+  <a class="sys" href="/" title="메인 화면">{{ system_name }}</a>
   <span class="env">{{ env }}</span>
-  {% if not llm_configured %}<span class="badge bad">LLM 미구성 (D-08)</span>{% endif %}
-  {% if not cad_configured %}<span class="badge bad">CAD Parsing 미구성 (D-05)</span>{% endif %}
-  <span class="badge notice">검색 모드 {{ search_mode }}</span>
+  {% if current %}
+  <span class="crumb"><span class="grp">{{ current.shortcut }}</span> › <b>{{ current.no }} {{ current.name }}</b></span>
+  {% elif screen_title %}
+  <span class="crumb"><b>{{ screen_title }}</b></span>
+  {% endif %}
+  {% if not kiosk %}
+  {% if not llm_configured %}<span class="badge bad" title="LLM API 키가 없다 — Agent 질의는 501 로 답한다">LLM 미구성 (D-08)</span>{% endif %}
+  {% if not cad_configured %}<span class="badge bad" title="Autodesk API·YOLOv8 미확보 — CAD 인식은 501 로 답한다">CAD Parsing 미구성 (D-05)</span>{% endif %}
+  <span class="badge notice" title="임베딩 모델이 없어 키워드 검색으로 돈다">검색 모드 {{ search_mode }}</span>
   {% if not csrf_enforced %}<span class="badge bad">CSRF 미적용 (D-60)</span>{% endif %}
-  {% if synthetic_note %}<span class="badge bad">{{ synthetic_note }}</span>{% endif %}
+  {% if synthetic_note %}<span class="badge synthetic" title="자재LOT·작업지시·공정실적·LOT추적·검사·출하는 원천이 없는 합성 데이터다">{{ synthetic_note }}</span>{% endif %}
+  {% endif %}
 {# ── 로그인 상태 (D-206) — 운영 화면은 **누가 보고 있는지**와 **나가는 길**이 필요하다. #}
-  <span style="margin-left:auto" class="meta">
+  <span style="margin-left:auto" class="meta who">
+    <span class="clock" title="현재일시 = DB now() · 기준일시 = 시드 생성 앵커(SYS_CONFIGS TIME_ANCHOR, §10-3). 화면의 건수·최신 일자는 기준일시를 따른다">
+      현재 {{ header_clock.now }} · 기준일시 {{ header_clock.anchor }}</span>
     {% if signed_in_id %}
-      <b>{{ signed_in_id }}</b>{% if role %} · {{ role.name }}{% endif %}
+      · <b>{{ signed_in_id }}</b>{% if role %} · {{ role.name }}{% endif %}
+    {% elif is_prod %}
+      · <span class="badge auth">로그인 전</span>
     {% else %}
-      {% if role %}{{ role.name }}{% endif %}
-      <span class="badge bad">로그인 아님 — 개발 전환 ({{ env }})</span>
+      {% if role %}· {{ role.name }}{% endif %}
+      <span class="badge auth" title="dev 는 세션 없이 역할을 준다 — 로그인한 것처럼 보이게 하지 않는다">로그인 아님 — 개발 전환 ({{ env }})</span>
     {% endif %}
   </span>
   {% if signed_in_id %}
@@ -33,23 +46,29 @@
   {% endif %}
 </header>
 <div class="layout">
-  <nav class="side">
+  {% if not kiosk and menu %}
+  <nav class="side" aria-label="업무 메뉴">
+    <a href="/" class="home{% if request.url.path == '/' %} on{% endif %}">메인</a>
     {% for shortcut, screens in menu %}
-    <div class="grp">
-      <b>{{ shortcut }}</b>
+    {% set here = current and current.shortcut == shortcut %}
+    <details class="grp{% if here %} on{% endif %}"{% if here or menu|length <= 3 %} open{% endif %}>
+      <summary><b>{{ shortcut }}</b><span class="cnt">{{ screens|length }}</span></summary>
       {% for s in screens %}
-      <a href="{{ s.path }}" {% if current and current.id == s.id %}class="on"{% endif %}>{{ s.no }} {{ s.name }}</a>
+      <a href="{{ s.path }}" {% if current and current.id == s.id %}class="on" aria-current="page"{% endif %}>{{ s.no }} {{ s.name }}</a>
       {% endfor %}
-    </div>
+    </details>
     {% endfor %}
   </nav>
+  {% endif %}
   <main class="content">
     {% block content %}{% endblock %}
 {# ── 미비 항목 (D-188) — **이 화면에서 아직 안 된 것**을 화면에 남긴다.
-     목록은 `decisions.md` 에서 온다. 화면이 자기 목록을 들면 대장과 어긋난다. #}
-    {% if followups %}
-    <div class="card" id="followup">
-      <h2>{% if request.url.path == '/sys/029' %}전체 미비 항목{% else %}이 화면의 미비 항목{% endif %} {{ followups|length }}건</h2>
+     목록은 `decisions.md` 에서 온다. 화면이 자기 목록을 들면 대장과 어긋난다.
+     기본은 접어 둔다(D-211) — 건수는 항상 보이고, 펼치면 전부 나온다. 숨기는 것이 아니다. #}
+    {% if followups and not kiosk %}
+    <details class="card followup" id="followup"{% if request.url.path == '/sys/029' %} open{% endif %}>
+      <summary><h2>{% if request.url.path == '/sys/029' %}전체 미비 항목{% else %}이 화면의 미비 항목{% endif %} {{ followups|length }}건
+        {% set crit = followups|selectattr('critical')|list|length %}{% if crit %}<span class="badge bad">Critical {{ crit }}</span>{% endif %}</h2></summary>
       <p class="meta">
         아직 안 된 것을 숨기지 않는다. 각 항목은 결정 대장(<code>decisions.md</code>)의
         번호이고, <b>무엇이 있어야 닫히는지</b>와 <b>그때까지 어떻게 하고 있는지</b>를 함께 적었다.
@@ -74,10 +93,11 @@
           </tbody>
         </table>
       </div>
-    </div>
+    </details>
     {% endif %}
   </main>
 </div>
+{% if not kiosk %}
 <footer class="foot">
   경동글로벌텍 제조AI 시스템 · 과제번호 SF26179182 · 공급기업 주식회사 재일 —
   화면·항목·문장은 SF-TD3/TD4/SF-AD2 정본에서 렌더한다. 값이 없으면 <span class="badge undetermined">미확정 (D-nn)</span> 을 표시한다.
@@ -85,5 +105,6 @@
   {% if synthetic_note %}<br><b>{{ synthetic_note }}</b> — 자재LOT·작업지시·공정실적·LOT추적·검사·출하는 원천이 없는 합성이다.
   프로젝트·도면은 실측, 고객사 코드는 확정 (D-139), 품목 코드는 가설 (D-131) 이다. 이 화면의 수치를 성과 실적으로 인용할 수 없다.{% endif %}
 </footer>
+{% endif %}
 </body>
 </html>

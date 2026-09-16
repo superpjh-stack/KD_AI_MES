@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Request
 
 from ...agent import docs as agent_docs
 from ...ingest import collector
@@ -57,6 +57,45 @@ def _need_write(request: Request, area: str) -> str:
     raise http.fail("forbidden", f"{area} 등록 권한 없음")
 
 
+def _device_id(request: Request, body: dict[str, Any]) -> int:
+    """`device_id` 검증 — **틀린 입력은 422 다. 500 이 아니다**(§2.5 · DEF-QA1-006).
+
+    전에는 `int(body.get("device_id", 0))` 였다 — `{"device_id": "abc"}` 하나로 **500** 이
+    났다(서버 결함처럼 보인다). 그리고 빠뜨리면 `0` 이 되어 FK 위반 500 으로 갔다.
+
+    보내는 쪽이 **등록된 장비로 인증됐으면**(D-168) 그 장비의 번호와 같아야 한다 —
+    A 장비가 B 장비 번호로 적재하면 수집 지점 2개소(D-06)의 계보가 깨진다.
+    사람 세션이면 `IF_DEVICE_REGISTRY` 에 **쓰는 중인 장비**로 등록돼 있는지 본다.
+    """
+    raw = body.get("device_id")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise http.fail("validation", "필수값 누락: device_id")
+    if isinstance(raw, bool) or not str(raw).strip().lstrip("-").isdigit():
+        raise http.fail("validation", f"device_id 는 정수여야 한다: {raw!r}")
+    device_id = int(str(raw).strip())
+
+    dev = getattr(request.state, "device", None)
+    if dev is not None:
+        if int(dev.device_id) != device_id:
+            raise http.fail(
+                "validation",
+                f"device_id 가 인증 장비와 다르다: 본문 {device_id} · 인증 {dev.device_id} "
+                f"({dev.name})")
+        return device_id
+
+    row = conn.q1("select DEVICE_ID, DEVICE_NAME, USE_YN from IF_DEVICE_REGISTRY "
+                  "where DEVICE_ID = %s", (device_id,))
+    if row is None:
+        raise http.fail("validation",
+                        f"IF_DEVICE_REGISTRY 에 없는 장비다: device_id={device_id} — "
+                        "수집 지점은 등록된 2개소뿐이다 (D-06)")
+    if str(row["use_yn"]).upper() != "Y":
+        raise http.fail("validation",
+                        f"사용하지 않는 장비다(USE_YN={row['use_yn']}): "
+                        f"{row['device_name']} (device_id={device_id})")
+    return device_id
+
+
 # ── MES-TD4-047 IoT/PLC 수집 ──────────────────────────────────────────────
 @router.post("/api/ingest/plc")
 async def ingest_plc(request: Request) -> dict[str, Any]:
@@ -74,8 +113,9 @@ async def ingest_plc(request: Request) -> dict[str, Any]:
         raise http.fail("validation", f"수집 payload 를 JSON 으로 읽지 못했다: {e}") from e
     if not isinstance(body, dict):
         raise http.fail("validation", "수집 payload 는 객체여야 한다")
+    device_id = _device_id(request, body)
     samples = collector.parse_samples(body.get("samples") or [])
-    res = collector.ingest_batch(int(body.get("device_id", 0)), str(body.get("equip_code", "")),
+    res = collector.ingest_batch(device_id, str(body.get("equip_code", "")),
                                  samples, collect_path=str(body.get("collect_path")
                                                            or collector.COLLECT_PATH))
     audit(request, None, "PLC수집", log_type="API")
@@ -109,18 +149,27 @@ async def ingest_resend(request: Request) -> dict[str, Any]:
 
 # ── MES-TD4-048 CAD 파일 수집 ─────────────────────────────────────────────
 @router.post("/api/cad/files")
-async def cad_upload(request: Request, file: UploadFile = File(...),
-                     collect_method: str = Form("업로드")) -> dict[str, Any]:
+async def cad_upload(request: Request) -> dict[str, Any]:
     """형식·크기 검증 → 중복·손상 제외 → `IF_CAD_FILES` 등록.
 
     **원본 바이너리를 저장하지 않는다** — Data Lake(Object Storage) 가 미구성이라
     `DAT_LAKE_OBJECTS` 적재 경로가 없다. 저장한 척하지 않고 그 사실을 응답에 적는다.
+
+    `File(...)`·`Form(...)` 을 시그니처에 두면 FastAPI 가 **검사 순서보다 먼저** 본문을
+    파싱해서, 권한 없는 사람이 파일 없이 부르면 403 이 아니라 FastAPI 의 **원시 JSON 422**
+    를 받는다 — 계약 §4.0 의 `CSRF → 권한 → 입력값` 이 뒤집힌다. 그래서 `/est/011/review`
+    처럼 **핸들러 안에서** 폼을 읽는다.
     """
     from ...cad import inventory as cad_inv
 
     # multipart 업로드다 — 토큰은 폼 필드(`_csrf`) 또는 헤더로 받는다(§5 · G-26).
-    csrf.require(request, csrf.token_of(request, await request.form()))
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))
     _need_write(request, CAD_AREA)
+    file = form.get("file")
+    if file is None or not hasattr(file, "read") or not hasattr(file, "filename"):
+        raise http.fail("validation", "필수값 누락: file (multipart 파일 1개)")
+    collect_method = str(form.get("collect_method") or "업로드")
     raw = await file.read()
     name = file.filename or ""
     ext = name.rsplit(".", 1)[-1].upper() if "." in name else ""
@@ -166,12 +215,23 @@ async def cad_logs(request: Request, limit: int = 100) -> dict[str, Any]:
 
 # ── MES-TD4-049 외부 표준문서 수집 ────────────────────────────────────────
 @router.post("/api/docs/import")
-async def docs_import(request: Request, doc_name: str = Form(...), doc_type: str = Form(...),
-                      source_path: str = Form(...), text: str = Form(...),
-                      access_role: str = Form("")) -> dict[str, Any]:
-    """텍스트 → 청크 → `AGT_VECTOR_DOCS`. 임베딩 미구성이면 벡터 없이 본문만 적재한다(D-08)."""
-    csrf.require(request, csrf.token_of(request, await request.form()))
+async def docs_import(request: Request) -> dict[str, Any]:
+    """텍스트 → 청크 → `AGT_VECTOR_DOCS`. 임베딩 미구성이면 벡터 없이 본문만 적재한다(D-08).
+
+    폼은 **핸들러 안에서** 읽는다 — 시그니처의 `Form(...)` 은 권한 검사보다 먼저 파싱돼
+    403 이어야 할 요청에 FastAPI 원시 422 를 내준다(§4.0 검사 순서).
+    """
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))
     _need_write(request, INGEST_AREA)
+    got = {}
+    for key in ("doc_name", "doc_type", "source_path", "text"):
+        got[key] = str(form.get(key) or "").strip()
+        if not got[key]:
+            raise http.fail("validation", f"필수값 누락: {key}")
+    doc_name, doc_type = got["doc_name"], got["doc_type"]
+    source_path, text = got["source_path"], got["text"]
+    access_role = str(form.get("access_role") or "").strip()
     ext_id = agent_docs.register_document(doc_name=doc_name, doc_type=doc_type,
                                           source_path=source_path)
     out = agent_docs.embed_document(ext_id, text, doc_type=doc_type,

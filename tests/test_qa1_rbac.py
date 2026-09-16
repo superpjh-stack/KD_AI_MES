@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from conftest import csrf_post                             # noqa: E402
 from kyungdong.app import design, nav, rbac               # noqa: E402
 from kyungdong.app.main import app                        # noqa: E402
+from kyungdong.app.routers.sys import ACCOUNT_ROLES       # noqa: E402
 from kyungdong.app.settings import settings               # noqa: E402
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -107,7 +108,8 @@ WRITE_CASES = (
     ("/bas/030", "기준정보관리", "write", {"qstd_code": "QA1-NOPE", "product_group": "PG10",
                                      "inspect_type": "수압시험", "inspect_item": "압력"}),
     ("/bas/032", "기준정보관리", "write", {}),
-    ("/sys/026", "사용자/시스템관리", "write", {}),
+    # 계정 생성은 "설정 지원"(공급기업 담당) 의 범위가 아니다 — `can_act` 좁힘(D-220).
+    ("/sys/026", "사용자/시스템관리", "account", {}),
     # `action=run` 은 **실제로 ETL 을 돌려 DAT_JOB_LOGS 를 쌓는다**. 권한만 보는 테스트가
     # 남의 표를 늘리면 안 된다(§10-17) — 정의되지 않은 동작으로 권한 분기만 지난다.
     ("/dat/033", "데이터관리", "write", {"action": "QA1-정의되지않은동작"}),
@@ -123,11 +125,14 @@ APPROVE_CASES = (
 )
 
 
-@pytest.mark.parametrize("path,area,_kind,form", WRITE_CASES, ids=lambda v: str(v)[:24])
-def test_등록권한_없는_역할은_403이다(path, area, _kind, form):
+@pytest.mark.parametrize("path,area,kind,form", WRITE_CASES, ids=lambda v: str(v)[:24])
+def test_등록권한_없는_역할은_403이다(path, area, kind, form):
     for role in ROLES:
         r = csrf_post(client, path, form, page=TOKEN_PAGE, params={"as": role})
-        if rbac.can_write(role, area):
+        # 'account' 는 매트릭스 쓰기가 아니라 **좁힌 동작**이다 — 승인 권한 또는 지정 역할(D-220).
+        allowed = (rbac.can_approve(role, area) or role in ACCOUNT_ROLES) if kind == "account" \
+            else rbac.can_write(role, area)
+        if allowed:
             assert r.status_code != 403, f"{role} 은 {area} 등록 권한이 있는데 {path} 가 403 이다"
         else:
             assert r.status_code == 403, (
@@ -165,7 +170,13 @@ def test_prod에서는_as파라미터가_안_먹는다():
     try:
         codes = {s.path: client.get(s.path, params={"as": "SYSADMIN"}).status_code
                  for s in nav.all_screens()[:5]}
-        assert set(codes.values()) == {403}, f"prod 인데 쿼리 한 줄로 화면이 열렸다: {codes}"
+        # 미인증은 권한(403)이 아니라 인증 문제다 — 비HTML 요청은 401, 브라우저(HTML)는
+        # `303 → /login?next=` 다(D-204 · D-211 ③). 어느 쪽이든 화면이 열리면 안 된다.
+        assert set(codes.values()) == {401}, f"prod 인데 쿼리 한 줄로 화면이 열렸다: {codes}"
+        html = client.get(nav.all_screens()[0].path, params={"as": "SYSADMIN"},
+                          headers={"accept": "text/html"}, follow_redirects=False)
+        assert html.status_code == 303 and html.headers["location"].startswith("/login"), (
+            f"브라우저 요청은 로그인으로 보내야 한다: {html.status_code}")
     finally:
         for k, v in old.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)

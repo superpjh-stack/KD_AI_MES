@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from .bas import (anchor_label, code_options, dt, guard, paginate, redirect,  # noqa: F401
-                  require_fields, screen_page, search_spec, undetermined, val)
-from .. import auth, rbac
+from .bas import (anchor_label, can_act, code_options, dt, guard, opt_date,  # noqa: F401
+                  opt_int, paginate, redirect, require_act, require_fields, screen_page,
+                  search_spec, undetermined, val)
+from .. import auth, design, rbac
 from ..util import clock, csrf, http, mask
 from ..util.audit import LOG_TYPES
 
@@ -26,6 +27,9 @@ router.include_router(auth.router)
 # TD5 `SYS_CONFIGS.CONFIG_TYPE` 비고가 정한 3구분
 CONFIG_TYPES = ("시스템설정", "인터페이스설정", "알림기준")
 ALERT_CHANNELS = ("화면", "현황판", "스마트패드", "화면·현황판", "화면·스마트패드")
+
+# 계정 생성은 "설정 지원"(공급기업 운영담당)의 범위가 아니다 — 시스템 관리자만 만든다.
+ACCOUNT_ROLES = ("SYSADMIN",)
 
 
 def _opts(values) -> list[dict[str, str]]:
@@ -116,8 +120,12 @@ def _users_page(request: Request, issued_password: str = "", issued_for: str = "
         }],
         form={
             "title": "사용자 등록", "action": "/sys/026", "submit": "저장",
+            "enabled": can_act(request, sid, ACCOUNT_ROLES),
+            "note_forbidden": "계정 생성은 시스템 관리자만 한다 — 역할 매트릭스의 '설정 지원'"
+                              "(공급기업 운영담당)은 설정을 돕는 것이지 계정을 만드는 것이 아니다 (G-28).",
             "note": "비밀번호는 저장하지 않고 **난수를 1회 발급**해 화면에 한 번만 보여준다(G-29). "
-                    "역할은 TD3 role_matrix 6역할만 선택된다 — 권한 없는 영역은 403 이다(G-28).",
+                    "역할은 TD3 role_matrix 6역할만 선택된다 — 권한 없는 영역은 403 이다(G-28). "
+                    "계정 생성은 시스템 관리자만 한다.",
             "fields": [
                 {"label": "로그인 계정", "name": "login_id", "required": True},
                 {"label": "사용자명", "name": "user_name", "required": True},
@@ -138,6 +146,7 @@ async def users_save(request: Request):
     f = await request.form()
     csrf.require(request, f.get("_csrf"))
     guard(request, sid, write=True)
+    require_act(request, sid, ACCOUNT_ROLES, "사용자 계정 등록")
     v = require_fields(f, ("login_id", "user_name", "role_code"))
     if v["role_code"] not in rbac.roles():
         raise http.fail("validation", f"알 수 없는 역할: {v['role_code']}")
@@ -171,10 +180,10 @@ async def logs(request: Request):
     scr, td3 = guard(request, sid)
     q = request.query_params
     where, params = ["1=1"], []
-    if q.get("from"):
-        where.append("g.OCCURRED_DT >= %s"); params.append(q["from"])
-    if q.get("to"):
-        where.append("g.OCCURRED_DT < (%s::date + 1)"); params.append(q["to"])
+    if opt_date(q, "from"):
+        where.append("g.OCCURRED_DT >= %s::date"); params.append(opt_date(q, "from"))
+    if opt_date(q, "to"):
+        where.append("g.OCCURRED_DT < (%s::date + 1)"); params.append(opt_date(q, "to"))
     if q.get("kind"):
         where.append("g.LOG_TYPE = %s"); params.append(q["kind"])
     if q.get("user"):
@@ -237,20 +246,24 @@ async def logs_download(request: Request):
     guard(request, sid, write=True)
     if (form.get("action") or "").strip() != "download":
         raise http.fail("validation", "알 수 없는 동작")
-    _record_download(request, sid, "로그", "CSV",
-                     int(conn.q1("select count(*) as n from SYS_ACCESS_LOGS")["n"]))
+    _record_download(request, sid, "로그", "CSV", download_row_cnt("로그"))
     return redirect("/sys/027")
 
 
 def _record_download(request: Request, screen_id: str, category: str,
                      fmt: str, row_cnt: int) -> None:
-    """`DAT_DOWNLOAD_LOGS` — 반출 통제(9.2 ①). 권한 없으면 403 이고 기록도 남지 않는다."""
+    """`DAT_DOWNLOAD_LOGS` — 반출 통제(9.2 ①).
+
+    **거절도 흔적을 남긴다.** 권한이 없으면 `APPROVED_YN='N'` 으로 먼저 적고 403 을 낸다 —
+    적지 않고 튕기면 "누가 무엇을 반출하려 했는가" 가 통제 기록에서 사라진다(9.2 ① 접근 로그).
+    `APPROVED_YN` 은 그래서 항상 `'Y'` 일 수 없다 — 그렇게 쓰면 승인 여부 열이 거짓말한다.
+    """
     role = getattr(request.state, "role_code", "") or ""
     perm = conn.q1("select DOWNLOAD_YN from SYS_ROLE_PERMISSIONS "
                    "where ROLE_CODE = %s and AREA_CODE = %s limit 1",
                    (role, screen_id_area(screen_id)))
-    if not perm or perm["download_yn"] != "Y":
-        raise http.fail("forbidden", f"역할 {role} 에 반출 권한이 없다 (9.2 ①)")
+    approved = "Y" if (perm and perm["download_yn"] == "Y") else "N"
+
     user_id = getattr(getattr(request.state, "session", None), "user_id", None)
     if user_id is None:                    # DAT_DOWNLOAD_LOGS.USER_ID 는 NOT NULL 이다
         row = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'admin'")
@@ -260,8 +273,32 @@ def _record_download(request: Request, screen_id: str, category: str,
     conn.x(
         "insert into DAT_DOWNLOAD_LOGS "
         "(USER_ID, SCREEN_ID, DATA_CATEGORY, FILE_FORMAT, ROW_CNT, APPROVED_YN, "
-        " DOWNLOAD_DT, CREATED_DT) values (%s,%s,%s,%s,%s,'Y',%s, now())",
-        (user_id, screen_id, category, fmt, row_cnt, clock.anchor()))
+        " DOWNLOAD_DT, CREATED_DT) values (%s,%s,%s,%s,%s,%s,%s, now())",
+        (user_id, screen_id, category, fmt, row_cnt, approved, clock.anchor()))
+    if approved != "Y":
+        raise http.fail("forbidden",
+                        f"역할 {role or '없음'} 에 반출 권한이 없다 (9.2 ①) — "
+                        "시도는 DAT_DOWNLOAD_LOGS 에 미승인으로 기록했다")
+
+
+# 반출 구분별 **실제 건수**. 0 을 적어 두면 반출 규모가 통제 기록에서 사라진다(9.2 ①).
+DOWNLOAD_ROW_SQL: dict[str, str] = {
+    "CAD": "select count(*) as n from EST_CAD_DRAWINGS",
+    "견적": "select count(*) as n from EST_QUOTATIONS",
+    "BOM": "select count(*) as n from EST_BOM_ITEMS",
+    "생산": "select count(*) as n from PRC_PERFORMANCES",
+    "품질": "select count(*) as n from SHP_INSPECTIONS",
+    "로그": "select count(*) as n from SYS_ACCESS_LOGS",
+}
+
+
+def download_row_cnt(category: str) -> int:
+    """반출 대상 건수 실측. 정본에 매핑이 없는 구분은 지어내지 않고 터뜨린다."""
+    sql = DOWNLOAD_ROW_SQL.get(category)
+    if sql is None:
+        raise http.fail("internal",
+                        f"반출 구분 '{category}' 의 건수 산식이 없다 — sys.DOWNLOAD_ROW_SQL")
+    return int(conn.q1(sql)["n"])
 
 
 def screen_id_area(screen_id: str) -> str:
@@ -277,14 +314,21 @@ async def alerts(request: Request):
     sid = "MES-TD3-028"
     scr, td3 = guard(request, sid)
     q = request.query_params
+    # **기본 술어를 갈아엎지 않는다.** 028 은 알림 설정 화면이라 `CONFIG_TYPE='알림기준'` 이
+    # 화면의 정체성이다 — `?type=시스템설정` 이 그것을 대체하면 028 이 029 로 둔갑한다.
+    # 구분 조건은 알림기준 **안에서** 더 좁히는 것으로만 쓴다.
     where, params = ["CONFIG_TYPE = '알림기준'"], []
     if q.get("type"):
-        where[0] = "CONFIG_TYPE = %s"; params.append(q["type"])
+        if q["type"] not in CONFIG_TYPES:
+            raise http.fail("validation", f"설정 구분은 {CONFIG_TYPES} 중 하나다: {q['type']!r}")
+        where.append("CONFIG_TYPE = %s"); params.append(q["type"])
     if q.get("key"):
         where.append("CONFIG_KEY ilike %s"); params.append(f"%{q['key']}%")
     if q.get("role"):
         where.append("TARGET_ROLE_CODE = %s"); params.append(q["role"])
     if q.get("channel"):
+        if q["channel"] not in ALERT_CHANNELS:
+            raise http.fail("validation", f"알림 채널은 {ALERT_CHANNELS} 중 하나다: {q['channel']!r}")
         where.append("ALERT_CHANNEL = %s"); params.append(q["channel"])
     if q.get("use"):
         where.append("USE_YN = %s"); params.append(q["use"])
@@ -346,6 +390,9 @@ async def alerts_save(request: Request):
     role = (f.get("target_role_code") or "").strip() or None
     if role and role not in rbac.roles():
         raise http.fail("validation", f"알 수 없는 역할: {role}")
+    channel = (f.get("alert_channel") or "").strip() or None
+    if channel and channel not in ALERT_CHANNELS:
+        raise http.fail("validation", f"알림 채널은 {ALERT_CHANNELS} 중 하나다: {channel!r}")
     if conn.q1("select 1 as x from SYS_CONFIGS where CONFIG_TYPE='알림기준' and CONFIG_KEY=%s",
                (v["config_key"],)):
         raise http.fail("validation", f"설정 키 중복: 알림기준 '{v['config_key']}'")
@@ -354,7 +401,7 @@ async def alerts_save(request: Request):
         " TARGET_ROLE_CODE, ALERT_CHANNEL, USE_YN, CREATED_DT) "
         "values ('알림기준',%s,%s,%s,%s,%s,'Y', now())",
         (v["config_key"], (f.get("config_value") or "").strip() or None, v["alert_condition"],
-         role, (f.get("alert_channel") or "").strip() or None))
+         role, channel))
     return redirect("/sys/028")
 
 
@@ -371,6 +418,8 @@ async def configs(request: Request):
     q = request.query_params
     where, params = ["1=1"], []
     if q.get("type"):
+        if q["type"] not in CONFIG_TYPES:
+            raise http.fail("validation", f"설정 구분은 {CONFIG_TYPES} 중 하나다: {q['type']!r}")
         where.append("CONFIG_TYPE = %s"); params.append(q["type"])
     if q.get("key"):
         where.append("CONFIG_KEY ilike %s"); params.append(f"%{q['key']}%")
@@ -388,9 +437,15 @@ async def configs(request: Request):
         f"limit %s offset %s", [*params, size, off])
 
     def shown(r) -> object:
-        """인터페이스 접속 정보는 값을 내보내지 않는다 (암호화 저장 대상)."""
+        """인터페이스 접속 정보는 값을 내보내지 않는다.
+
+        **`(암호화 저장)` 이라고 적지 않는다** — 암호화하는 코드가 없다. TLS 버전·암호화
+        알고리즘·해시가 정본에 없어서(D-15) 무엇으로 암호화할지 정해지지 않았고,
+        `SYS_CONFIGS.CONFIG_VALUE` 는 평문이다. 화면이 하는 일은 **비표시** 뿐이다.
+        """
         if r["config_type"] in SECRET_TYPES:
-            return "(암호화 저장)" if r["config_value"] else undetermined("D-07")
+            return ({"text": "값 비표시 (암호화 미구현 — D-15)", "notice": True}
+                    if r["config_value"] else undetermined("D-07"))
         return val(r["config_value"], "D-110")
 
     grid = [[str(off + i), r["config_type"], r["config_key"], shown(r),
@@ -410,10 +465,17 @@ async def configs(request: Request):
                     "select DEVICE_NAME, DEVICE_TYPE, MODEL_NAME, IP_ADDRESS, PROTOCOL, "
                     "COLLECT_INTERVAL from IF_DEVICE_REGISTRY order by DEVICE_ID"), 1)]
 
-    ifaces = [{"value": r["alert_condition"], "label": r["alert_condition"]} for r in conn.q(
-        "select distinct ALERT_CONDITION from SYS_CONFIGS "
-        "where CONFIG_TYPE = '인터페이스설정' and ALERT_CONDITION is not null "
-        "order by ALERT_CONDITION")]
+    # 값은 `MES-TD4-046` 같은 프로그램 ID 다. **라벨은 정본 프로그램명으로 푼다** —
+    # 화면에 ID 를 그대로 내보내면 사용자가 무엇을 고르는지 알 수 없다. 이름을 지어내지 않고
+    # `design.program()` 에서만 가져온다. 정본에 없으면 미확정으로 적는다.
+    ifaces = []
+    for r in conn.q("select distinct ALERT_CONDITION from SYS_CONFIGS "
+                    "where CONFIG_TYPE = '인터페이스설정' and ALERT_CONDITION is not null "
+                    "order by ALERT_CONDITION"):
+        code = r["alert_condition"]
+        name = (design.program(code) or {}).get("name", "")
+        ifaces.append({"value": code,
+                       "label": f"{code} {name}" if name else f"{code} {http.undetermined('D-01')}"})
 
     return screen_page(
         request, sid, _loaded=(scr, td3),
@@ -429,8 +491,10 @@ async def configs(request: Request):
                   "text": "외부 인터페이스 4종(ERP 연계·IoT/PLC·CAD 파일·외부 표준문서)은 "
                           "FP산정리스트에서 EIF 로 별도 산정된다 (SF-TD3-029 체크)"},
                  {"kind": "undetermined",
-                  "text": "접속 주소·계정은 정본에 값이 없고 암호화 저장 대상이다 — "
-                          "값을 내보내지 않는다 (D-07)"},
+                  "text": "접속 주소·계정은 정본에 값이 없다 — 값을 화면에 내보내지 않는다 (D-07)"},
+                 {"kind": "bad",
+                  "text": "저장 값은 **평문이다** — TLS 버전·암호화 알고리즘·해시가 정본에 "
+                          "없어(D-15) 암호화를 구현하지 않았다. 화면이 하는 일은 비표시뿐이다"},
                  {"kind": "bad",
                   "text": "'연계 테스트' 는 실 연동이 범위 밖이라 미구현이다 — "
                           "성공한 척하지 않는다 (D-07 · G-30)"}],

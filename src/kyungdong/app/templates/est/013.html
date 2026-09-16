@@ -1,5 +1,42 @@
 {% extends "est/_screen.html" %}
 {% block extra %}
+{% if bom_items %}
+<div class="card">
+  <h2>다단계 전개 — {{ bom_no }}
+    {% if bom_items.header %}<span class="badge undetermined">합성 데이터 기준 (D-131)</span>{% endif %}
+  </h2>
+  {% if bom_items.header %}
+  <p class="meta">
+    프로젝트 {{ bom_items.header.project_no }} · 버전 {{ bom_items.header.bom_version }} ·
+    생성 방식 {{ bom_items.header.gen_method }} · 확정 {{ bom_items.header.confirm_yn }} ·
+    순환 참조 검증 {{ bom_items.header.cycle_check_result or '미검증' }}
+  </p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>레벨</th><th>품목코드</th><th>품목명</th><th>재질</th><th>규격</th>
+                 <th>소요량</th><th>단위</th><th>상위 항목</th></tr></thead>
+      <tbody>
+        {% for i in bom_items.rows %}
+        <tr><td>{{ i.bom_level }}</td><td>{{ i.item_code }}</td>
+            <td>{{ i.item_name or '미확정 (D-47)' }}</td><td>{{ i.material or '' }}</td>
+            <td>{{ i.spec_text or '' }}</td><td>{{ i.require_qty }}</td><td>{{ i.uom }}</td>
+            <td>{{ i.parent_item_id or '-' }}</td></tr>
+        {% else %}
+        <tr><td class="empty" colspan="8">{{ bom_items.note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="meta">{{ bom_items.note }}</p>
+  {% endif %}
+  <p class="meta">
+    <code>EST_BOM_ITEMS.PARENT_ITEM_ID</code> 자기참조를 레벨 순으로 편 것이다. 순환 참조는
+    허용하지 않는다 — <code>CYCLE_CHECK_RESULT</code> 가 `정상` 이 아닌 BOM 은 확정이 422 다.
+  </p>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>BOM 자동생성 전제</h2>
   <div class="tablewrap">

@@ -13,18 +13,21 @@
 """
 from __future__ import annotations
 
+import re
 import sys
-from datetime import datetime, timedelta
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from .. import design, nav, rbac
 from ..settings import settings
 from ..templating import render
 from ..util import clock, http
-from ..util.audit import RESULT_ERR, audit
+from ..util.audit import RESULT_ERR, RESULT_OK, audit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "db"))
 
@@ -45,6 +48,13 @@ def user_id(request: Request) -> int | None:
     return getattr(sess, "user_id", None)
 
 
+def _audit(request: Request, sid: str, action: str, *, log_type: str = "접속",
+           result: str = RESULT_OK, error: str | None = None) -> None:
+    """감사 기록 **한 곳**. 개발2 4모듈의 `audit()` 호출은 여기 하나뿐이다(D-97 · G-29)."""
+    audit(request, sid, action, log_type=log_type, result=result, error=error,
+          user_id=user_id(request))
+
+
 def guard(request: Request, sid: str, *, write: bool = False, approve: bool = False):
     """권한 확인 + 정본 로드 + **감사 기록**. 권한 없으면 **403**, 정본이 없으면 지어내지 않는다.
 
@@ -52,13 +62,17 @@ def guard(request: Request, sid: str, *, write: bool = False, approve: bool = Fa
     전부 이 가드를 지나므로 화면마다 `audit()` 을 흩뿌리지 않는다 — 한 곳이 빠지면
     16화면이 통째로 빠진다는 것이 QA3 가 잡은 결함이다. 개발1 `bas.guard` 와 같은 방식이다.
     거부(403)도 **`오류`** 로 남긴다 — 감사에 안 남는 거부는 없는 것과 같다.
+
+    **쓰기(write/approve)는 여기서 `변경` 을 남기지 않는다.** 전에는 진입 시점에 `정상` 으로
+    적어서 뒤따르는 422 가 성공 기록을 남겼다(개발2 감사 #17). 쓰기 핸들러는 `writing()` 으로
+    본문을 감싸 **커밋 뒤에 `변경`, 실패 분기에 `오류`** 를 남긴다.
     """
     screen = nav.by_id()[sid]
     role = getattr(request.state, "role_code", "") or ""
 
     def denied(reason: str):
-        audit(request, sid, "조회거부", log_type="오류", result=RESULT_ERR,
-              error=reason, user_id=user_id(request))
+        _audit(request, sid, "조회거부" if not (write or approve) else "쓰기거부",
+               log_type="오류", result=RESULT_ERR, error=reason)
         return http.fail("forbidden", reason)
 
     if not rbac.can_read(role, screen.area):
@@ -70,10 +84,154 @@ def guard(request: Request, sid: str, *, write: bool = False, approve: bool = Fa
     td3 = design.screen(sid)
     if td3 is None:
         raise http.fail("internal", f"{sid} 정본(SF-TD3)이 없다 — {http.undetermined('D-nn')}")
-    wrote = write or approve
-    audit(request, sid, "승인" if approve else ("등록" if write else "조회"),
-          log_type="변경" if wrote else "접속", user_id=user_id(request))
+    if not (write or approve):
+        _audit(request, sid, "조회")
     return screen, td3
+
+
+BOARD_AREA = "AI 대시보드"      # 현황판이 보여 주는 것 — 생산·품질·출하·KPI 요약
+
+
+def board_guard(request: Request) -> None:
+    """현황판 `/board` 의 조회 권한 확인 + 감사 (G-28 · G-29).
+
+    현황판은 `nav` 화면이 아니라 **공통 화면**(TD3 common_screens)이라 `guard()` 를 쓸 수
+    없다. 그렇다고 아무나 여는 화면도 아니다 — 65" 두 대에 수주·납기·KPI 가 그대로 뜬다.
+    `main.py` 의 `_SKIP_PREFIXES` 에 `/board` 가 있어 공통 가드를 지나지 않으므로
+    **여기서 막는다.** 감사 기록도 여기서 남긴다(개발2 감사 호출은 이 파일 한 곳이다).
+    """
+    role = getattr(request.state, "role_code", "") or ""
+    if not rbac.can_read(role, BOARD_AREA):
+        _audit(request, None, "현황판 조회거부", log_type="오류", result=RESULT_ERR,
+               error=f"{BOARD_AREA} 조회 권한 없음")
+        raise http.fail("forbidden", f"{BOARD_AREA} 조회 권한 없음")
+    _audit(request, None, "현황판 조회")
+
+
+@contextmanager
+def writing(request: Request, sid: str, action: str):
+    """쓰기 핸들러 본문을 감싼다 — **성공하면 `변경`, 실패하면 `오류`** 를 남긴다.
+
+    `guard(write=True)` 는 이 블록 **밖**에서 먼저 부른다(403 은 가드가 이미 남긴다).
+    """
+    try:
+        yield
+    except HTTPException as e:
+        d = e.detail if isinstance(e.detail, dict) else {}
+        _audit(request, sid, action, log_type="오류", result=RESULT_ERR,
+               error=f"{e.status_code} {d.get('detail') or d.get('message') or ''}".strip())
+        raise
+    _audit(request, sid, action, log_type="변경")
+
+
+# ── 입력값 검증 — 잘못된 조회값은 500 이 아니라 422 다 (§2.5) ─────────────
+_DAY = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+
+
+def opt_date(request: Request, key: str) -> str:
+    """`YYYY-MM-DD` 또는 빈 값. 형식이 틀리면 **422**."""
+    v = (request.query_params.get(key) or "").strip()
+    if not v:
+        return ""
+    try:
+        return date.fromisoformat(v).isoformat()
+    except ValueError:
+        raise http.fail("validation", f"{key}: 날짜 형식은 YYYY-MM-DD 다: {v!r}") from None
+
+
+def day_prefix(request: Request, key: str) -> str:
+    """일자 조회 — `YYYY-MM-DD` 는 그 날, `YYYY-MM` 은 그 달. 그 외는 **422**.
+    SQL 은 `to_char(col,'YYYY-MM-DD') like %(key)s || '%%'` 로 쓴다."""
+    v = (request.query_params.get(key) or "").strip()
+    if not v:
+        return ""
+    if not _DAY.match(v):
+        raise http.fail("validation", f"{key}: YYYY-MM-DD 또는 YYYY-MM 이어야 한다: {v!r}")
+    if len(v) == 10:
+        opt_date(request, key)
+    return v
+
+
+def date_range(request: Request, from_key: str = "from", to_key: str = "to") -> dict[str, str]:
+    """기간 — 시작일 이상 · 종료일 **포함**(`< 종료일 + 1일`). 둘 다 선택이다."""
+    f, t = opt_date(request, from_key), opt_date(request, to_key)
+    if f and t and t < f:
+        raise http.fail("validation", f"기간 종료일({t})이 시작일({f})보다 앞선다")
+    t_excl = (date.fromisoformat(t) + timedelta(days=1)).isoformat() if t else ""
+    return {from_key: f, to_key: t, f"{to_key}_excl": t_excl}
+
+
+def parse_datetime(value: str, name: str) -> datetime:
+    """폼의 일시 문자열 → datetime. `YYYY-MM-DD HH:MM`·ISO 만 받고 아니면 **422**."""
+    raw = (value or "").strip()
+    if not raw:
+        raise http.fail("validation", f"필수값 누락: {name}")
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        raise http.fail("validation", f"{name} 은 YYYY-MM-DD HH:MM 형식이다: {raw!r}") from None
+
+
+def parse_opt_date(value: str, name: str) -> date | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise http.fail("validation", f"{name} 은 YYYY-MM-DD 형식이다: {raw!r}") from None
+
+
+def range_wired(label_from: str, f: dict[str, str], from_key: str = "from", to_key: str = "to",
+                hint: str = "YYYY-MM-DD") -> dict[str, Any]:
+    """조회조건 '기간' 한 칸에 시작·종료 두 입력을 넣는다(정본 항목 수는 그대로)."""
+    return {"name": from_key, "value": f[from_key], "hint": f"{hint} 시작",
+            "to": {"name": to_key, "value": f[to_key], "hint": f"{hint} 종료(포함)"}}
+
+
+# ── 페이징 — 200 건에서 잘라 놓고 말하지 않으면 사용자는 그것이 전부인 줄 안다 ──
+def page_of(request: Request, size: int) -> tuple[int, int]:
+    raw = (request.query_params.get("page") or "1").strip()
+    try:
+        page = max(1, int(raw))
+    except ValueError:
+        raise http.fail("validation", f"page 는 정수여야 한다: {raw!r}") from None
+    return page, (page - 1) * size
+
+
+def pager(request: Request, total: int, page: int, size: int) -> dict[str, Any]:
+    pages = max(1, (int(total) + size - 1) // size)
+    keep = [(k, v) for k, v in request.query_params.multi_items() if k != "page"]
+    base = urlencode(keep)
+    sep = "&" if base else ""
+    return {"total": int(total), "page": page, "size": size, "pages": pages,
+            "prev": f"?{base}{sep}page={page - 1}" if page > 1 else None,
+            "next": f"?{base}{sep}page={page + 1}" if page < pages else None}
+
+
+def count_total(core_sql: str, params: Any) -> int:
+    """`from … where …` 조각으로 총 건수를 센다(그리드 note 에 '총 N 건' 으로 적는다)."""
+    import conn
+    row = conn.q1(f"select count(*) as n {core_sql}", params)
+    return int(row["n"]) if row else 0
+
+
+def safe_next(request: Request, value: str | None, default: str) -> str:
+    """저장 뒤 돌아갈 곳 — **같은 화면 경로**로 시작하는 상대 경로만 받는다(열린 리다이렉트 금지)."""
+    v = (value or "").strip()
+    if v.startswith(default) and not v.startswith("//") and "\\" not in v:
+        return v
+    return default
+
+
+def process_options(names: dict[str, str], exclude: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """'공정' 조회조건은 코드가 아니라 **이름으로 고른다**(select)."""
+    return [(c, f"{n} ({c})") for c, n in names.items() if c not in exclude]
+
+
+# 출하 '지연' 은 저장된 상태값이 아니라 **파생**이다 — 확정됐는데 납기를 넘겼거나(OTD_YN='N'),
+# 미확정인데 납기일이 기준일 이전이면 지연이다. `SHIP_STATUS='지연'` 은 아무 데서도 쓰지 않는다.
+LATE_SQL = "(s.OTD_YN = 'N' or (s.SHIP_DT is null and s.DUE_DT is not null and s.DUE_DT < %(today)s))"
 
 
 def mock(td3: dict[str, Any]) -> dict[str, Any]:
@@ -113,16 +271,24 @@ def dt(value: Any, fmt: str = "%Y-%m-%d %H:%M") -> str:
     return value.strftime(fmt) if isinstance(value, datetime) else ("—" if not value else str(value))
 
 
-def count_card(label: str, n: int, unit: str = "건", sub: str = "") -> dict[str, Any]:
-    """**건수 카드는 0 이어도 그대로 `0 건`** 이다 — '미수집' 을 붙이면 거짓 표시다(§10-14)."""
-    return {"label": label, "value": f"{n:,} {unit}", "sub": sub}
+def count_card(label: str, n: int, unit: str = "건", sub: str = "",
+               href: str | None = None) -> dict[str, Any]:
+    """**건수 카드는 0 이어도 그대로 `0 건`** 이다 — '미수집' 을 붙이면 거짓 표시다(§10-14).
+    `href` 가 있으면 카드를 누르면 그 화면으로 간다(TD4-001 fn4 드릴다운)."""
+    return {"label": label, "value": f"{n:,} {unit}", "sub": sub, "href": href}
 
 
-def ratio_card(label: str, pct: float | None, sub: str = "", decision: str = COLLECT_DECISION):
+def ratio_card(label: str, pct: float | None, sub: str = "", decision: str = COLLECT_DECISION,
+               href: str | None = None):
     """비율 카드는 분모가 없으면 값이 **없는 것**이다 — '미수집' 이 맞다."""
     if pct is None:
-        return {"label": label, "value": http.not_collected(decision), "sub": sub, "off": True}
-    return {"label": label, "value": f"{pct:,.1f} %", "sub": sub}
+        return {"label": label, "value": http.not_collected(decision), "sub": sub, "off": True,
+                "href": href}
+    return {"label": label, "value": f"{pct:,.1f} %", "sub": sub, "href": href}
+
+
+# 진행 중 프로젝트가 정말 0건일 때의 문구 — 조회는 됐고 결과가 0 이다. '미수집' 이 아니다(§10-14).
+ZERO_ACTIVE_NOTE = "진행 중 프로젝트 0 건 — 등록된 프로젝트가 전부 완료 상태다"
 
 
 def ctx(request: Request, screen: nav.Screen, td3: dict[str, Any], **extra) -> dict[str, Any]:
@@ -215,27 +381,34 @@ async def production_status(request: Request):
         "from EST_PROJECTS pj "
         "join SHP_LOT_TRACES lt on lt.PROJECT_ID = pj.PROJECT_ID "
         "join PRC_PROCESS_HISTORIES h on h.LOT_TRACE_ID = lt.LOT_TRACE_ID "
+        "where pj.PROJECT_STATUS <> '완료' "
         "group by pj.PROJECT_NO, pj.PROJECT_NAME order by pj.PROJECT_NO limit 8"
     )
+    # 완료 프로젝트는 '진행률' 목록의 대상이 아니다. 0건이면 **미수집이 아니라 진행 중 0건**이다(§10-14).
 
     return render(request, "dsh/001.html", **ctx(
         request, screen, td3,
         cards=[
             count_card("금일 실적수량", int(float(today["good"] or 0)), "ea",
-                       f"실적 {int(today['n'] or 0)}건 · 기준 {dt(a, '%Y-%m-%d')}"),
-            count_card("진행 작업지시", int(running["n"] or 0)),
-            ratio_card("설비 가동률", util, f"수집 신호 {signal_n:,}건 · 레이저커팅기 1대 (D-06)"),
-            count_card("지연 프로젝트", int(late["n"] or 0), "건", "납기일 경과·미완료"),
+                       f"실적 {int(today['n'] or 0)}건 · 기준 {dt(a, '%Y-%m-%d')}",
+                       href=f"/prc/021?date={a.strftime('%Y-%m-%d')}"),
+            count_card("진행 작업지시", int(running["n"] or 0), href="/prc/021"),
+            ratio_card("설비 가동률", util, f"수집 신호 {signal_n:,}건 · 레이저커팅기 1대 (D-06)",
+                       href="/dsh/003"),
+            count_card("지연 프로젝트", int(late["n"] or 0), "건", "납기일 경과·미완료",
+                       href="/dsh/004"),
         ],
         chart_title=mock(td3).get("chart_title", "").replace("(예시)", ""),
         chart=[{"label": names.get(r["process_code"], r["process_code"]),
                 "value": float(r["good"] or 0), "text": num(r["good"], 0)} for r in by_process],
         list_title=mock(td3).get("list_title", "").replace("(예시)", ""),
         progress=[{"label": f"{r['project_no']} {r['project_name']}",
+                   "href": f"{HISTORY_PATH}?project={r['project_no']}",
                    "percent": int(round(int(r["done"]) / int(r["total"]) * 100)) if r["total"] else 0,
                    "text": f"{r['done']}/{r['total']} 공정"} for r in by_project],
         badges=collection_badges(),
         empty_note=http.not_collected(COLLECT_DECISION),
+        list_empty_note=ZERO_ACTIVE_NOTE,
     ))
 
 
@@ -257,7 +430,11 @@ async def quality_status(request: Request):
     bad_lots = conn.q1(
         "select count(distinct LOT_TRACE_ID) as n from SHP_INSPECTIONS where JUDGE_RESULT <> '합격'"
     ) or {"n": 0}
-
+    bad_lot_rows = conn.q(
+        "select lt.PRODUCT_LOT_NO, count(*) as n from SHP_INSPECTIONS i "
+        "join SHP_LOT_TRACES lt on lt.LOT_TRACE_ID = i.LOT_TRACE_ID "
+        "where i.JUDGE_RESULT <> '합격' group by lt.PRODUCT_LOT_NO order by lt.PRODUCT_LOT_NO limit 8"
+    )
     trend = conn.q(
         "select to_char(START_DT, 'YYYY-MM') as period, coalesce(sum(DEFECT_QTY),0) as defect "
         "from PRC_PERFORMANCES group by 1 order by 1 desc limit 6"
@@ -272,10 +449,19 @@ async def quality_status(request: Request):
         request, screen, td3,
         cards=[
             count_card("금일 검사 건수", int(today["n"] or 0)),
-            ratio_card("합격률", q.pass_rate, f"검사 {q.inspect_cnt:,}건 중 합격 {q.pass_cnt:,}건"),
-            count_card("불량 수량", int(q.defect_qty), "ea", f"양품 {q.good_qty:,.0f} ea"),
-            count_card("이상 LOT", int(bad_lots["n"] or 0), "건", "불합격 판정이 있는 제품 LOT"),
+            # 합격률 단서는 `kpi.QualityKpi.pass_rate_caveat` **한 곳**에서 온다 — 002·044·현황판 공용.
+            ratio_card("합격률", q.pass_rate,
+                       f"검사 {q.inspect_cnt:,}건 중 합격 {q.pass_cnt:,}건"
+                       + (f" · {q.pass_rate_caveat}" if q.pass_rate_caveat else ""),
+                       href="/shp/018"),
+            count_card("불량 수량", int(q.defect_qty), "ea", f"양품 {q.good_qty:,.0f} ea",
+                       href="/prc/025"),
+            count_card("이상 LOT", int(bad_lots["n"] or 0), "건", "불합격 판정이 있는 제품 LOT",
+                       href="/shp/018?judge=불합격"),
         ],
+        # 이상 LOT 목록 — 누르면 그 LOT 의 024 공정이력조회로 간다(TD4-002 fn3).
+        bad_lot_list=[{"lot_no": r["product_lot_no"], "n": int(r["n"]),
+                       "href": f"{HISTORY_PATH}?lot={r['product_lot_no']}"} for r in bad_lot_rows],
         chart_title="기간별 불량 발생 추이",
         chart=[{"label": r["period"], "value": float(r["defect"] or 0),
                 "text": num(r["defect"], 0)} for r in reversed(trend)],
@@ -367,11 +553,12 @@ async def shipment_status(request: Request):
     a = anchor()
 
     agg = conn.q1(
-        "select count(*) filter (where SHIP_DT is null) as planned, "
-        "count(*) filter (where SHIP_DT is not null) as done, "
-        "count(*) filter (where SHIP_STATUS = '지연') as late, "
-        "count(*) filter (where OTD_YN = 'Y') as otd, "
-        "count(*) filter (where OTD_YN is not null) as otd_base from SHP_SHIPMENTS"
+        "select count(*) filter (where s.SHIP_DT is null) as planned, "
+        "count(*) filter (where s.SHIP_DT is not null) as done, "
+        f"count(*) filter (where {LATE_SQL}) as late, "
+        "count(*) filter (where s.OTD_YN = 'Y') as otd, "
+        "count(*) filter (where s.OTD_YN is not null) as otd_base from SHP_SHIPMENTS s",
+        {"today": a.date()},
     ) or {}
     weekly = conn.q(
         "select to_char(SHIP_DT, 'IYYY-IW') as wk, count(*) as n from SHP_SHIPMENTS "
@@ -391,20 +578,23 @@ async def shipment_status(request: Request):
     return render(request, "dsh/004.html", **ctx(
         request, screen, td3,
         cards=[
-            count_card("출하 예정", int(agg.get("planned") or 0)),
-            count_card("출하 완료", int(agg.get("done") or 0)),
-            count_card("지연", int(agg.get("late") or 0)),
+            count_card("출하 예정", int(agg.get("planned") or 0), href="/shp/016?status=승인대기"),
+            count_card("출하 완료", int(agg.get("done") or 0), href="/shp/016?status=완료"),
+            count_card("지연", int(agg.get("late") or 0), "건",
+                       "파생값 — 납기 미준수 확정(OTD_YN=N) + 미확정·납기 경과", href="/shp/016?status=지연"),
             ratio_card("납기 준수율", kpimod.ratio_pct(agg.get("otd"), agg.get("otd_base")),
-                       "출하 확정 건 기준 (OTD_YN)"),
+                       "출하 확정 건 기준 (OTD_YN)", href="/shp/016?otd=N"),
         ],
         chart_title="주간 출하 물량",
         chart=[{"label": r["wk"], "value": float(r["n"]), "text": num(r["n"], 0)}
                for r in reversed(weekly)],
         list_title="납기 임박 프로젝트",
         progress=[{"label": f"{r['project_no']} {r['project_name']}",
+                   "href": f"{HISTORY_PATH}?project={r['project_no']}",
                    "percent": max(0, min(100, 100 - days_left(r["due_dt"]) * 2)),
                    "text": f"납기 {r['due_dt']} · D{days_left(r['due_dt']):+d} · {r['project_status']}"}
                   for r in due],
+        list_empty_note=ZERO_ACTIVE_NOTE,
         badges=[{"cls": "notice",
                  "text": "납기는 수주 확정 시점의 납기일 기준이다. 출하 확정 시각이 "
                          "수주출하 리드타임(LEADTIME_O2D)의 종료 시각이다"}],

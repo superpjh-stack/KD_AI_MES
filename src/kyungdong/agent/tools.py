@@ -114,7 +114,9 @@ def get_project_summary(project_no: str | None = None) -> dict[str, Any]:
     return {"projects": projects, "performances": perf}
 
 
-def get_material_status(project_no: str | None = None, issues_only: bool = False) -> dict[str, Any]:
+def get_material_status(project_no: str | None = None, issues_only: bool = False,
+                        lot_no: str | None = None) -> dict[str, Any]:
+    """`lot_no` 는 화면 009 의 조회조건 '자재 LOT 번호' 가 그대로 들어오는 자리다."""
     sql = (
         "select l.LOT_NO, l.ITEM_CODE, l.MATERIAL, l.THICKNESS_MM, l.CURRENT_QTY, l.LOT_STATUS, "
         "       s.LOCATION_CODE, s.STOCK_QTY, s.AVAILABLE_QTY, s.SAFETY_QTY, "
@@ -128,6 +130,9 @@ def get_material_status(project_no: str | None = None, issues_only: bool = False
     if project_no:
         conds.append("p.PROJECT_NO = %s")
         params.append(project_no)
+    if lot_no:
+        conds.append("l.LOT_NO = %s")
+        params.append(lot_no)
     if issues_only:
         conds.append("(r.INSPECT_RESULT <> '합격' or r.MTC_NO is null or s.AVAILABLE_QTY < s.SAFETY_QTY)")
     if conds:
@@ -208,8 +213,12 @@ def get_procurement_risks(project_no: str | None = None,
     }
 
 
-def get_fat_quality(project_no: str | None = None) -> dict[str, Any]:
-    """출하 전 성능검사(수압·기밀·진공) 결과 + 품질기준."""
+def get_fat_quality(project_no: str | None = None,
+                    product_lot_no: str | None = None) -> dict[str, Any]:
+    """출하 전 성능검사(수압·기밀·진공) 결과 + 품질기준.
+
+    `product_lot_no` 는 화면 020 의 조회조건 '제품 LOT 번호' 가 들어오는 자리다.
+    """
     sql = (
         "select t.PRODUCT_LOT_NO, i.INSPECT_ITEM, i.MEASURED_VALUE, i.UOM, i.JUDGE_RESULT, "
         "       i.INSPECT_DT, i.REPORT_NO, i.REJECT_REASON, "
@@ -219,16 +228,25 @@ def get_fat_quality(project_no: str | None = None) -> dict[str, Any]:
         "left join BAS_QUALITY_STANDARDS s on s.QSTD_ID = i.QSTD_ID "
         "left join EST_PROJECTS p on p.PROJECT_ID = t.PROJECT_ID "
     )
-    params: list[Any] = []
+    conds, params = [], []
     if project_no:
-        sql += "where p.PROJECT_NO = %s "
+        conds.append("p.PROJECT_NO = %s")
         params.append(project_no)
+    if product_lot_no:
+        conds.append("t.PRODUCT_LOT_NO = %s")
+        params.append(product_lot_no)
+    if conds:
+        sql += "where " + " and ".join(conds) + " "
     return {"inspections": _q(sql + "order by i.INSPECT_DT desc limit 50", params),
             "note": "검사 합격·출하 승인은 담당자 승인 대상이다 (G-24)."}
 
 
-def get_lead_time_status(project_no: str | None = None) -> dict[str, Any]:
-    """`LEADTIME_MFG` · `LEADTIME_O2D`(D-35). **산식은 `app/kpi.py` 한 곳**(개발2)."""
+def get_lead_time_status(project_no: str | None = None,
+                         shipment_no: str | None = None) -> dict[str, Any]:
+    """`LEADTIME_MFG` · `LEADTIME_O2D`(D-35). **산식은 `app/kpi.py` 한 곳**(개발2).
+
+    `shipment_no` 는 화면 020 의 조회조건 '출하번호' 가 들어오는 자리다.
+    """
     kpis = _q(
         "select t.KPI_CODE, t.KPI_NAME, t.UOM, t.BASE_VALUE, t.TARGET_VALUE, t.IMPROVE_RATE, "
         "       t.WEIGHT, t.MEASURE_BASIS, m.PERIOD_CODE, m.MEASURE_VALUE, m.ACHIEVE_RATE, m.SAMPLE_CNT "
@@ -239,10 +257,15 @@ def get_lead_time_status(project_no: str | None = None) -> dict[str, Any]:
         "select p.PROJECT_NO, p.ORDER_CONFIRM_DT, p.DUE_DT, s.SHIPMENT_NO, s.PLAN_DT, s.SHIP_DT, "
         "       s.OTD_YN, s.SHIP_STATUS "
         "from EST_PROJECTS p left join SHP_SHIPMENTS s on s.PROJECT_ID = p.PROJECT_ID ")
-    params: list[Any] = []
+    conds, params = [], []
     if project_no:
-        sql += "where p.PROJECT_NO = %s "
+        conds.append("p.PROJECT_NO = %s")
         params.append(project_no)
+    if shipment_no:
+        conds.append("s.SHIPMENT_NO = %s")
+        params.append(shipment_no)
+    if conds:
+        sql += "where " + " and ".join(conds) + " "
     return {"kpi": kpis, "shipments": _q(sql + "order by p.PROJECT_NO limit 50", params)}
 
 
@@ -308,6 +331,25 @@ REWIRING: dict[str, str] = {
     "get_claim_trace": "SHP_CLAIMS + SHP_CLAIM_CAUSES + SHP_LOT_TRACES + SHP_INSPECTIONS",
 }
 
+# ── 화면 조회조건 ↔ 도구 (TD3 009 · 020 mockup 실측) ──────────────────────
+# 009 '자재 LOT 번호' · 020 '제품 LOT 번호'·'출하번호' 는 **화면에 있는 칸**이다.
+# 전에는 렌더만 되고 `service.ask` 가 질의문만 읽어 **넣어도 아무 일이 없었다** —
+# 채운 사람은 그 LOT 로 좁혀진 답을 받았다고 읽는다. 여기서 도구 호출로 잇는다.
+# `rows` 는 도구 결과에서 **건수를 세는 키**, `table` 은 근거줄에 적을 TD5 표다.
+CONTEXT_TOOLS: dict[str, tuple[dict[str, Any], ...]] = {
+    "입고": ({"key": "material_lot", "label": "자재 LOT 번호", "tool": "get_material_status",
+              "arg": "lot_no", "fixed": {"project_no": None, "issues_only": False},
+              "rows": "materials", "table": "INV_MATERIAL_LOTS"},),
+    "출하": ({"key": "product_lot", "label": "제품 LOT 번호", "tool": "get_fat_quality",
+              "arg": "product_lot_no", "fixed": {"project_no": None},
+              "rows": "inspections", "table": "SHP_INSPECTIONS"},
+             {"key": "shipment_no", "label": "출하번호", "tool": "get_lead_time_status",
+              "arg": "shipment_no", "fixed": {"project_no": None},
+              "rows": "shipments", "table": "SHP_SHIPMENTS"}),
+    # 038 '대상 업무영역' 은 도구가 아니라 **검색 범위 문구**다 — 붙일 도구를 지어내지 않는다.
+    "통합": (),
+}
+
 # Agent 3종 ↔ 도구 (TD3 009 입고 · 020 출하 · 038 통합)
 TOOLSETS: dict[str, tuple[str, ...]] = {
     "입고": ("search_knowledge", "get_rules", "get_material_status",
@@ -343,8 +385,9 @@ def definitions(agent_type: str = "통합") -> list[dict[str, Any]]:
         "get_material_status": _tool(
             "get_material_status", "자재 LOT, MTC, 보관위치, 부족·보류 상태를 조회한다.",
             {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null"),
+             "lot_no": _nullable("자재 LOT 번호. 전체이면 null"),
              "issues_only": {"type": "boolean", "description": "이슈만 조회할지 여부"}},
-            ["project_no", "issues_only"]),
+            ["project_no", "lot_no", "issues_only"]),
         "get_incoming_inspection_issues": _tool(
             "get_incoming_inspection_issues", "입고검사 보류·불합격과 MTC 누락을 조회한다.",
             {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null")}, ["project_no"]),
@@ -360,10 +403,14 @@ def definitions(agent_type: str = "통합") -> list[dict[str, Any]]:
             ["project_no", "supplier"]),
         "get_fat_quality": _tool(
             "get_fat_quality", "출하 전 성능검사(수압·기밀·진공) 결과와 적용 품질기준을 조회한다.",
-            {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null")}, ["project_no"]),
+            {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null"),
+             "product_lot_no": _nullable("제품 LOT 번호. 전체이면 null")},
+            ["project_no", "product_lot_no"]),
         "get_lead_time_status": _tool(
             "get_lead_time_status", "제조 리드타임·수주출하 리드타임 목표와 측정값, 출하 예정을 조회한다.",
-            {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null")}, ["project_no"]),
+            {"project_no": _nullable("프로젝트(수주)번호. 전체이면 null"),
+             "shipment_no": _nullable("출하번호. 전체이면 null")},
+            ["project_no", "shipment_no"]),
         "get_claim_trace": _tool(
             "get_claim_trace", "클레임을 제품 LOT·검사 이력과 연결해 조회한다.",
             {"claim_no": {"type": "string", "description": "클레임 번호"}}, ["claim_no"]),

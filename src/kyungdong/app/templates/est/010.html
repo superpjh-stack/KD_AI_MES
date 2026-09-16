@@ -1,5 +1,26 @@
 {% extends "est/_screen.html" %}
+{% from "_macros.html" import csrf_field with context %}
 {% block extra %}
+<div class="card">
+  <h2>도면 파일 업로드 (MES-TD4-048)</h2>
+  {% if can_upload %}
+  <form method="post" action="/api/cad/files" enctype="multipart/form-data">{{ csrf_field() }}
+    <p>
+      <label for="cad-file">도면 파일</label>
+      <input id="cad-file" type="file" name="file" required aria-label="도면 파일">
+      <input type="hidden" name="collect_method" value="업로드">
+      <button type="submit">도면 업로드</button>
+    </p>
+  </form>
+  {% else %}
+  <p>
+    <button type="button" disabled title="{{ area if area is defined else '수주견적AI관리' }} 등록 권한 없음 (G-28)">도면 업로드</button>
+    <span class="meta">등록 권한이 없는 역할이다 — 업로드하면 403 이다 (G-28).</span>
+  </p>
+  {% endif %}
+  <p class="meta">받는 형식: {{ upload_types|join(' · ') }}. {{ upload_note }}</p>
+</div>
+
 <div class="card">
   <h2>인식 공급자 구성 상태 (D-05)</h2>
   <div class="tablewrap">

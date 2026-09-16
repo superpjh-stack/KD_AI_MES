@@ -167,10 +167,18 @@ def gate_26(client: TestClient) -> None:
         if not hsts:
             bad.append("prod 프로파일에 HSTS 가 없다")
         # prod 에서 개발용 역할 전환이 막히는가 (main.attach_role)
+        # 미인증은 권한(403)이 아니라 **인증** 문제다 — 비HTML 요청은 401, 브라우저(HTML)는
+        # `303 → /login?next=` 다(D-204 · D-211 ③). 200 이면 열린 것이고 그때만 결함이다.
         r = client.get("/dsh/001", headers={"x-kyungdong-role": "SYSADMIN"})
-        say(f"     prod 에서 헤더 역할 전환 → GET /dsh/001 {r.status_code} (기대 403 — 인증 없이 열리면 결함)")
-        if r.status_code != 403:
-            bad.append(f"prod 에서 인증 없이 화면이 {r.status_code} 로 열린다")
+        say(f"     prod 에서 헤더 역할 전환 → GET /dsh/001 {r.status_code} (기대 401 — 200 이면 인증 없이 열린 결함)")
+        if r.status_code != 401:
+            bad.append(f"prod 에서 인증 없이 비HTML 요청이 {r.status_code} 다 (기대 401)")
+        h = client.get("/dsh/001", headers={"x-kyungdong-role": "SYSADMIN", "accept": "text/html"},
+                       follow_redirects=False)
+        loc = h.headers.get("location", "")
+        say(f"     prod 브라우저 요청 → GET /dsh/001 {h.status_code} → {loc!r} (기대 303 → /login)")
+        if not (h.status_code == 303 and loc.startswith("/login")):
+            bad.append(f"prod 에서 미인증 브라우저 요청이 로그인으로 가지 않는다 ({h.status_code} → {loc!r})")
     finally:
         if orig_env is None:
             os.environ.pop("KYUNGDONG_ENV", None)

@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{#
+  024 공정이력조회 — 디지털 스레드의 **도착지** (G-08).
+  · 제품 LOT 하나면 9단계 사슬, 프로젝트면 LOT 마다 한 줄이다. 아무 LOT 이나 골라 보여 주지 않는다.
+  · `?lot=` 에 자재 LOT 번호가 와도 받는다 — 그 자재가 투입된 제품 LOT 으로 옮겨 조회한다.
+  · 끊긴 단계는 채우지 않고 **단절**로 그대로 보여 준다 (TD3 버튼 '단절 구간 표시').
+#}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
@@ -9,6 +15,20 @@
 
 <div class="d2-wrap">
   <div class="d2-main">
+    {% if material_lot %}
+    <div class="card">
+      <h2>자재 LOT {{ material_lot.lot_no }} — {{ material_lot.material or '—' }} ({{ material_lot.item_code or '—' }})</h2>
+      {% if material_lot.product_lots %}
+      <p class="d2-note">이 자재가 투입된 제품 LOT {{ material_lot.product_lots|length }} 건:
+        {% for l in material_lot.product_lots %}<a href="?lot={{ l }}">{{ l }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+      {% else %}
+      <p class="d2-note">이 자재 LOT 이 투입된 제품 LOT 이 <b>0 건</b>이다 —
+        <b>단절</b>이다(SHP_LOT_TRACES.MATERIAL_LOT_ID 가 이 자재를 가리키지 않는다).</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if thread %}
     <div class="card">
       <h2>디지털 스레드 — {{ thread.project_no }} {{ thread.project_name }}
@@ -28,14 +48,42 @@
           </tbody>
         </table>
       </div>
-      <p class="d2-note">G-08 사슬 9단계. 끊긴 단계는 채우지 않고 <b>단절</b>로 그대로 보여 준다.</p>
+      <p class="d2-note">G-08 사슬 9단계. 끊긴 단계는 채우지 않고 <b>단절</b>로 그대로 보여 준다.
+        도면·BOM·작업지시는 <b>이 LOT 이 실제로 쓴 것</b>을 따라간다 (SHP_LOT_TRACES.BOM_ID · WORK_ORDER_ID).</p>
+    </div>
+    {% endif %}
+
+    {% if chains %}
+    <div class="card">
+      <h2>디지털 스레드 — 제품 LOT {{ chains|length }} 건</h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>제품 LOT</th>{% for s in chains[0].steps %}<th>{{ s.n }}. {{ s.table.split('_')[1:]|join('_') }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+          {% for c in chains %}
+          <tr>
+            <td><a href="?lot={{ c.lot_no }}">{{ c.lot_no }}</a></td>
+            {% for s in c.steps %}
+            <td>{% if s.ok %}<span class="badge notice">연결</span>{% else %}<span class="badge undetermined">단절</span>{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="d2-note">프로젝트 하위 제품 LOT 을 <b>하나도 빼지 않고</b> 줄마다 보여 준다.
+        LOT 을 누르면 그 LOT 의 9단계 사슬을 값까지 편다.</p>
     </div>
     {% endif %}
 
     <div class="card">
       {{ kit.grid(mock.grid_columns, rows, empty_note) }}
       {{ kit.actions(mock.buttons, {}) }}
-      <p class="d2-note">조회 {{ rows|length }} 건 · 제품 LOT 열을 누르면 그 LOT 로 다시 조회한다.</p>
+      {{ kit.pager(page, rows|length) }}
+      <p class="d2-note">제품 LOT 열을 누르면 그 LOT 로 다시 조회한다.
+        이 쪽의 단절 이력 {{ broken_shown }} 건.</p>
     </div>
   </div>
   {{ kit.side(td3, notes) }}

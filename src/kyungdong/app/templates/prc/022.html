@@ -4,5 +4,5 @@
 {% block content %}
 {{ kit.styles() }}
 {{ kit.listing(current, td3, wired, current.path, mock.grid_columns, rows, empty_note,
-               {}, badges|default([]), notes|default([]), cards|default([])) }}
+               {}, badges|default([]), notes|default([]), cards|default([]), page|default(none)) }}
 {% endblock %}

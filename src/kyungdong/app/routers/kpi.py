@@ -17,7 +17,8 @@ from .. import design, kpi as kpimod
 from ..settings import settings
 from ..templating import render
 from ..util import http
-from .dsh import (COLLECT_DECISION, anchor, cell, ctx, dt, equip_utilisation, guard, mock, num,
+from .dsh import (COLLECT_DECISION, HISTORY_PATH, ZERO_ACTIVE_NOTE, anchor, board_guard, cell,
+                  collection_status, ctx, dt, equip_utilisation, guard, mock, num,
                   process_names, project_cell)
 
 router = APIRouter()
@@ -34,6 +35,14 @@ def _measure_chart(code: str) -> list[dict]:
     rows.sort(key=lambda r: r["period_code"])
     return [{"label": r["period_code"], "value": float(r["measure_value"]),
              "text": num(r["measure_value"], 1)} for r in rows[-6:]]
+
+
+def _defect_point(row) -> dict | None:
+    """월별 불량률 한 점. **분모(양품+불량)가 0이면 점이 없다** — 0% 로 메우지 않는다."""
+    rate = kpimod.ratio_pct(row["defect"], float(row["good"] or 0) + float(row["defect"] or 0))
+    if rate is None:
+        return None
+    return {"label": row["period"], "value": rate, "text": num(rate, 1)}
 
 
 def _official_table() -> list[dict]:
@@ -71,22 +80,25 @@ async def productivity(request: Request):
 
     return render(request, "kpi/043.html", **ctx(
         request, screen, td3,
+        period=period or "",
         cards=[
             {"label": "제조 리드타임(기존)", "value": f"{d.base:,.0f} {d.uom}", "sub": d.basis},
             {"label": "제조 리드타임(목표)", "value": f"{d.target:,.0f} {d.uom}"},
             {"label": "개선율 목표", "value": f"{d.improve_rate} %",
              "sub": "(기존−목표)÷기존×100"},
             {"label": "가중치", "value": f"{d.weight}"},
+            # 실측·달성률은 그 표본이 어디서 왔는지로 간다 — 작업지시~포장완료 구간은 021·024 다.
             {"label": "실측 평균", "value": m.value_text,
              "sub": f"표본 {m.sample_cnt:,}건" if m.sample_cnt else "표본 0건",
-             "off": not m.collected},
+             "off": not m.collected, "href": "/prc/021"},
             {"label": "달성률", "value": m.achieve_text,
-             "sub": kpimod.ACHIEVE_FORMULA, "off": m.achieve is None},
+             "sub": kpimod.ACHIEVE_FORMULA, "off": m.achieve is None, "href": "/kpi/045"},
         ],
         chart_title="월별 제조 리드타임(h)",
         chart=_measure_chart(kpimod.CODE_MFG),
         list_title="공정별 소요시간 비중",
         progress=[{"label": names.get(r["process_code"], r["process_code"]),
+                   "href": f"/prc/025?process={r['process_code']}",
                    "percent": int(round(float(r["avg_h"] or 0) / total * 100)),
                    "text": f"{num(r['avg_h'], 2)} h"} for r in dwell],
         official=_official_table(),
@@ -121,16 +133,20 @@ async def quality_kpi(request: Request):
 
     return render(request, "kpi/044.html", **ctx(
         request, screen, td3,
+        period=period or "",
         cards=[
             {"label": "출하 합격률",
              "value": f"{q.pass_rate:,.1f} %" if q.pass_rate is not None
                       else http.not_collected(COLLECT_DECISION),
-             "sub": f"검사 {q.inspect_cnt:,}건 · 합격 {q.pass_cnt:,}건", "off": q.pass_rate is None},
+             # 합격률 단서(측정값 없는 판정)는 `kpi.QualityKpi` 한 곳에서 온다 — 002·044·현황판 공용.
+             "sub": f"검사 {q.inspect_cnt:,}건 · 합격 {q.pass_cnt:,}건"
+                    + (f" · {q.pass_rate_caveat}" if q.pass_rate_caveat else ""),
+             "off": q.pass_rate is None, "href": "/shp/018"},
             {"label": "공정 불량률",
              "value": f"{q.defect_rate:,.1f} %" if q.defect_rate is not None
                       else http.not_collected(COLLECT_DECISION),
              "sub": f"양품 {q.good_qty:,.0f} · 불량 {q.defect_qty:,.0f} ea",
-             "off": q.defect_rate is None},
+             "off": q.defect_rate is None, "href": "/prc/025"},
             {"label": "클레임 발생률",
              "value": f"{q.claim_rate:,.1f} %" if q.claim_rate is not None
                       else http.not_collected("D-204"),
@@ -138,18 +154,16 @@ async def quality_kpi(request: Request):
              # "분모가 0인데 0%로 메웠다" 로 오독된다 — `tools/check_data.py` ③ 의 보조설명
              # 판정이 실제로 그렇게 오탐했다(D-211). 분모가 39건이면 0.0% 는 **참값**이다.
              "sub": f"분모 출하 {q.shipment_cnt:,}건 · 분자 클레임 {q.claim_cnt:,} (D-204 미등록)",
-             "off": q.claim_rate is None},
+             "off": q.claim_rate is None, "href": "/shp/019"},
             {"label": "집계 기간", "value": period or f"전체 (기준 {dt(a, '%Y-%m-%d')})"},
         ],
         chart_title="월별 불량률(%)",
-        chart=[{"label": r["period"],
-                "value": kpimod.ratio_pct(r["defect"],
-                                          float(r["good"] or 0) + float(r["defect"] or 0)) or 0.0,
-                "text": num(kpimod.ratio_pct(r["defect"],
-                                             float(r["good"] or 0) + float(r["defect"] or 0)), 1)}
-               for r in reversed(trend)],
+        # **분모가 없는 달은 그리지 않는다.** 0.0 으로 그리면 "그 달 불량률이 0%" 로 읽힌다 —
+        # 실제로는 실적이 없어 잴 수 없는 달이다(G-11 · §10-14).
+        chart=[c for c in (_defect_point(r) for r in reversed(trend)) if c],
         list_title="불량 유형 비중",
         progress=[{"label": r["defect_type"] or http.undetermined("D-47"),
+                   "href": "/prc/025",
                    "percent": int(round(float(r["defect"] or 0) / type_total * 100)),
                    "text": f"{num(r['defect'], 0)} ea"} for r in by_type],
         not_official=kpimod.NOT_OFFICIAL_NOTE,
@@ -235,6 +249,9 @@ async def kpi_admin(request: Request):
 @router.get("/board")
 async def board(request: Request):
     import conn
+    # 현황판도 **권한 있는 사람이 보는 화면**이다 — `main.py` 가 `/board` 를 공통 가드에서
+    # 건너뛰므로 여기서 막고, 봤다는 사실을 감사에 남긴다 (G-28 · G-29 · D-218).
+    board_guard(request)
     a = anchor()
     day0 = a.replace(hour=0, minute=0, second=0, microsecond=0)
     s = settings()
@@ -271,20 +288,35 @@ async def board(request: Request):
         "from AGT_RECOMMENDATIONS order by CREATED_AT_DT desc nulls last limit 5"
     )
 
+    # 수집 상태는 `collector.status()` **정본 한 벌**을 그대로 띄운다(§10-16) — 현황판이
+    # 판정을 다시 하지 않는다. 끊겼으면 65" 화면에서 제일 먼저 보여야 할 사실이다(G-12).
+    st = collection_status()
+    devices = [{"name": d["device_name"],
+                "last": dt(d["last_collect_dt"], "%Y-%m-%d %H:%M:%S")
+                        if d["last_collect_dt"] else http.not_collected(COLLECT_DECISION),
+                "stale": bool(d["stale"]), "notice": d["notice"] or "",
+                "signals": int(d["signal_cnt"])} for d in st["devices"]]
+
     return render(request, "board.html",
+                  kiosk=True,                     # 65" 현황판 — 메뉴·헤더 배지·푸터를 접는다
                   common=design.common_screens()["dashboard"],
                   refresh=refresh,
                   anchor_text=dt(a),
                   official=official,
                   quality=q,
+                  quality_caveat=q.pass_rate_caveat,
                   not_official=kpimod.NOT_OFFICIAL_NOTE,
+                  collect=st, devices=devices,
+                  checked_at=dt(st["checked_at"], "%Y-%m-%d %H:%M:%S"),
                   cards=[
                       {"label": "금일 실적", "value": f"{int(today['n'] or 0):,} 건",
                        "sub": f"수량 {float(today['good'] or 0):,.0f} ea"},
                       {"label": "검사 합격률",
                        "value": f"{q.pass_rate:,.1f} %" if q.pass_rate is not None
                                 else http.not_collected(COLLECT_DECISION),
-                       "sub": "운영지표 — 공식 성과지표 아님", "off": q.pass_rate is None},
+                       "sub": "운영지표 — 공식 성과지표 아님"
+                              + (f" · {q.pass_rate_caveat}" if q.pass_rate_caveat else ""),
+                       "off": q.pass_rate is None},
                       {"label": "출하 예정", "value": f"{int(ship.get('planned') or 0):,} 건",
                        "sub": f"확정 {int(ship.get('done') or 0):,} 건"},
                       {"label": "설비 가동률",
@@ -294,6 +326,7 @@ async def board(request: Request):
                       {"label": "설비 알람", "value": f"{int(alarms['n'] or 0):,} 건"},
                   ],
                   progress=[{"label": f"{r['project_no']} {r['project_name']}",
+                             "href": f"{HISTORY_PATH}?project={r['project_no']}",
                              "percent": int(round(int(r["done"]) / int(r["total"]) * 100))
                                         if r["total"] else 0,
                              "text": f"{r['done']}/{r['total']} 공정 · 납기 {r['due_dt'] or '—'}"}
@@ -302,5 +335,6 @@ async def board(request: Request):
                          "left": (r["due_dt"] - a.date()).days if r["due_dt"] else None,
                          "status": r["project_status"]} for r in risk],
                   reco=reco,
-                  empty_note=http.not_collected(COLLECT_DECISION),
+                  # 진행 중 프로젝트가 정말 0건인 것과 수집이 안 된 것은 다른 사실이다(§10-14).
+                  empty_note=ZERO_ACTIVE_NOTE,
                   reco_note=http.not_collected("D-08"))

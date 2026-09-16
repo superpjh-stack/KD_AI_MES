@@ -473,8 +473,11 @@ def test_인터페이스_설정값은_화면에_다시_나오지_않는다():
                              "config_value": "secret-endpoint-zzz"}).status_code == 200
     html = get("/sys/029?type=인터페이스설정").text
     assert "TEST_ENDPOINT" in html
-    assert "secret-endpoint-zzz" not in html, "암호화 저장 대상 값이 화면에 나갔다"
-    assert "(암호화 저장)" in html
+    assert "secret-endpoint-zzz" not in html, "비표시 대상 값이 화면에 나갔다"
+    # 라벨 정정: 암호화하는 코드가 없다(D-15 — TLS·알고리즘·해시가 정본에 없다). 화면이
+    # 실제로 하는 일은 비표시뿐이라 '(암호화 저장)' 은 거짓 표기였다.
+    assert "값 비표시 (암호화 미구현 — D-15)" in html
+    assert "(암호화 저장)" not in html
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -1,8 +1,16 @@
 {% set page = (request.query_params.get('page') or '1')|int %}
 {% set size = (request.query_params.get('size') or '20')|int %}
+{% set total = total if total is defined and total is not none else rows|length %}
+{% set pages = ((total + size - 1) // size) if total else 1 %}
+{% set extra_columns = extra_columns if extra_columns is defined else [] %}
+{% set row_form = row_form if row_form is defined else none %}
+{% set span = mockup.grid_columns|length + extra_columns|length + (1 if row_form else 0) %}
 {# AI Agent 통합관리 목록 화면 골격 (039·040·041·042) — TD3 mockup 'list'.
-   AI 산출값은 신뢰도·근거·검토 상태를 함께 표시한다(layout_rules 'AI 결과 표기'). #}
+   AI 산출값은 신뢰도·근거·검토 상태를 함께 표시한다(layout_rules 'AI 결과 표기').
+   **검토·승인은 행에서 한다** — AI 결과를 사람이 승인해야 반영된다(G-24). 승인 권한이
+   없으면 버튼이 비활성이고 왜 그런지 옆에 적는다(G-28). #}
 {% extends "base.html" %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -41,25 +49,55 @@
 </div>
 
 <div class="card">
-  <h2>{{ mockup.tabs[-1] if mockup.tabs else screen.name }} — {{ rows|length }} 건</h2>
+  <h2>{{ mockup.tabs[-1] if mockup.tabs else screen.name }} — 총 {{ total }} 건</h2>
   <div class="tablewrap">
     <table>
-      <thead><tr>{% for c in mockup.grid_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <thead><tr>
+        {% for c in mockup.grid_columns %}<th>{{ c }}</th>{% endfor %}
+        {% for c in extra_columns %}<th>{{ c }}</th>{% endfor %}
+        {% if row_form %}<th>{{ row_form.title }}</th>{% endif %}
+      </tr></thead>
       <tbody>
         {% for r in rows %}
-        <tr>{% for cell in r.cells %}
-          <td>{% if r.link and loop.index0 == r.link_index %}<a href="{{ r.link }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
-        {% endfor %}</tr>
+        <tr>
+          {% for cell in r.cells %}
+          <td>{% if r.links.get(loop.index0) %}<a href="{{ r.links[loop.index0] }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
+          {% endfor %}
+          {% for e in r.extra %}
+          <td>{% if e.link %}<a href="{{ e.link }}">{{ e.text }}</a>{% else %}{{ e.text }}{% endif %}</td>
+          {% endfor %}
+          {% if row_form %}
+          <td>
+            {% if row_form.can %}
+            <form method="post" action="{{ r.form_action }}">{{ csrf_field() }}
+              <input type="hidden" name="screen_id" value="{{ row_form.screen_id }}">
+              {% for s in row_form.selects %}
+              <label for="{{ s.name }}-{{ r.form_id }}">{{ s.label }}</label>
+              <select id="{{ s.name }}-{{ r.form_id }}" name="{{ s.name }}"{% if s.required %} required{% endif %}>
+                <option value="">선택</option>
+                {% for o in s.options %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+              </select>
+              {% endfor %}
+              <button type="submit">{{ row_form.button }}</button>
+            </form>
+            {% else %}
+            <button type="button" disabled title="{{ row_form.note }}">{{ row_form.button }}</button>
+            <span class="meta">{{ row_form.note }}</span>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
         {% else %}
-        <tr><td class="empty" colspan="{{ mockup.grid_columns|length }}">{{ empty_note }}</td></tr>
+        <tr><td class="empty" colspan="{{ span }}">{{ empty_note }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   <p class="meta">
-    페이지 {{ page }} · 쪽당 {{ size }}
-    {% if page > 1 %}<a href="?page={{ page - 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">이전</a>{% endif %}
-    {% if rows|length == size %}<a href="?page={{ page + 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">다음</a>{% endif %}
+    총 {{ total }} 건 · 페이지 {{ page }}/{{ pages }} · 쪽당 {{ size }}
+    {% set qs %}{% for k, v in filters.items() %}{% if v %}&amp;{{ k }}={{ v|urlencode }}{% endif %}{% endfor %}{% endset %}
+    {% if page > 1 %}<a href="?page={{ page - 1 }}&amp;size={{ size }}{{ qs }}">이전</a>{% endif %}
+    {% if page < pages %}<a href="?page={{ page + 1 }}&amp;size={{ size }}{{ qs }}">다음</a>{% endif %}
   </p>
 </div>
 

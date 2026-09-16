@@ -12,7 +12,6 @@
 
   {% if signed_in %}
   <p>로그인했다 — 계정 <b>{{ signed_in.login_id }}</b> · 역할 {{ role.name if role else signed_in.role_code }}
-     · 세션 {{ signed_in.sid }}
      {% if idle_minutes %}· 유휴 {{ idle_minutes.value }}분이 지나면 자동 로그아웃된다
      <span class="badge undetermined">{{ idle_minutes.badge }}</span>{% endif %}</p>
   <p><a href="/">메인 화면으로</a> — 좌측 메뉴는 권한 있는 화면만 나온다 (G-28).</p>
@@ -23,9 +22,9 @@
   <h2>비밀번호 변경</h2>
   <form method="post" action="/password">
     {{ csrf_field() }}
-    <label>현재 비밀번호 <input type="password" name="current_password" required></label>
-    <label>새 비밀번호 <input type="password" name="new_password" required></label>
-    <label>새 비밀번호 확인 <input type="password" name="confirm_password" required></label>
+    <label>현재 비밀번호 <input type="password" name="current_password" autocomplete="current-password" required></label>
+    <label>새 비밀번호 <input type="password" name="new_password" autocomplete="new-password" required></label>
+    <label>새 비밀번호 확인 <input type="password" name="confirm_password" autocomplete="new-password" required></label>
     <button type="submit">변경</button>
   </form>
   <p class="meta">정책을 지키지 않으면 422 로 막힌다 — 아래 표의 값이 기준이다 (9.2-2 · 가설 D-16).</p>
@@ -38,7 +37,7 @@
     {% for label in common.mockup.search_fields %}
     <label>{{ label }}
       {% if loop.first %}
-      <input type="text" name="login_id" autocomplete="username" required>
+      <input type="text" name="login_id" autocomplete="username" required autofocus>
       {% else %}
       <input type="password" name="password" autocomplete="current-password" required>
       {% endif %}
@@ -50,17 +49,21 @@
     {% endfor %}
   </form>
   <p class="meta">비밀번호는 <b>POST 본문</b>으로만 보낸다 — 쿼리스트링에 싣지 않는다 (9.2 ① · G-29).
-     실패는 계정·IP 단위로 세어 한도에서 잠근다.</p>
+     실패는 계정·IP 단위로 세어 한도에서 잠근다. 비밀번호를 잃었으면 시스템 관리자가 재발급한다(`make ops-password`).</p>
   {% endif %}
+</div>
 
-  <pre class="src">{{ common['items'] }}</pre>
-  <h2>검토 사항</h2><pre class="src">{{ common.checks }}</pre>
-  <h2>계정 정책 (가설값 — 사업계획서 9.2 는 수치를 적지 않았다)</h2>
+{# 정본 문장·정책은 접어 둔다 — 로그인 화면의 본문은 로그인이다(D-211). 숨기지는 않는다. #}
+<details class="card">
+  <summary class="meta">화면 정의(SF-TD3 common/login) · 계정 정책 (가설값 — 사업계획서 9.2 는 수치를 적지 않았다)</summary>
+  <p class="meta">{{ common['items'] }}</p>
+  <h2>검토 사항</h2><p class="meta">{{ common.checks }}</p>
+  <h2>계정 정책</h2>
   <div class="tablewrap"><table>
     <thead><tr><th>항목</th><th>값</th><th>근거</th></tr></thead>
     <tbody>
     {% for h in policy %}<tr><td>{{ h.what }}</td><td>{{ h.value }}</td><td><span class="badge undetermined">{{ h.badge }}</span></td></tr>{% endfor %}
     </tbody>
   </table></div>
-</div>
+</details>
 {% endblock %}

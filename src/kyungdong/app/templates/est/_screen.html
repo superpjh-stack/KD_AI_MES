@@ -1,10 +1,19 @@
 {% set page = (request.query_params.get('page') or '1')|int %}
 {% set size = (request.query_params.get('size') or '20')|int %}
+{% set total = total if total is defined and total is not none else rows|length %}
+{% set pages = ((total + size - 1) // size) if total else 1 %}
+{% set extra_columns = extra_columns if extra_columns is defined else [] %}
+{% set extra_filters = extra_filters if extra_filters is defined else {} %}
+{% set row_form = row_form if row_form is defined else none %}
+{% set span = mockup.grid_columns|length + extra_columns|length + (1 if row_form else 0) %}
 {# 수주견적AI관리 공통 골격 — TD3 layout_rules 그대로.
    상단 조회조건(최대 6) · 중앙 그리드(열 최대 7) · 우측 설명 패널.
    화면의 모든 칸은 `design.screen(sid)["mockup"]` 에서 온다 — 손으로 적지 않는다.
+   **정본 열 뒤에 붙는 것**만 `extra_columns`(근거·스레드 이동)과 승인 폼 한 칸이다 —
+   정본 열을 바꾸지 않으면서 근거와 사람 승인(G-24)을 같은 행에서 보게 한다.
    CSS 는 `app/static/app.css` 단일 파일만 쓴다(§10-13). 개발자 CSS·미디어쿼리 없음. #}
 {% extends "base.html" %}
+{% from "_macros.html" import csrf_field with context %}
 {% block title %}{{ screen.no }} {{ screen.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -26,6 +35,9 @@
 <div class="card">
   <h2>조회 조건</h2>
   <form method="get" action="{{ screen.path }}">
+    {% for k, v in extra_filters.items() %}{% if v %}
+    <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {% endif %}{% endfor %}
     <div class="tablewrap">
       <table>
         <thead><tr>{% for f in mockup.search_fields %}<th>{{ f }}</th>{% endfor %}</tr></thead>
@@ -43,6 +55,8 @@
       {% for b in mockup.buttons %}
         {% if loop.first %}
       <button type="submit">{{ b }}</button>
+        {% elif button_links is defined and button_links.get(b) %}
+      <a href="{{ button_links[b] }}">{{ b }}</a>
         {% else %}
       <button type="button" disabled title="{{ actions.get(b, '') }}">{{ b }}</button>
         {% endif %}
@@ -55,27 +69,60 @@
 </div>
 
 <div class="card">
-  <h2>{{ mockup.tabs[-1] if mockup.tabs else screen.name }} — {{ rows|length }} 건</h2>
+  <h2>{{ mockup.tabs[-1] if mockup.tabs else screen.name }} — 총 {{ total }} 건
+    {% if grid_badges is defined %}{% for b in grid_badges %}<span class="badge {{ b.kind }}">{{ b.text }}</span> {% endfor %}{% endif %}
+  </h2>
   <div class="tablewrap">
     <table>
-      <thead><tr>{% for c in mockup.grid_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <thead><tr>
+        {% for c in mockup.grid_columns %}<th>{{ c }}</th>{% endfor %}
+        {% for c in extra_columns %}<th>{{ c }}</th>{% endfor %}
+        {% if row_form %}<th>{{ row_form.title }}</th>{% endif %}
+      </tr></thead>
       <tbody>
         {% for r in rows %}
         <tr>
           {% for cell in r.cells %}
-          <td>{% if r.link and loop.index0 == r.link_index %}<a href="{{ r.link }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
+          <td>{% if r.links.get(loop.index0) %}<a href="{{ r.links[loop.index0] }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
           {% endfor %}
+          {% for e in r.extra %}
+          <td>{% if e.link %}<a href="{{ e.link }}">{{ e.text }}</a>{% else %}{{ e.text }}{% endif %}</td>
+          {% endfor %}
+          {% if row_form %}
+          <td>
+            {% if row_form.can %}
+            <form method="post" action="{{ row_form.action }}">{{ csrf_field() }}
+              <input type="hidden" name="{{ row_form.id_name }}" value="{{ r.form_id }}">
+              {% for s in row_form.selects %}
+              <label for="{{ s.name }}-{{ r.form_id }}">{{ s.label }}</label>
+              <select id="{{ s.name }}-{{ r.form_id }}" name="{{ s.name }}"{% if s.required %} required{% endif %}>
+                <option value="">선택</option>
+                {% for o in s.options %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+              </select>
+              {% endfor %}
+              {% for t in row_form.texts %}
+              <input name="{{ t.name }}" value="" aria-label="{{ t.label }}" placeholder="{{ t.label }}">
+              {% endfor %}
+              <button type="submit">{{ row_form.button }}</button>
+            </form>
+            {% else %}
+            <button type="button" disabled title="{{ row_form.note }}">{{ row_form.button }}</button>
+            <span class="meta">{{ row_form.note }}</span>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% else %}
-        <tr><td class="empty" colspan="{{ mockup.grid_columns|length }}">{{ empty_note }}</td></tr>
+        <tr><td class="empty" colspan="{{ span }}">{{ empty_note }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   <p class="meta">
-    페이지 {{ page }} · 쪽당 {{ size }}
-    {% if page > 1 %}<a href="?page={{ page - 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">이전</a>{% endif %}
-    {% if rows|length == size %}<a href="?page={{ page + 1 }}&size={{ size }}{% for k, v in filters.items() %}{% if v %}&{{ k }}={{ v }}{% endif %}{% endfor %}">다음</a>{% endif %}
+    총 {{ total }} 건 · 페이지 {{ page }}/{{ pages }} · 쪽당 {{ size }}
+    {% set qs %}{% for k, v in filters.items() %}{% if v %}&amp;{{ k }}={{ v|urlencode }}{% endif %}{% endfor %}{% for k, v in extra_filters.items() %}{% if v %}&amp;{{ k }}={{ v|urlencode }}{% endif %}{% endfor %}{% endset %}
+    {% if page > 1 %}<a href="?page={{ page - 1 }}&amp;size={{ size }}{{ qs }}">이전</a>{% endif %}
+    {% if page < pages %}<a href="?page={{ page + 1 }}&amp;size={{ size }}{{ qs }}">다음</a>{% endif %}
   </p>
 </div>
 

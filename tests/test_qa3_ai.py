@@ -347,20 +347,31 @@ def test_g24_confirm_yn_has_exactly_one_write_path():
     assert len(objs) == 1, f"EST_CAD_OBJECTS 쓰기 경로가 {objs} 다 — 하나여야 한다"
 
 
-def test_g24_inspections_have_no_write_path_yet():
-    """**차단 표지** — `SHP_INSPECTIONS` 에 앱 쓰기 경로가 아직 0곳이다.
+def test_g24_inspections_write_path_is_one_and_guarded(client):
+    """**표지를 뒤집었다** — `SHP_INSPECTIONS` 쓰기 경로가 0곳이던 시절의 차단 표지였다.
 
-    '승인 없이 바뀌는 경로 0' 이 통제 때문이 아니라 **구현 부재** 때문임을 못박는다.
-    검사 합격 판정 화면(018)이 붙으면 이 테스트가 실패한다 → 그때 G-24 를 다시 재라.
+    018 검사결과 등록(`POST /shp/018`)이 붙었다. '승인 없이 바뀌는 경로 0' 이 이제
+    **구현 부재가 아니라 통제** 로 성립하는지 잰다 — 쓰기 경로는 **정확히 1곳**이고,
+    출하물류관리 등록 권한이 없는 역할은 403, 있는 역할은 권한 문 뒤의 입력값 검증(422)까지 간다.
     """
-    n = 0
+    hits = []
     for p in (ROOT / "src").rglob("*.py"):
-        for line in p.read_text().splitlines():
+        for i, line in enumerate(p.read_text().splitlines(), 1):
             if __import__("re").search(r"(insert\s+into|update)\s+SHP_INSPECTIONS\b",
                                        line, __import__("re").I):
-                n += 1
-    assert n == 0, ("SHP_INSPECTIONS 쓰기 경로가 생겼다 — 검사 합격 판정이 "
-                    "품질 담당 승인 아래 있는지 G-24 를 다시 재라")
+                hits.append((p.relative_to(ROOT).as_posix(), i))
+    assert len(hits) == 1 and hits[0][0].endswith("routers/shp.py"), (
+        f"SHP_INSPECTIONS 쓰기 경로는 018 하나여야 한다: {hits}")
+
+    form = {"lot_trace_id": "999999", "inspect_type": "수압시험", "qstd_id": "999999",
+            "measured_value": "1"}
+    for role in sorted(rbac.roles()):
+        r = csrf_post(client, "/shp/018", form, headers={"x-kyungdong-role": role},
+                      follow_redirects=False)
+        if rbac.can_write(role, "출하물류관리"):
+            assert r.status_code == 422, f"{role}: 권한 문을 지나 입력값 검증(422)이어야 한다: {r.status_code}"
+        else:
+            assert r.status_code == 403, f"{role}(출하물류관리 W 없음): {r.status_code} — 403 이어야 한다"
 
 
 # ── G-25 MLOps ───────────────────────────────────────────────────────────
