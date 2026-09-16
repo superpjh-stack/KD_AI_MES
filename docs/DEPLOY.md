@@ -34,17 +34,27 @@ openssl rand -base64 32   # KYUNGDONG_SESSION_SECRET
 
 `KYUNGDONG_SESSION_SECRET` 은 **고정값**이어야 한다. 바뀌면 접속 중인 사용자가 전원 로그아웃된다.
 
-### 2. Compose → **Compose from URL**
+### 2. 저장소를 VPS 에 받아 둔다 — hPanel 우상단 **Web console**
+
+Docker Manager 는 저장소를 빌드하지 않는다 — **Compose from URL 에 저장소 URL 을 주면 빈 `services:` 만 남았다**(실측).
+그래서 웹 콘솔에서 저장소를 받아 두고, compose 의 빌드 컨텍스트로 그 경로를 준다.
+
+```bash
+cd /root && git clone https://github.com/superpjh-stack/KD_AI_MES.git     # 갱신은 cd KD_AI_MES && git pull
+```
+
+### 3. Compose → **Compose manually** (또는 만들어 둔 `kyungdong` 앱의 .yaml 편집기)
 
 | 칸 | 값 |
 |---|---|
 | Application name | `kyungdong` |
-| URL | `https://github.com/superpjh-stack/KD_AI_MES` (저장소 루트의 `docker-compose.yml` · `build: .`) |
+| .yaml editor | `docker/compose.hostinger.yml` 내용 그대로 (`build.context: /root/KD_AI_MES`) |
 | Environment | `POSTGRES_PASSWORD=…` `KYUNGDONG_SESSION_SECRET=…` `KYUNGDONG_PORT=8020` `KYUNGDONG_ENV=dev` |
 
 Deploy 를 누르면 이미지를 빌드하고(약 3~5분 — xgboost·shap·scikit-learn 설치) 두 컨테이너가 뜬다.
+코드를 바꾼 뒤에는 웹 콘솔에서 `git pull` 하고 Docker Manager 에서 다시 Deploy 한다.
 
-### 3. 최초 기동 로그에서 계정 비밀번호를 받아 적는다
+### 4. 최초 기동 로그에서 계정 비밀번호를 받아 적는다
 
 엔트리포인트가 **DB 대기 → 스키마(68테이블) → 시드** 를 순서대로 한다. 시드는 계정 6개
 (`admin` `exec` `prod` `quality` `operator` `supplier`)를 만들고 **계정별 난수 비밀번호를 로그에 딱 한 번**
@@ -64,7 +74,7 @@ Deploy 를 누르면 이미지를 빌드하고(약 3~5분 — xgboost·shap·sci
 python tools/ops_password.py --login admin
 ```
 
-### 4. 확인
+### 5. 확인
 
 ```
 http://187.52.127.215:8020/health     → {"status":"ok","canon":"45/10/49/68/762 일치"}
@@ -73,7 +83,7 @@ http://187.52.127.215:8020/dsh/003    → 설비상태 모니터링 (실시간 �
 
 hPanel 방화벽에서 8020 이 열려 있어야 한다. `canon` 이 일치하지 않으면 정본 파일이 이미지에 빠진 것이다.
 
-### 5. 시연 — PLC 시뮬레이터
+### 6. 시연 — PLC 시뮬레이터
 
 컨테이너 안에서 돌린다(장비 IP 가 없어 실물은 못 붙는다, D-169). 데이터에는 시뮬레이터 표지가 남는다(D-174).
 

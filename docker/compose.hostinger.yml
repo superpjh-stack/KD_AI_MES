@@ -1,0 +1,78 @@
+# 경동글로벌텍 제조AI (SF26179182) — Hostinger VPS Docker Manager 에 **붙여넣는 판** (Compose manually).
+# 저장소 루트의 docker-compose.yml 과 같되 빌드 컨텍스트가 VPS 의 절대경로다 — 웹 콘솔에서 먼저 `git clone` 해 둔다 (docs/DEPLOY.md §2).
+# 사업계획서 2.4 는 AP 1 · DB 2 · Vector DB 1 · AI 1 의 5대를 계상하나, 이 배포는 **VPS 1대에 컨테이너 2개**다
+# (앱 + PostgreSQL 17 + pgvector 확장). 차이는 docs/DEPLOY.md 에 적었다 — 검수 시 SF-PM3 변경관리내역서 대상.
+#
+# 비밀은 저장소 밖(.env / Docker Manager 의 Environment)에만 둔다. 필요한 키:
+#   POSTGRES_PASSWORD (필수) · KYUNGDONG_SESSION_SECRET (필수 — prod 에서는 없으면 기동 거부)
+#   KYUNGDONG_ENV (dev|prod — **prod 는 HTTPS 종단 뒤에서만**, D-208) · KYUNGDONG_PORT (기본 8020)
+#   KYUNGDONG_SEED_PASSWORD (선택 — 자동화·시연용 고정 비밀번호. 비우면 난수 1회 출력, G-29)
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: kyungdong-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kyungdong_db
+      POSTGRES_USER: kyungdong
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 를 .env 에 설정하라}
+      TZ: Asia/Seoul
+    volumes:
+      - kyungdong-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyungdong -d kyungdong_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # 외부에 DB 포트를 열지 않는다 (사업계획서 9.2-3 외부 접속 최소화). 앱 컨테이너만 내부 네트워크로 접근한다.
+    expose:
+      - "5432"
+
+  app:
+    build:
+      context: /root/KD_AI_MES
+    image: kyungdong-app:latest
+    container_name: kyungdong-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      KYUNGDONG_PG_DSN: "postgresql://kyungdong:${POSTGRES_PASSWORD}@db:5432/kyungdong_db"
+      # 재기동해도 로그인이 풀리지 않게 반드시 고정값. prod 에서는 비어 있으면 기동 자체를 거부한다 (G-26).
+      KYUNGDONG_SESSION_SECRET: ${KYUNGDONG_SESSION_SECRET:?KYUNGDONG_SESSION_SECRET 를 .env 에 설정하라}
+      # dev = 로그인 없이 열림(D-206) / prod = 로그인 필수 + 쿠키 Secure·HSTS.
+      # **HTTPS 없이 prod 로 두면 로그인이 되지 않는다** (D-208). HTTPS 종단은 docs/DEPLOY.md §HTTPS.
+      KYUNGDONG_ENV: ${KYUNGDONG_ENV:-dev}
+      KYUNGDONG_PORT: "8020"
+      KYUNGDONG_CSRF_ENFORCE: "1"
+      # 시드 계정 비밀번호 — 비우면 최초 1회 난수를 로그에 출력한다(운영 권장). 재기동해도 기존 계정은 바뀌지 않는다 (D-207).
+      KYUNGDONG_SEED_PASSWORD: ${KYUNGDONG_SEED_PASSWORD:-}
+      # 표본 크기 (D-199). 기본 40 — 근거 있는 수라 함부로 바꾸지 않는다.
+      KYUNGDONG_SAMPLE_LOTS: ${KYUNGDONG_SAMPLE_LOTS:-40}
+      # D-08 미확정. 비우면 Agent 는 501 "LLM 미구성" 을 명시 렌더한다 (조용한 폴백 없음).
+      KYUNGDONG_LLM_PROVIDER: ${KYUNGDONG_LLM_PROVIDER:-}
+      KYUNGDONG_LLM_MODEL: ${KYUNGDONG_LLM_MODEL:-}
+      KYUNGDONG_EMBED_PROVIDER: ${KYUNGDONG_EMBED_PROVIDER:-}
+      # D-05 미확보. 비우면 CAD 인식은 501 + 명시 배지.
+      KYUNGDONG_CAD_PARSER: ${KYUNGDONG_CAD_PARSER:-}
+      # 실시간 패널·시뮬레이터 주기(가설 D-06). VPS 에서는 2초가 알맞다.
+      KYUNGDONG_PLC_POLL_SEC: ${KYUNGDONG_PLC_POLL_SEC:-2}
+      TZ: Asia/Seoul
+    volumes:
+      # PLC 시뮬레이터의 장비 측 저장소(work/plc_device.db). 재기동해도 미전송분이 남는다.
+      - kyungdong-work:/app/work
+    ports:
+      # 직접 접속(평문). HTTPS 를 붙인 뒤에도 남겨 두면 점검·되돌리기에 쓴다.
+      - "${KYUNGDONG_PORT:-8020}:8020"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8020/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # 최초 기동은 스키마 + 시드(표본 40 · CAD 표본 781)까지 한다.
+      start_period: 240s
+
+volumes:
+  kyungdong-pgdata:
+  kyungdong-work:
