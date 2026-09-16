@@ -20,7 +20,7 @@
 ## 같은 VPS 의 다른 앱과 포트
 
 이 VPS 에는 다른 사업의 앱 13개가 떠 있다(afc200 · kwangsung · kkotsuni · imjingang · jaeil_pm · …).
-호스트 포트 사용 중: **3000 · 8000 · 8010 · 8011 · 8012 · 8501 · 8504 · 8505 · 8507 · 8600 · 443(Caddy)**.
+호스트 포트 사용 중(실측 `docker ps`): **3000 · 8000 · 8010 · 8011 · 8012 · 8501 · 8502 · 8504 · 8505 · 8506 · 8507 · 8600 · 443(Caddy)**.
 이 앱은 **8020** 을 쓴다 (goal.md §8 의 개발 포트와 같다). 겹치면 `KYUNGDONG_PORT` 로 바꾼다.
 
 ## 절차 — hPanel → VPS → Docker Manager
@@ -34,25 +34,38 @@ openssl rand -base64 32   # KYUNGDONG_SESSION_SECRET
 
 `KYUNGDONG_SESSION_SECRET` 은 **고정값**이어야 한다. 바뀌면 접속 중인 사용자가 전원 로그아웃된다.
 
-### 2. 저장소를 VPS 에 받아 둔다 — hPanel 우상단 **Web console**
+### 2. Compose → **Compose from URL** 로 만들되, 환경변수를 먼저 알아 둔다
 
-Docker Manager 는 저장소를 빌드하지 않는다 — **Compose from URL 에 저장소 URL 을 주면 빈 `services:` 만 남았다**(실측).
-그래서 웹 콘솔에서 저장소를 받아 두고, compose 의 빌드 컨텍스트로 그 경로를 준다.
+실측(2026-09-16): URL 에 `https://github.com/superpjh-stack/KD_AI_MES/blob/master/docker-compose.yml` 을 주면 Docker Manager 가
+**저장소를 `/root/.ssh/kwangsung_deploy` 키로 clone 하고 `/docker/kyungdong` 에 두고 빌드까지 한다**(`build: .` 동작).
+그런데 이 화면에는 환경변수 칸이 없어 **첫 배포는 `POSTGRES_PASSWORD 를 .env 에 설정하라` 로 반드시 실패**하고,
+앱이 `Created` 상태로 목록에 남는다. 그 뒤 `Manage` → **환경(Environment)** 편집기에 아래 5줄을 넣고 다시 배포하면 된다.
 
-```bash
-cd /root && git clone https://github.com/superpjh-stack/KD_AI_MES.git     # 갱신은 cd KD_AI_MES && git pull
+```
+POSTGRES_PASSWORD=<openssl rand -base64 32 | tr -d '/+='>
+KYUNGDONG_SESSION_SECRET=<openssl rand -base64 48 | tr -d '/+='>
+KYUNGDONG_ENV=dev
+KYUNGDONG_PORT=8020
+KYUNGDONG_PLC_POLL_SEC=2
 ```
 
-### 3. Compose → **Compose manually** (또는 만들어 둔 `kyungdong` 앱의 .yaml 편집기)
+**주의 — 저장소의 기본 브랜치는 `main`(Initial commit 뿐)이고 코드는 `master` 에 있다.** URL 에 `blob/master/` 를 꼭 넣는다.
+`main` 을 받으면 compose 가 없어 `no configuration file provided` 가 난다.
 
-| 칸 | 값 |
-|---|---|
-| Application name | `kyungdong` |
-| .yaml editor | `docker/compose.hostinger.yml` 내용 그대로 (`build.context: /root/KD_AI_MES`) |
-| Environment | `POSTGRES_PASSWORD=…` `KYUNGDONG_SESSION_SECRET=…` `KYUNGDONG_PORT=8020` `KYUNGDONG_ENV=dev` |
+### 3. SSH 로 하는 동등한 절차 (이번 배포는 이 길로 했다)
 
-Deploy 를 누르면 이미지를 빌드하고(약 3~5분 — xgboost·shap·scikit-learn 설치) 두 컨테이너가 뜬다.
-코드를 바꾼 뒤에는 웹 콘솔에서 `git pull` 하고 Docker Manager 에서 다시 Deploy 한다.
+```bash
+ssh -i ~/.ssh/hostinger root@187.52.127.215
+git clone -b master https://github.com/superpjh-stack/KD_AI_MES.git /docker/kyungdong   # Docker Manager 가 보는 위치
+cd /docker/kyungdong
+umask 077; printf 'POSTGRES_PASSWORD=%s\nKYUNGDONG_SESSION_SECRET=%s\nKYUNGDONG_ENV=dev\nKYUNGDONG_PORT=8020\nKYUNGDONG_PLC_POLL_SEC=2\n' \
+  "$(openssl rand -base64 32 | tr -d '/+=')" "$(openssl rand -base64 48 | tr -d '/+=')" > .env   # 비밀은 서버에서 만들고 어디에도 안 적는다
+docker compose -p kyungdong up -d --build
+docker compose -p kyungdong logs -f app          # 계정 비밀번호가 여기 딱 한 번 찍힌다
+```
+
+코드를 바꾼 뒤에는 `cd /docker/kyungdong && git pull && docker compose -p kyungdong up -d --build`.
+`/docker/<이름>` 에 있는 compose 프로젝트는 Docker Manager 목록에 그대로 나타난다.
 
 ### 4. 최초 기동 로그에서 계정 비밀번호를 받아 적는다
 

@@ -1164,6 +1164,21 @@ URL 도 잡았는데 **검사를 고치지 않고 문구를 바꿨다.**
 - **한 줄 시연은 `make demo`** — 서버·작업지시·시뮬레이터를 함께 올리고 Ctrl-C 로 함께 내린다(D-230). 커밋 `4ab27cf` · 원격 https://github.com/superpjh-stack/KD_AI_MES `master`.
 - 수집에 부산물이 생겼다(알림추천·자동 실적). **수집을 넣는 시험·검사기는 이 둘도 지운다** — 안 지우면 다음 시험의 0건 전제가 깨지고 그 원인은 다른 파일에서 보인다.
 
+## Hostinger VPS 배포 (D-231 · D-232)
+
+> 2026-09-16. 사용자: *"https://hpanel.hostinger.com/vps/1934103/docker-manager 에 배포해줘"*
+
+| | 실측 |
+|---|---|
+| 주소 | `http://187.52.127.215:8020` (srv1934103.hstgr.cloud) · dev 프로파일 — 로그인 없이 열린다(D-206), 시연·검증용 |
+| `/health` | `{"status":"ok","canon":"45/10/49/68/762 일치"}` (VPS 안·밖 모두) |
+| 컨테이너 | `kyungdong-app` healthy · `kyungdong-db`(pgvector/pg17) healthy · 프로젝트 `/docker/kyungdong` — Docker Manager 목록에 나타난다 |
+| 엔트리포인트 | DB 대기 → 스키마 **68표 · 762컬럼** → 시드 4종(계정 6개 비밀번호 로그 1회 출력) → uvicorn. 빌드 196초 |
+| 화면 | 003 200 (실시간 패널 · 신호 0건이라 `미수집 (D-06)`) · `/api/ingest/live` 200 |
+| 만든 것 | `Dockerfile` · `docker-compose.yml` · `docker/entrypoint.sh` · `.dockerignore` · `docs/DEPLOY.md` |
+| 잡은 것 | Compose from URL 은 clone+build 까지 한다(환경변수만 빠져 첫 회 실패) · 기본 브랜치 `main` 함정 · `workflow` 토큰 범위 없어 Actions 워크플로 보류 (D-232) |
+| 안 한 것 | HTTPS·prod — 이 VPS 의 443·호스트명은 광성정밀 Caddy 가 쥐고 있다. 절차만 DEPLOY.md 에 적었다(D-231) |
+
 ## 다음에 할 일
 
 **열린 항목은 `make check-decisions` 가 항상 실측으로 답한다**(현재 **29건**) — 이 목록을
