@@ -18,8 +18,8 @@ from ..templating import render
 from ..util import codes, csrf, http
 from .dsh import (COLLECT_DECISION, HISTORY_PATH, STD_COND_DECISION, anchor, cell,
                   collection_badges, count_total, ctx, date_range, day_prefix, dt, guard,
-                  lot_cell, mock, num, page_of, pager, parse_datetime, process_names,
-                  process_options, project_cell, range_wired, safe_next, writing)
+                  live_poll_sec, lot_cell, mock, num, page_of, pager, parse_datetime,
+                  process_names, process_options, project_cell, range_wired, safe_next, writing)
 
 router = APIRouter()
 SCREENS = ("MES-TD3-021", "MES-TD3-022", "MES-TD3-023", "MES-TD3-024", "MES-TD3-025")
@@ -273,8 +273,11 @@ async def signals(request: Request):
         cell(num(r["temp_value"], 4), num=True),
     ] for i, r in enumerate(rows, 1)]
 
+    from ...ingest import mes
     return render(request, "prc/022.html", **ctx(
         request, screen, td3,
+        # 실시간 패널 (D-223) — TD3 022 버튼 '실시간 보기'. API 와 같은 함수로 처음 그린다.
+        live=mes.live_snapshot(), live_poll_sec=live_poll_sec(),
         wired={"설비 코드": {"name": "equip", "value": f["equip"], "hint": "EQ10 / EQ20"},
                "수집 기간": range_wired("수집 기간", f),
                "가동 상태": {"name": "status", "value": f["status"], "hint": "가동/정지/대기/알람"},

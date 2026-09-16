@@ -217,7 +217,9 @@ td.d2-num{text-align:right;font-variant-numeric:tabular-nums}
 <div class="d2-acts">
   {% for b in buttons %}
   {% set e = enabled.get(b) %}
-  {% if e %}
+  {% if e and e.href %}
+  <a class="d2-btn {{ 'pri' if e.primary }}" href="{{ e.href }}" title="{{ e.title or '' }}">{{ b }}</a>
+  {% elif e %}
   <button class="d2-btn {{ 'pri' if e.primary }}" type="{{ e.type or 'submit' }}"
           {% if e.form %}form="{{ e.form }}"{% endif %}
           {% if e.formaction %}formaction="{{ e.formaction }}"{% endif %}>{{ b }}</button>

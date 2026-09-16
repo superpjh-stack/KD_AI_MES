@@ -148,8 +148,11 @@ def gate_12() -> tuple[dict, list[str]]:
         "PRC_EQUIP_SIGNALS": (maxid("PRC_EQUIP_SIGNALS", "SIGNAL_ID"), one("select count(*) from PRC_EQUIP_SIGNALS")),
         "DAT_TIMESERIES": (maxid("DAT_TIMESERIES", "TS_ID"), one("select count(*) from DAT_TIMESERIES")),
         "IF_GATEWAY_BUFFER": (maxid("IF_GATEWAY_BUFFER", "BUFFER_ID"), one("select count(*) from IF_GATEWAY_BUFFER")),
+        # 수집은 MES 연계 부산물을 남긴다 (D-224) — 알람 에피소드 → 알림추천, 매핑된 신호 → 자동 실적.
+        "AGT_RECOMMENDATIONS": (maxid("AGT_RECOMMENDATIONS", "RECO_ID"), one("select count(*) from AGT_RECOMMENDATIONS")),
     }
-    clean_start = all(v[1] == 0 for v in base.values())
+    base["PRC_PERFORMANCES"] = (maxid("PRC_PERFORMANCES", "PERF_ID"), one("select count(*) from PRC_PERFORMANCES"))
+    clean_start = all(v[1] == 0 for k, v in base.items() if k != "PRC_PERFORMANCES")
 
     say("── G-12-② 0건 경로 (수집 전) ─────────────────────────────────")
     say("  " + " · ".join(f"{k} {v[1]}행" for k, v in base.items()))
@@ -791,7 +794,8 @@ def cleanup(base: dict) -> None:
     """이 검사기가 넣은 행을 **전부 지운다**. 남기면 다른 QA 의 0건 경로가 오염된다."""
     say("── 정리 (검사기가 넣은 행만 삭제) ────────────────────────────")
     for table, col in (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
-                       ("IF_GATEWAY_BUFFER", "BUFFER_ID"), ("IF_PLC_SIGNALS", "PLC_IF_ID")):
+                       ("IF_GATEWAY_BUFFER", "BUFFER_ID"), ("IF_PLC_SIGNALS", "PLC_IF_ID"),
+                       ("AGT_RECOMMENDATIONS", "RECO_ID"), ("PRC_PERFORMANCES", "PERF_ID")):
         n = conn.x(f"delete from {table} where {col} > %s", (base[table][0],))
         left = one(f"select count(*) from {table}")
         say(f"  {table:<20} 삭제 {n:>4} · 남은 {left} (검사 전 {base[table][1]})")

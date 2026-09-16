@@ -21,7 +21,7 @@ import conn
 from ..app.settings import settings
 from ..app.util import http
 from ..app.util.codes import require_code
-from . import preprocess, tags
+from . import mes, preprocess, tags
 
 # 수집 경로 라벨 — TD5 `DAT_TIMESERIES.COLLECT_PATH` 비고 그대로
 COLLECT_PATH = "PLC→Gateway→시계열DB"
@@ -56,6 +56,7 @@ class IngestResult:
     missing_rows: int = 0      # 숫자 변환 실패 — QUALITY_FLAG='결측' (버리지 않는다)
     undecided_rows: int = 0    # 표본 부족·산포 0 으로 **판정하지 않은** 행 (판정 불가)
     order: list[datetime] = field(default_factory=list)
+    mes: mes.MesLink = field(default_factory=mes.MesLink)   # 작업지시 매핑·자동 실적·알람 (D-224)
 
     @property
     def ordered(self) -> bool:
@@ -93,8 +94,13 @@ def ingest_batch(
     samples: Sequence[Sample],
     *,
     collect_path: str = COLLECT_PATH,
+    work_order_id: int | None = None,
 ) -> IngestResult:
-    """한 배치를 한 트랜잭션으로 적재한다. 순서는 **들어온 그대로** 유지한다."""
+    """한 배치를 한 트랜잭션으로 적재한다. 순서는 **들어온 그대로** 유지한다.
+
+    `work_order_id` 는 현장POP 이 지정한 작업지시다(선택). 없으면 `mes.resolve()` 규칙으로
+    붙이고, 붙일 수 없으면 NULL 로 두고 이유를 `res.mes.reason` 에 남긴다 (D-224).
+    """
     if not samples:
         raise http.fail("validation", "수집 payload 가 비어 있다")
     # 코드성 FK 는 DB 가 막지 않는다 (D-32)
@@ -197,17 +203,31 @@ def ingest_batch(
             "where DEVICE_ID = %s and IF_STATUS = %s and COLLECT_DT between %s and %s",
             ("적재", device_id, "수신", min(res.order), max(res.order)),
         )
+        # ── MES 연계 (D-224) — **같은 트랜잭션**이다. 적재만 되고 연계가 빠진 상태를 남기지 않는다.
+        # 중복으로 걸러진 배치(`by_dt` 비어 있음)는 이미 연계된 것이라 다시 하지 않는다 —
+        # 단 현장POP 이 지시를 지정해 왔으면 검증은 한다(틀린 지시를 조용히 받지 않는다).
+        if by_dt:
+            res.mes = mes.link_batch(cur, equip_code, sorted(by_dt), work_order_id)
+        elif work_order_id is not None:
+            res.mes = mes.resolve(cur, equip_code, work_order_id)
+            res.mes.reason += " · 배치 전부 중복 — 신호가 이미 적재돼 있어 다시 붙이지 않았다"
     return res
 
 
 # ── Gateway 로컬 버퍼 (IF_GATEWAY_BUFFER) ─────────────────────────────────
 def buffer(device_id: int, equip_code: str, samples: Sequence[Sample],
-           reason: str = "네트워크 단절") -> int:
-    """단절 구간의 배치를 로컬에 쌓는다. **버린 데이터가 0 이어야 한다.**"""
+           reason: str = "네트워크 단절", *, collect_path: str = COLLECT_PATH,
+           work_order_id: int | None = None) -> int:
+    """단절 구간의 배치를 로컬에 쌓는다. **버린 데이터가 0 이어야 한다.**
+
+    출처 표지(`collect_path`)와 현장POP 지정 작업지시도 **함께** 담는다 — 재전송 때 기본값으로
+    적으면 시뮬레이터 배치가 실수집 라벨로 바뀐다(D-196 과 같은 결함이 버퍼 경로에 있었다, D-227).
+    """
     if reason not in BUFFER_REASONS:
         raise http.fail("validation", f"버퍼 사유 어휘 위반: {reason!r} (TD5 {BUFFER_REASONS})")
     payload = json.dumps(
-        {"equip_code": equip_code, "samples": [s.as_dict() for s in samples]},
+        {"equip_code": equip_code, "collect_path": collect_path, "work_order_id": work_order_id,
+         "samples": [s.as_dict() for s in samples]},
         ensure_ascii=False,
     )
     row = conn.q1(
@@ -236,7 +256,9 @@ def resend(device_id: int | None = None) -> dict[str, Any]:
         body = json.loads(buf["payload"])
         samples = parse_samples(body["samples"])
         try:
-            r = ingest_batch(int(buf["device_id"]), body["equip_code"], samples)
+            r = ingest_batch(int(buf["device_id"]), body["equip_code"], samples,
+                             collect_path=body.get("collect_path") or COLLECT_PATH,
+                             work_order_id=body.get("work_order_id"))
         except Exception:
             conn.x("update IF_GATEWAY_BUFFER set RETRY_CNT = RETRY_CNT + 1 where BUFFER_ID = %s",
                    (buf["buffer_id"],))

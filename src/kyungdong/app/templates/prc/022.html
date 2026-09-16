@@ -1,8 +1,22 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{% import "dsh/_live.html" as lv %}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
-{{ kit.listing(current, td3, wired, current.path, mock.grid_columns, rows, empty_note,
-               {}, badges|default([]), notes|default([]), cards|default([]), page|default(none)) }}
+{{ kit.head(current, td3, badges|default([])) }}
+{# '실시간 보기' (TD3 022 버튼) — 실시간 패널 (D-223). 목록 조회는 그 아래 그대로다 #}
+{{ lv.live_panel(live, live_poll_sec) }}
+{% if cards is defined and cards %}{{ kit.cards(cards) }}{% endif %}
+{{ kit.filters(mock.search_fields, wired, current.path) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    <div class="card">
+      {{ kit.grid(mock.grid_columns, rows, empty_note) }}
+      {{ kit.actions(mock.buttons, {'실시간 보기': {'href': '#live', 'primary': true, 'title': '위 실시간 패널로 이동 — 수집 주기마다 갱신된다 (D-223)'}}) }}
+      {{ kit.pager(page, rows|length) }}
+    </div>
+  </div>
+  {{ kit.side(td3, notes|default([])) }}
+</div>
 {% endblock %}

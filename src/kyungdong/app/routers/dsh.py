@@ -339,6 +339,11 @@ def collection_badges() -> list[dict[str, str]]:
     return out
 
 
+def live_poll_sec() -> int:
+    """실시간 패널 갱신 주기 = PLC 수집 주기(.env, 가설 D-06). 화면은 2초보다 빠르게 두드리지 않는다."""
+    return max(2, settings().h("PLC_POLL_SEC").as_int())
+
+
 def equip_utilisation(since: datetime) -> tuple[float | None, int]:
     """가동률(%) = 가동 신호 ÷ 전체 신호 × 100. 신호가 없으면 `None` 이다."""
     import conn
@@ -511,8 +516,11 @@ async def equipment_status(request: Request):
     signal_total = sum(int(p["n"] or 0) for p in points) or 1
 
     has_signal = laser is not None
+    from ...ingest import mes
     return render(request, "dsh/003.html", **ctx(
         request, screen, td3,
+        # 실시간 패널 (D-223) — API `GET /api/ingest/live` 와 **같은 함수**로 처음 그린다.
+        live=mes.live_snapshot(), live_poll_sec=live_poll_sec(),
         cards=[
             {"label": "레이저커팅기 상태",
              "value": laser["run_status"] if has_signal else http.not_collected(COLLECT_DECISION),

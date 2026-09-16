@@ -1,6 +1,6 @@
 # 경동글로벌텍 제조AI (SF26179182) — goal.md §9 게이트 실행 명령
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
-	plc-scan plc-poll plc-status plc-register plc-unregister check-decisions \
+	plc-scan plc-poll plc-status plc-register plc-unregister plc-run plc-wo-start plc-wo-finish check-decisions \
 	run-prod ops-accounts ops-password \
         check-routes check-trace check-schema check-data check-ingest check-ai check-security \
         gate gate-full contracts
@@ -68,6 +68,18 @@ plc-register:                   ## 시뮬레이터 장비 IP 등록 + 선언 —
 
 plc-unregister:                 ## 시뮬레이터 IP·선언을 함께 거둔다 → prod 수집은 다시 403 (D-168)
 	uv run python tools/plc_simulator.py --unregister
+
+plc-run:                        ## 연속 생성 (D-222) — 멈출 때까지 주기마다 PLC→Gateway→수집 API. `make run` 필요. 화면 003·022 가 실시간 갱신
+	uv run python tools/plc_simulator.py --daemon --via http --poll-sec $(or $(POLL),2) \
+		--anomaly-rate $(or $(ANOMALY),0.02) --fault-every $(or $(FAULT_EVERY),0) $(if $(WO),--work-order $(WO),)
+
+plc-wo-start:                   ## 시험용: 레이저커팅 작업지시를 진행 상태로 — `make plc-wo-start WO=WO-2017-0002` (D-226)
+	@test -n "$(WO)" || { echo "WO 를 준다:  make plc-wo-start WO=WO-2017-0002"; exit 1; }
+	uv run python tools/plc_simulator.py --start-work-order $(WO)
+
+plc-wo-finish:                  ## 시험용: 진행으로 뒀던 작업지시를 완료로 되돌린다
+	@test -n "$(WO)" || { echo "WO 를 준다:  make plc-wo-finish WO=WO-2017-0002"; exit 1; }
+	uv run python tools/plc_simulator.py --finish-work-order $(WO)
 
 cad-ingest:                     ## 도면 수집·정제(중복 183·0KB 4 제거) → EST_CAD_DRAWINGS
 	uv run python tools/cad_ingest.py

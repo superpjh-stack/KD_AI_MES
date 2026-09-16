@@ -22,6 +22,13 @@
 둘을 갈라 두면 **단절 구간에 값이 PLC 안에 남아 있다가 복구 후 올라가는 것**을 잴 수 있다.
 곧장 `collector.ingest_batch()` 를 부르면 그 두 다리가 통째로 빠진다.
 
+**연속 모드 `--daemon` (D-222)** — 멈출 때까지 수집 주기마다 한 주기를 만들어 스캔 → 폴링 → 적재를
+돈다. 시각은 **벽시계**다(장비의 시계를 흉내 낸다 — 003·022 실시간 패널이 "지금" 을 묻기 때문이다).
+가동/대기/정지 상태가 바뀌고, `--anomaly-rate` 로 알람 에피소드가, `--fault-every/--fault-len` 으로
+Gateway↔클라우드 단절·복구(버퍼 재전송)가 주기적으로 일어난다. 작업지시는 `--work-order` 로 지정하거나
+(현장POP 지정을 흉내), 없으면 서버의 매핑 규칙(D-224)을 따른다. 시험용으로 작업지시를 진행 상태로 두려면
+`--start-work-order WO-…` / `--finish-work-order WO-…` 다 — **선언(SYS_CONFIGS)을 남기고 되돌린다.**
+
 `--via` 가 전달 경로를 고른다.
   · `inproc`(기본) — `collector.ingest_batch()` 직접 호출. **HTTP·장비 인증을 지나지 않는다**
   · `http`        — 진짜 `POST /api/ingest/plc`. 미들웨어·장비 인증·태그 검증을 전부 지난다.
@@ -135,9 +142,10 @@ def unregister_sim_ip() -> None:
 
 
 # ══ 전달 경로 ═════════════════════════════════════════════════════════════
-def deliver_inproc(dev: int, samples: list, path: str):
+def deliver_inproc(dev: int, samples: list, path: str, work_order_id: int | None = None):
     """`collector` 직접 호출 — **HTTP·장비 인증을 지나지 않는다.**"""
-    return collector.ingest_batch(dev, EQUIP_CODE, samples, collect_path=path)
+    return collector.ingest_batch(dev, EQUIP_CODE, samples, collect_path=path,
+                                  work_order_id=work_order_id)
 
 
 # `--via http` 가 닿을 수 있는 곳 — **루프백뿐이다.**
@@ -162,7 +170,7 @@ def check_loopback(base_url: str) -> str:
 
 
 def deliver_http(base_url: str, dev: int, samples: list, path: str,
-                 timeout: float = 10.0):
+                 timeout: float = 10.0, work_order_id: int | None = None):
     """진짜 `POST /api/ingest/plc` — **루프백의 우리 앱에만** 보낸다(`check_loopback`).
 
     **서버가 없으면 소리내어 죽는다** — 조용히 inproc 으로 되돌아가지 않는다(§10-9).
@@ -177,10 +185,11 @@ def deliver_http(base_url: str, dev: int, samples: list, path: str,
     # `PLC→Gateway→시계열DB`(실수집 라벨)로 적어서 **시뮬레이터 데이터가 실수집이 된다.**
     # inproc 경로는 `collect_path` 를 직접 넘겨 표지가 붙었는데 HTTP 경로만 빠져 있었다 —
     # 표지를 두 경로가 따로 붙이고 있었던 것이 원인이다.
-    body = json.dumps({"device_id": dev, "equip_code": EQUIP_CODE,
-                       "collect_path": path,
-                       "samples": [x.as_dict() for x in samples]},
-                      ensure_ascii=False, default=str).encode()
+    payload = {"device_id": dev, "equip_code": EQUIP_CODE, "collect_path": path,
+               "samples": [x.as_dict() for x in samples]}
+    if work_order_id is not None:
+        payload["work_order_id"] = work_order_id      # 현장POP 지정을 흉내 낸다 (D-224)
+    body = json.dumps(payload, ensure_ascii=False, default=str).encode()
     req = urllib.request.Request(f"{base_url.rstrip('/')}/api/ingest/plc", data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -197,6 +206,157 @@ def deliver_http(base_url: str, dev: int, samples: list, path: str,
             f"수집 API 에 닿지 못했다: {base_url} — {e.reason}\n"
             f"  서버를 먼저 띄운다: `make run` (포트 {settings().port})") from e
 
+# ══ 시험용 작업지시 상태 전환 (D-226) — 작업지시를 만드는 화면이 45화면에 없다 ══
+WO_CONFIG_KEY = "PLC_SIMULATOR_WO"
+
+
+def _find_wo(no: str) -> dict:
+    row = conn.q1("select WORK_ORDER_ID, WORK_ORDER_NO, PROCESS_CODE, ORDER_STATUS, OUTSOURCE_YN "
+                  "from PRC_WORK_ORDERS where WORK_ORDER_NO = %s", (no,))
+    if row is None:
+        raise SystemExit(f"작업지시 {no} 가 없다 — `SELECT WORK_ORDER_NO FROM PRC_WORK_ORDERS WHERE PROCESS_CODE='P40'`")
+    if row["process_code"] != "P40" or row["outsource_yn"] == "Y":
+        raise SystemExit(f"{no} 는 {row['process_code']} 다 — 자동(PLC) 수집은 레이저커팅 P40 사내 지시뿐이다 (D-06)")
+    return dict(row)
+
+
+def start_work_order(no: str) -> None:
+    """작업지시를 `진행` 으로 둔다 + **시험용 전환이라는 선언**을 남긴다. 실적 승인이 아니다."""
+    wo = _find_wo(no)
+    conn.x("update PRC_WORK_ORDERS set ORDER_STATUS = '진행', UPDATED_DT = now() where WORK_ORDER_ID = %s",
+           (wo["work_order_id"],))
+    conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = %s and CONFIG_KEY = %s", (device.CONFIG_TYPE, WO_CONFIG_KEY))
+    conn.x("insert into SYS_CONFIGS (CONFIG_TYPE, CONFIG_KEY, CONFIG_VALUE, DESCRIPTION, USE_YN, CREATED_DT) "
+           "values (%s, %s, %s, %s, 'Y', now())",
+           (device.CONFIG_TYPE, WO_CONFIG_KEY, no,
+            f"{no} 의 ORDER_STATUS='진행' 은 tools/plc_simulator.py --start-work-order 가 넣은 **시험용 전환**이다 "
+            f"(이전 상태 {wo['order_status']}). --finish-work-order 로 되돌린다 (D-226)"))
+    print(f"작업지시 진행     {no} ({wo['order_status']} → 진행) · 선언 SYS_CONFIGS('{device.CONFIG_TYPE}','{WO_CONFIG_KEY}')")
+    print("                레이저커팅기 신호가 이 지시에 붙고 자동(PLC) 실적이 도출된다 (D-224)")
+
+
+def finish_work_order(no: str) -> None:
+    wo = _find_wo(no)
+    n = conn.x("update PRC_WORK_ORDERS set ORDER_STATUS = '완료', UPDATED_DT = now() "
+               "where WORK_ORDER_ID = %s and ORDER_STATUS = '진행'", (wo["work_order_id"],))
+    m = conn.x("delete from SYS_CONFIGS where CONFIG_TYPE = %s and CONFIG_KEY = %s", (device.CONFIG_TYPE, WO_CONFIG_KEY))
+    print(f"작업지시 완료     {no} ({n} 행) · 선언 {m} 행 거둠. 붙은 신호·자동 실적은 남는다 — 사실이었기 때문이다")
+
+
+# ══ 연속 모드 (D-222) — 멈출 때까지 주기마다 스캔 → 폴링 → 적재 ═══════════════
+# 상태 전이는 **시뮬레이션 가정**이다(정본에 없다). 가동 중 한 주기에 1개가 나올 확률을
+# poll_sec/PIECE_SEC 로 두어 대략 PIECE_SEC 초에 한 조각씩 세게 했다.
+PIECE_SEC = 90.0
+STATE_HOLD = {"가동": (40, 120), "대기": (3, 10), "정지": (5, 20)}      # 주기 수
+
+
+def _wall_now():
+    """장비의 벽시계. `--daemon` 에서만 쓴다 — 실시간 패널이 '지금' 을 묻기 때문이다 (D-222).
+    생성 기준일 용도가 아니다(§10-3): 시드·학습은 여전히 clock.anchor() 다."""
+    from datetime import datetime
+    return datetime.now().replace(microsecond=0)
+
+
+def run_daemon(a, pc, dev: int, base_url: str, path: str) -> int:
+    import signal
+    import time
+
+    rng = random.Random(a.seed if a.seed is not None else int(time.time()))
+    stop = {"flag": False}
+
+    def _stop(_sig, _frm):
+        stop["flag"] = True
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    wo_id = None
+    if a.work_order:
+        wo_id = int(_find_wo(a.work_order)["work_order_id"])
+    state, hold = "가동", rng.randint(*STATE_HOLD["가동"])
+    alarm_left = 0
+    fault_left = 0
+    stats = {"cycles": 0, "stored": 0, "dup": 0, "buffered": 0, "resent": 0, "alarms": 0, "unmapped": 0}
+    print(f"연속 모드         {a.poll_sec}초 주기 · 벽시계 · 알람률 {a.anomaly_rate} · "
+          f"단절 매 {a.fault_every or '-'}주기 × {a.fault_len} · 작업지시 {a.work_order or '서버 매핑 규칙 (D-224)'}")
+    print("                Ctrl-C 로 멈춘다. 이 값은 시뮬레이션이다 — COLLECT_PATH 에 그렇게 남는다 (D-174)")
+    last_mes = None
+    while not stop["flag"] and (a.max_cycles is None or stats["cycles"] < a.max_cycles):
+        t = _wall_now()
+        i = stats["cycles"]
+        # ── 상태 전이
+        hold -= 1
+        if hold <= 0:
+            state = rng.choices(["가동", "대기", "정지"], weights=[8, 2, 1])[0]
+            hold = rng.randint(*STATE_HOLD[state])
+        if alarm_left == 0 and state == "가동" and rng.random() < a.anomaly_rate:
+            alarm_left = rng.randint(2, 5)
+        bad = alarm_left > 0
+        if bad:
+            alarm_left -= 1
+        run = state == "가동"
+        values = {
+            "RUN_MINUTE": f"{(a.poll_sec / 60) if run else 0:.4f}",
+            "PRODUCE_QTY": str(1 if run and rng.random() < a.poll_sec / PIECE_SEC else 0),
+            "RUN_STATUS": "알람" if bad else state,
+            "ALARM_CODE": ALARM_CODE if bad else "",
+            "SPEED_VALUE": f"{rng.uniform(*BASE['SPEED_VALUE']) if run else 0:.4f}",
+            "PRESSURE_VALUE": f"{rng.uniform(*BASE['PRESSURE_VALUE']) if run else 0:.4f}",
+            "CURRENT_VALUE": f"{ANOMALY['CURRENT_VALUE'] if bad else (rng.uniform(*BASE['CURRENT_VALUE']) if run else 0):.4f}",
+            "TEMP_VALUE": f"{ANOMALY['TEMP_VALUE'] if bad else rng.uniform(*BASE['TEMP_VALUE']):.4f}",
+        }
+        if bad:
+            stats["alarms"] += 1
+        # ── ① PLC 스캔
+        plcdb.scan_write(pc, t, values)
+        # ── ② Gateway 폴링 — 단절이면 버퍼, 복구 주기에 재전송
+        if a.fault_every and i > 0 and i % a.fault_every == 0:
+            fault_left = a.fault_len
+        cycles = plcdb.group_by_cycle(plcdb.poll(pc))
+        line = ""
+        for dt, group in cycles:
+            samples = [collector.Sample(g.tag_name, g.value, dt) for g in group]
+            if fault_left > 0:
+                collector.buffer(dev, EQUIP_CODE, samples, "네트워크 단절",
+                                 collect_path=path, work_order_id=wo_id)
+                plcdb.mark_sent(pc, [g.scan_id for g in group], t)
+                stats["buffered"] += 1
+                line = "Gateway↔클라우드 단절 — 버퍼에 쌓음"
+                continue
+            if a.via == "http":
+                r = deliver_http(base_url, dev, samples, path, work_order_id=wo_id)
+                stats["stored"] += int(r.get("stored", 0)); stats["dup"] += int(r.get("duplicated", 0))
+                last_mes = r.get("mes") or last_mes
+            else:
+                res = deliver_inproc(dev, samples, path, work_order_id=wo_id)
+                stats["stored"] += res.stored; stats["dup"] += res.duplicated
+                last_mes = res.mes.as_dict()
+            plcdb.mark_sent(pc, [g.scan_id for g in group], t)
+            if last_mes and not last_mes.get("work_order_id"):
+                stats["unmapped"] += 1
+        if fault_left > 0:
+            fault_left -= 1
+            if fault_left == 0:
+                out = collector.resend(dev)
+                stats["resent"] += int(out["resent_batches"])
+                line = f"복구 — 버퍼 {out['resent_batches']} 배치 재전송 · 신규 {out['stored_rows']} 행 (유실 0)"
+        stats["cycles"] += 1
+        wo_txt = (f"WO {last_mes['work_order_no']}" if last_mes and last_mes.get("work_order_no")
+                  else "작업지시 미매핑")
+        print(f"{t:%H:%M:%S} #{i + 1:<5} {values['RUN_STATUS']:<3} 수량 {values['PRODUCE_QTY']} "
+              f"전류 {float(values['CURRENT_VALUE']):6.2f}A 온도 {float(values['TEMP_VALUE']):5.1f}℃ "
+              f"· {wo_txt}" + (f" · {line}" if line else ""), flush=True)
+        if a.max_cycles is None or stats["cycles"] < a.max_cycles:
+            time.sleep(a.poll_sec)
+    st = plcdb.stats(pc)
+    print(f"멈춤             주기 {stats['cycles']} · 적재 {stats['stored']} 행 · 중복 {stats['dup']} · "
+          f"버퍼 {stats['buffered']} 배치 → 재전송 {stats['resent']} · 알람 주기 {stats['alarms']} · "
+          f"미매핑 배치 {stats['unmapped']} · PLC 미전송 {st['unsent']}")
+    if last_mes:
+        print(f"마지막 연계       {last_mes.get('reason')}"
+              + (f" · 자동 실적 #{last_mes.get('perf_id')} 수량 {last_mes.get('perf_good_qty')}"
+                 if last_mes.get("perf_id") else ""))
+    return 0
+
 
 def main() -> int:
     s = settings()
@@ -205,7 +365,8 @@ def main() -> int:
     p.add_argument("--cycles", type=int, default=20, help="수집 주기 반복 횟수 (기본 20)")
     p.add_argument("--poll-sec", type=int, default=s.h("PLC_POLL_SEC").as_int(),
                    help=f"수집 주기(초). 기본은 .env KYUNGDONG_PLC_POLL_SEC — {s.h('PLC_POLL_SEC').badge}")
-    p.add_argument("--seed", type=int, default=20260911, help="난수 시드 (재현 가능하게 고정)")
+    p.add_argument("--seed", type=int, default=None,
+                   help="난수 시드 (단발 모드 기본 20260911 — 재현 가능 · 연속 모드 기본은 시각)")
     p.add_argument("--anomaly", action="store_true", help="전류·온도 임계 초과 주입")
     # **단절은 두 가지다 — 끊긴 자리가 다르면 값이 남는 자리도 다르다.**
     p.add_argument("--disconnect", type=int, default=None,
@@ -236,9 +397,32 @@ def main() -> int:
                    metavar="HOST", help="시뮬레이터 IP 를 장비에 등록 + 선언 (기본 127.0.0.1)")
     p.add_argument("--unregister", action="store_true", help="IP 와 선언을 함께 거둔다")
     p.add_argument("--plc-status", action="store_true", help="PLC 레지스터·미전송 현황만 본다")
+    # ── 연속 모드 (D-222) ──
+    p.add_argument("--daemon", action="store_true",
+                   help="멈출 때까지 주기마다 생성·스캔·폴링·적재를 돈다 (벽시계 · 기본 --via http)")
+    p.add_argument("--max-cycles", type=int, default=None, help="--daemon 을 이 주기 수에서 멈춘다 (시험용)")
+    p.add_argument("--anomaly-rate", type=float, default=0.02,
+                   help="--daemon 가동 주기당 알람 에피소드 시작 확률 (시뮬레이션 가정, 기본 0.02)")
+    p.add_argument("--fault-every", type=int, default=0,
+                   help="--daemon 에서 N 주기마다 Gateway↔클라우드 단절을 일으킨다 (0=안 함)")
+    p.add_argument("--fault-len", type=int, default=3, help="단절 지속 주기 수 (기본 3) — 복구 시 버퍼 재전송")
+    p.add_argument("--work-order", default=None, metavar="WO_NO",
+                   help="현장POP 지정을 흉내 — 이 작업지시번호를 payload 에 싣는다 (서버가 검증, D-224)")
+    p.add_argument("--start-work-order", default=None, metavar="WO_NO",
+                   help="시험용: P40 작업지시를 진행 상태로 둔다 + 선언 (D-226)")
+    p.add_argument("--finish-work-order", default=None, metavar="WO_NO",
+                   help="시험용: 진행으로 뒀던 작업지시를 완료로 되돌리고 선언을 거둔다")
     a = p.parse_args()
+    if a.daemon and "--via" not in sys.argv:
+        a.via = "http"                     # 연속 모드는 기본이 진짜 HTTP 다 — 장비 인증까지 지난다
 
     # ── 단독 명령 ───────────────────────────────────────────────────────
+    if a.start_work_order:
+        start_work_order(a.start_work_order)
+        return 0
+    if a.finish_work_order:
+        finish_work_order(a.finish_work_order)
+        return 0
     if a.unregister:
         unregister_sim_ip()
         return 0
@@ -270,7 +454,7 @@ def main() -> int:
         t0 = clock.anchor()
         basis = f"시간 앵커 {t0.isoformat(sep=' ')} (§10-3 date.today() 금지)"
 
-    rng = random.Random(a.seed)
+    rng = random.Random(a.seed if a.seed is not None else 20260911)
     dev = None if a.dry_run else device_id()
     base_url = a.base_url or f"http://127.0.0.1:{s.port}"
     if a.via == "http":
@@ -286,6 +470,8 @@ def main() -> int:
           f"(장비 메모리 — 우리 DB 가 아니다)")
     print(f"전달 경로        {a.via}" + (f" → {base_url}" if a.via == "http" else
                                         " (HTTP·장비 인증을 지나지 않는다)"))
+    if a.daemon:
+        return run_daemon(a, pc, dev, base_url, path)
 
     # ── ① PLC 스캔 — 레지스터에 쓴다. 아직 아무것도 보내지 않는다 ──────────
     scanned = 0
@@ -331,7 +517,7 @@ def main() -> int:
             # ── Gateway↔클라우드 단절 — 폴링은 **됐다.** 값은 Gateway 손에 있다.
             # 그래서 PLC 에서는 **보냄 처리**하고 Gateway 버퍼(TD5 IF_GATEWAY_BUFFER)가 진다.
             # 여기서 PLC 에도 남기면 같은 값을 둘이 들고 있게 되어 복구 때 **두 번 올라간다**.
-            collector.buffer(dev, EQUIP_CODE, samples, "네트워크 단절")
+            collector.buffer(dev, EQUIP_CODE, samples, "네트워크 단절", collect_path=path)
             plcdb.mark_sent(pc, [g.scan_id for g in group], dt)
             buffered += 1
             continue

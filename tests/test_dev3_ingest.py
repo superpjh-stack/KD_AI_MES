@@ -31,6 +31,9 @@ def window():
     """시험 전용 시간 창 — 앵커에서 멀리 떨어뜨려 다른 데이터와 섞이지 않게 한다."""
     t0 = clock.anchor() + timedelta(days=3650)
     yield t0
+    # 수집은 MES 연계 부산물(알림추천·자동 실적)도 남긴다 (D-224) — 같이 지운다
+    conn.x("delete from AGT_RECOMMENDATIONS where RECO_TYPE = '알림추천' and CREATED_AT_DT >= %s", (t0,))
+    conn.x("delete from PRC_PERFORMANCES where COLLECT_METHOD = '자동(PLC)' and START_DT >= %s", (t0,))
     conn.x("delete from DAT_TIMESERIES where MEASURE_DT >= %s", (t0,))
     conn.x("delete from PRC_EQUIP_SIGNALS where COLLECT_DT >= %s", (t0,))
     conn.x("delete from IF_PLC_SIGNALS where COLLECT_DT >= %s", (t0,))
@@ -158,13 +161,15 @@ def _run_sim(tmp_path, *extra: str) -> dict:
 @pytest.fixture()
 def clean_runtime():
     """런타임 전용 표는 **0건이 정상**이다(G-11). 앞뒤로 확인하고 비운다."""
-    tbls = ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS", "IF_GATEWAY_BUFFER")
+    tbls = ("IF_PLC_SIGNALS", "DAT_TIMESERIES", "PRC_EQUIP_SIGNALS", "IF_GATEWAY_BUFFER", "AGT_RECOMMENDATIONS")
     for t in tbls:
         n = int(conn.q1(f"select count(*) as n from {t}")["n"])
         assert n == 0, f"{t} 가 시험 전부터 {n} 행이다 — G-11 을 확인한다"
     yield
     for t in tbls:
         conn.x(f"delete from {t}")
+    conn.x("delete from PRC_PERFORMANCES where COLLECT_METHOD = '자동(PLC)' and START_DT >= %s",
+           (clock.anchor(),))
 
 
 def test_PLC측_단절은_장비에_남고_Gateway_버퍼에는_안_들어간다(tmp_path, clean_runtime):

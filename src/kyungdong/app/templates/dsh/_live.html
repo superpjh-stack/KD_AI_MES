@@ -1,0 +1,118 @@
+{# ── 실시간 패널 (D-223) — 화면 003·022 공용. 처음 그릴 때는 서버가 `live`(mes.live_snapshot) 로 채우고,
+   그 뒤에는 /static/live.js 가 같은 함수를 `GET /api/ingest/live` 로 불러 **같은 모양**으로 다시 그린다.
+   · 값은 전부 DB 에 적재된 것이다. 시뮬레이터 데이터면 그 선언(D-174)이 배지로 뜬다.
+   · 외부 CDN·차트 라이브러리 0 — 추이는 인라인 SVG 다 (CSP script-src 'self').
+   · 0 건은 0 이다(§10-14). 신호가 한 건도 없으면 '미수집' 을 그대로 쓴다. #}
+{% macro live_panel(live, poll_sec) %}
+<style>
+.lv{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:#fff}
+.lv-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:12px;color:var(--mut)}
+.lv-head b{font-size:14px;color:var(--fg)}
+.lv-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#98a1ad;margin-right:5px;vertical-align:middle}
+.lv-dot.run{background:#2e9e5b}.lv-dot.alarm{background:#c8322b}.lv-dot.stale{background:#e0a020}
+.lv-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.lv-tag{flex:1 1 110px;min-width:0;border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.lv-tag .k{font-size:11px;color:var(--mut);display:block}
+.lv-tag .v{font-size:19px;font-weight:650;display:block;font-variant-numeric:tabular-nums;word-break:break-all}
+.lv-tag .u{font-size:11px;color:var(--mut);margin-left:3px;font-weight:400}
+.lv-tag.alarm{border-color:#e9c2bf;background:#fdeeed}
+.lv-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;align-items:flex-start}
+.lv-col{flex:1 1 300px;min-width:0}
+.lv-col h3{font-size:12px;color:var(--mut);margin:0 0 4px}
+.lv-svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:6px;background:#fbfbfc}
+.lv-kv{font-size:12px;line-height:1.7;margin:0}
+.lv-kv b{font-variant-numeric:tabular-nums}
+.lv-btn{font:12px/1.4 inherit;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--fg);cursor:pointer;min-height:32px}
+.lv-btn[aria-pressed="true"]{background:#1f5fa8;border-color:#1f5fa8;color:#fff}
+.lv-err{color:var(--bad);font-size:12px}
+.lv-alerts{list-style:none;margin:0;padding:0;font-size:12px}
+.lv-alerts li{padding:3px 0;border-bottom:1px dashed var(--line)}
+</style>
+<div class="lv" id="live" data-live="/api/ingest/live?equip={{ live.equip_code }}&n=30"
+     data-interval="{{ poll_sec }}" aria-live="polite">
+  <div class="lv-head">
+    <b>레이저커팅기 실시간</b>
+    <span id="lv-status">
+      {% if live.last %}
+      <span class="lv-dot {{ 'alarm' if live.last.alarm_code else ('stale' if live.device and live.device.stale else ('run' if live.last.run_status == '가동' else '')) }}"></span>{{ live.last.run_status or '—' }}
+      {% if live.last.alarm_code %}· 알람 {{ live.last.alarm_code }}{% endif %}
+      · 마지막 수집 {{ live.last.collect_dt }}
+      {% if live.device and live.device.seconds_since is not none %}({{ live.device.seconds_since }}초 전){% endif %}
+      {% else %}
+      <span class="lv-dot"></span>{{ empty_note if empty_note is defined else '미수집 (D-06)' }} — PLC 수집 신호 0건
+      {% endif %}
+    </span>
+    {% if live.device and live.device.notice %}<span class="badge bad" id="lv-notice">{{ live.device.notice }}</span>{% else %}<span class="badge bad" id="lv-notice" hidden></span>{% endif %}
+    {% if live.simulation %}<span class="badge synthetic" title="{{ live.simulation }}">시뮬레이터 데이터 (D-174)</span>{% endif %}
+    <span style="margin-left:auto">
+      <button class="lv-btn" type="button" id="lv-toggle" aria-pressed="true" title="화면을 다시 열지 않아도 {{ poll_sec }}초마다 갱신한다">실시간 갱신 켜짐 · {{ poll_sec }}초</button>
+      <span id="lv-tick" class="meta"></span>
+      <span id="lv-err" class="lv-err"></span>
+    </span>
+  </div>
+
+  <div class="lv-tags" id="lv-tags">
+    {% if live.last %}
+    {% for t in live.last.tags %}
+    <div class="lv-tag {{ 'alarm' if t.name == 'ALARM_CODE' and t.value else '' }}">
+      <span class="k">{{ t.ko }}</span>
+      <span class="v">{% if t.value is none or t.value == '' %}—{% elif t.value is number %}{{ '{:,.2f}'.format(t.value) }}{% else %}{{ t.value }}{% endif %}<span class="u">{{ t.uom }}</span></span>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="lv-grid">
+    <div class="lv-col">
+      <h3>최근 {{ live.recent|length }}주기 추이 — 속도·압력·전류·온도 (정규화)</h3>
+      <svg class="lv-svg" id="lv-chart" viewBox="0 0 600 150" role="img" aria-label="최근 신호 추이"></svg>
+      <p class="lv-kv" id="lv-legend">
+        <span style="color:#1f5fa8">■ 속도</span> <span style="color:#7ba7d7">■ 압력</span>
+        <span style="color:#c8322b">■ 전류</span> <span style="color:#e0a020">■ 온도</span>
+        · 세로축은 각 태그의 창 내 최소~최대 정규화 — 절대값은 위 타일이 정답이다
+      </p>
+    </div>
+    <div class="lv-col">
+      <h3>금일 {{ live.today.date }} (실시각 기준)</h3>
+      <p class="lv-kv" id="lv-today">
+        신호 <b>{{ live.today.signals }}</b> 건 · 가동시간 <b>{{ '{:,.1f}'.format(live.today.run_minute) }}</b> 분 ·
+        생산수량 <b>{{ '{:,.0f}'.format(live.today.produce_qty) }}</b> ea · 알람 <b>{{ live.today.alarms }}</b> 건 ·
+        가동률 <b>{% if live.today.utilisation_pct is none %}—{% else %}{{ live.today.utilisation_pct }} %{% endif %}</b>
+        {% if live.today.unmapped %}· <span class="badge undetermined">작업지시 미매핑 신호 {{ live.today.unmapped }} 건</span>{% endif %}
+        · Gateway 대기 버퍼 <b>{{ live.buffer_pending }}</b> 배치
+      </p>
+      <h3>MES 연계 — 작업지시 · 자동 실적 (D-224)</h3>
+      <p class="lv-kv" id="lv-mes">
+        {% if live.work_order %}
+        작업지시 <b><a href="/prc/024?project={{ live.work_order.project_no }}">{{ live.work_order.work_order_no }}</a></b> · 프로젝트 {{ live.work_order.project_no }}
+        <span class="meta">({{ live.work_order.source }})</span><br>
+        {% if live.performance %}
+        자동 실적 #{{ live.performance.perf_id }} — {{ live.performance.method }} · 실적수량 <b>{{ '{:,.0f}'.format(live.performance.good_qty or 0) }}</b> ea ·
+        공수 <b>{{ live.performance.manhour }}</b> h · {{ live.performance.start_dt }} ~ {{ live.performance.end_dt }}
+        <span class="meta">· {{ live.performance.note }}</span>
+        {% else %}
+        자동 실적 — 오늘 매핑된 신호가 아직 없다 (다음 배치부터 도출)
+        {% endif %}
+        {% else %}
+        <span class="badge undetermined">{{ live.mapping_note }}</span>
+        {% endif %}
+      </p>
+      <h3>임계 비교 · 알림</h3>
+      <p class="lv-kv" id="lv-thr">
+        {% if live.thresholds.blocked %}<span class="badge undetermined">{{ live.thresholds.note }}</span>
+        {% else %}{{ live.thresholds.note }} —
+          {% for it in live.thresholds.items %}{{ it.cond_item }} {{ it.actual if it.actual is not none else '—' }}/{{ it.std }}{{ it.uom }}{% if it.out_of_tol %} <span class="badge bad">허용범위 초과</span>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+        {% endif %}
+      </p>
+      <ul class="lv-alerts" id="lv-alerts">
+        {% for a in live.alerts %}
+        <li><a href="/agt/041">#{{ a.reco_id }}</a> {{ a.at }} — {{ a.summary }} <span class="badge {{ 'undetermined' if a.review_status == '미검토' else 'notice' }}">{{ a.review_status }}</span></li>
+        {% else %}
+        <li class="meta">금일 알림 0 건 — 장비 알람 코드가 오면 041 알림 화면에 `알림추천` 으로 올라간다</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+<script src="/static/live.js" defer></script>
+{% endmacro %}

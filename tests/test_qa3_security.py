@@ -712,9 +712,33 @@ def test_g30_no_client_side_async_fallback():
     js = list((ROOT / "src" / "kyungdong" / "app" / "static").rglob("*.js"))
     fetches = [p.relative_to(ROOT).as_posix() for p in TEMPLATES
                if re.search(r"fetch\(|XMLHttpRequest", p.read_text())]
-    assert js == [] and fetches == [], (
-        f"클라이언트 비동기 호출이 생겼다 (js {js}, fetch {fetches}) — "
+    # 실시간 패널 `live.js`(D-223) 하나만 허용한다 — 그리고 **백엔드 죽음을 숨기지 않는 것**을 코드로 잰다:
+    # 실패 응답을 상태 코드째 화면(`lv-err`)에 쓰고, 성공 표시(`lv-tick`)를 지우고, 되풀이되면 멈춘다.
+    # 마지막 값을 조용히 계속 보여 주는 폴백(저장소·캐시)은 없어야 한다 (D-229 검사기 정밀화).
+    allowed = ROOT / "src" / "kyungdong" / "app" / "static" / "live.js"
+    others = [p for p in js if p != allowed]
+    assert others == [] and fetches == [], (
+        f"클라이언트 비동기 호출이 생겼다 (js {others}, fetch {fetches}) — "
         "백엔드 죽음에 화면이 어떻게 보이는지 다시 재라")
+    if allowed.exists():
+        src = allowed.read_text()
+        assert 'throw new Error("HTTP " + r.status' in src, "실패 응답을 상태 코드째 드러내지 않는다"
+        assert '$("lv-err").textContent = "갱신 실패' in src and '$("lv-tick").textContent = ""' in src
+        assert "failures >= 5" in src and "on = false" in src, "실패가 되풀이돼도 계속 두드린다"
+        assert not re.search(r"localStorage|sessionStorage|indexedDB", src), "마지막 값을 저장해 두는 폴백이 있다"
+
+
+def test_g30_live_api_db_down_is_503(client, monkeypatch):
+    """실시간 패널이 부르는 API — DB 가 죽으면 **503 JSON** 이다. 200 에 빈 값을 주면 화면이 멀쩡해 보인다."""
+    monkeypatch.setenv("KYUNGDONG_PG_DSN", "postgresql://127.0.0.1:1/nope_qa3")
+    settings.cache_clear()
+    try:
+        r = client.get("/api/ingest/live")
+        assert r.status_code == 503, r.text[:200]
+    finally:
+        monkeypatch.undo()
+        settings.cache_clear()
+    assert client.get("/api/ingest/live").status_code == 200
 
 
 def test_g30_ingest_stale_badge_shows(client):

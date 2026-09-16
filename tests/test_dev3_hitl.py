@@ -53,6 +53,15 @@ def test_확정_대상_표를_쓰는_함수는_승인_검사를_지난다():
             start = txt.rfind("\ndef ", 0, m.start())
             start = txt.rfind("\nasync def ", 0, m.start()) if start < 0 else start
             body = txt[max(0, start): m.end() + 200]
+            # `AGT_RECOMMENDATIONS` 에 **미검토** 행을 넣는 것은 제안(추천·알림)이지 확정이 아니다 —
+            # G-24 가 막는 것은 REVIEW_STATUS 를 승인으로 바꾸는 경로다. 단 REVIEWER_ID 를 함께
+            # 적으면 검토한 것처럼 보이므로 그것은 여전히 위반이다 (D-228 검사기 정밀화).
+            after = txt[m.end(): m.end() + 900]
+            proposal = (m.group(2).upper() == "AGT_RECOMMENDATIONS" and m.group(1).lower() != "update"
+                        and ("REVIEW_INITIAL" in after or "'미검토'" in after)
+                        and "REVIEWER_ID" not in after.split("values")[0])
+            if proposal:
+                continue
             if "can_approve" not in body and "forbidden" not in body:
                 line = txt[:m.start()].count("\n") + 1
                 offenders.append(f"{path.name}:{line} {m.group(0)}")

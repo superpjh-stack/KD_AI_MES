@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from ...agent import docs as agent_docs
-from ...ingest import collector
+from ...ingest import collector, mes
 from .. import rbac
 from ..util import csrf, device, http
 from ..util.audit import audit
@@ -117,11 +117,42 @@ async def ingest_plc(request: Request) -> dict[str, Any]:
     samples = collector.parse_samples(body.get("samples") or [])
     res = collector.ingest_batch(device_id, str(body.get("equip_code", "")),
                                  samples, collect_path=str(body.get("collect_path")
-                                                           or collector.COLLECT_PATH))
+                                                           or collector.COLLECT_PATH),
+                                 work_order_id=_work_order_id(body))
     audit(request, None, "PLC수집", log_type="API")
     return {"received": res.received, "stored": res.stored, "duplicated": res.duplicated,
             "signal_rows": res.signal_rows, "timeseries_rows": res.timeseries_rows,
-            "ordered": res.ordered}
+            "ordered": res.ordered, "mes": res.mes.as_dict()}
+
+
+def _work_order_id(body: dict[str, Any]) -> int | None:
+    """현장POP 이 지정한 작업지시(선택). 있으면 정수여야 한다 — 아니면 **422** (§2.5)."""
+    raw = body.get("work_order_id")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if isinstance(raw, bool) or not str(raw).strip().isdigit():
+        raise http.fail("validation", f"work_order_id 는 양의 정수여야 한다: {raw!r}")
+    return int(str(raw).strip())
+
+
+LIVE_AREAS = ("AI 대시보드", "공정관리", INGEST_AREA)
+
+
+@router.get("/api/ingest/live")
+async def ingest_live(request: Request, equip: str = mes.AUTO_EQUIP, n: int = 30) -> dict[str, Any]:
+    """실시간 패널의 단일 소스 (D-223) — 화면 003·022 가 처음 그릴 때와 갱신할 때 **같은 함수**를 본다.
+
+    조회 권한은 그 두 화면과 같다 — 대시보드·공정관리·데이터관리 중 하나를 읽을 수 있으면 된다.
+    값은 전부 DB 에 적재된 것이고, 시뮬레이터 데이터면 `simulation` 에 그 선언이 실린다(D-174).
+    """
+    role = _role(request)
+    if not any(rbac.can_read(role, a) for a in LIVE_AREAS):
+        raise http.fail("forbidden", "실시간 조회 권한 없음 — 대시보드·공정관리·데이터관리 중 하나가 필요하다")
+    if equip not in (mes.AUTO_EQUIP, "EQ20"):
+        raise http.fail("validation", f"수집 지점은 2개소뿐이다 (D-06): {equip!r}")
+    if n < 1 or n > 200:
+        raise http.fail("validation", f"n 은 1~200 이다: {n}")
+    return mes.live_snapshot(equip, n)
 
 
 @router.get("/api/ingest/status")

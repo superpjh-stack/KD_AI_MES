@@ -276,7 +276,22 @@ def p_d197() -> tuple[bool, str]:
         f"판정 안 한 행을 정상으로 적는다 {undecided_as_normal}")
 
 
+def p_d225() -> tuple[bool, str]:
+    """임계 비교가 막힌 이유 — 가공(레이저커팅) 표준 작업조건이 **0건**인가 (D-59 · D-225).
+
+    표준조건이 들어오면 `mes.threshold_check()` 가 그 값으로 편차를 내므로 이 항목은 닫힌다.
+    """
+    n = int(conn.q1("select count(*) as n from PRC_STD_CONDITIONS where PROCESS_CODE = 'P40' "
+                    "and USE_YN = 'Y'")["n"])
+    alert = conn.q1("select ALERT_CONDITION from SYS_CONFIGS where CONFIG_TYPE = '알림기준' "
+                    "and CONFIG_KEY = 'ALERT_EQUIP'")
+    undecided = bool(alert and "미확정" in str(alert["alert_condition"] or ""))
+    return n == 0, (f"PRC_STD_CONDITIONS(P40) {n}건 · ALERT_EQUIP 임계 미확정 {undecided} — "
+                    "장비 ALARM_CODE 만 알림으로 올린다")
+
+
 PROBES = {
+    "D-225": p_d225,
     "D-32": p_d32, "D-33": p_d33, "D-41": p_d41, "D-44": p_d44, "D-54": p_d54,
     "D-56": p_d56, "D-57": p_d57, "D-60": p_d60, "D-62": p_d62, "D-69": p_d69_70,
     "D-70": p_d69_70, "D-71": p_d71, "D-75": p_d75, "D-76": p_d76, "D-77": p_d77,

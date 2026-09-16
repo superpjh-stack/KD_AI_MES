@@ -28,7 +28,8 @@ from tools import check_ingest as ci                           # noqa: E402
 
 CYCLES = 5
 COLLECT_TABLES = (("DAT_TIMESERIES", "TS_ID"), ("PRC_EQUIP_SIGNALS", "SIGNAL_ID"),
-                  ("IF_GATEWAY_BUFFER", "BUFFER_ID"), ("IF_PLC_SIGNALS", "PLC_IF_ID"))
+                  ("IF_GATEWAY_BUFFER", "BUFFER_ID"), ("IF_PLC_SIGNALS", "PLC_IF_ID"),
+                  ("AGT_RECOMMENDATIONS", "RECO_ID"))       # 수집이 알람 알림을 남긴다 (D-224)
 
 
 def _n(t: str) -> int:

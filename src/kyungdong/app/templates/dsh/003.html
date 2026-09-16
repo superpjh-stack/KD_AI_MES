@@ -1,7 +1,18 @@
 {% extends "base.html" %}
 {% import "dsh/_kit.html" as kit %}
+{% import "dsh/_live.html" as lv %}
 {% block title %}{{ current.no }} {{ current.name }} — {{ system_name }}{% endblock %}
 {% block content %}
 {{ kit.styles() }}
-{{ kit.dashboard(current, td3, cards, chart_title, chart, list_title, progress, badges, empty_note, notes|default([]), list_empty_note|default('')) }}
+{{ kit.head(current, td3, badges) }}
+{# 실시간 패널 (D-223) — 서버가 `live` 로 처음 그리고 /static/live.js 가 같은 API 로 갱신한다 #}
+{{ lv.live_panel(live, live_poll_sec) }}
+{{ kit.cards(cards) }}
+<div class="d2-wrap">
+  <div class="d2-main">
+    {{ kit.bars(chart_title, chart, '', empty_note) }}
+    {{ kit.progress(list_title, progress, list_empty_note|default('') or empty_note) }}
+  </div>
+  {{ kit.side(td3, notes|default([])) }}
+</div>
 {% endblock %}

@@ -150,6 +150,8 @@ NOW_ALLOWED: dict[tuple[str, str], str] = {
         "앵커 **발급** 자체다. 발급된 값은 SYS_CONFIGS 에 고정되고 재실행은 그 값을 그대로 쓴다",
     ("tools/plc_simulator.py", "main"):
         "`--realtime` 분기 — 003·022 수집 배지를 실시각으로 시험하는 전용 옵션이다",
+    ("tools/plc_simulator.py", "_wall_now"):
+        "`--daemon` 연속 모드의 장비 벽시계 — 실시간 패널이 '지금' 을 묻는다 (D-222). 시드·학습은 앵커다",
     ("src/kyungdong/ingest/collector.py", "status"):
         "수집이 **지금** 살아 있는지 묻는 함수다. 생성 기준일이 아니다",
 }
@@ -739,6 +741,9 @@ def simulate_for_g10() -> dict | None:
 
 def cleanup_g10(sim: dict) -> None:
     """**넣은 것을 되돌린다.** 0건으로 돌아가지 않으면 그것이 결함이다."""
+    # 수집의 MES 연계 부산물(알림추천·자동 실적, D-224)도 같이 되돌린다 — 남으면 G-11·QA 0건 전제가 깨진다
+    conn.x("delete from AGT_RECOMMENDATIONS where RECO_TYPE = '알림추천'")
+    conn.x("delete from PRC_PERFORMANCES where COLLECT_METHOD = '자동(PLC)' and START_DT >= %s", (clock.anchor(),))
     for t in sim["tables"]:
         conn.x(f"delete from {t}")
         n = int(conn.q1(f"select count(*) as n from {t}")["n"])
