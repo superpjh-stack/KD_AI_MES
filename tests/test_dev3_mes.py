@@ -200,6 +200,13 @@ def test_스냅샷_N건_경로는_적재된_값만_돌려준다(device_id, windo
     assert s["alerts"] and s["alerts"][0]["review_status"] == "미검토"
 
 
+def test_스냅샷은_적재_행의_표지로도_시뮬레이터임을_말한다(device_id, window, running_wo):
+    """IP 등록 선언(D-174)이 없어도 COLLECT_PATH 가 시뮬레이터면 배지가 뜬다 — 사이드카 배포(D-233)가 그 경우다."""
+    collector.ingest_batch(device_id, EQUIP, _cycle(window, 0), collect_path=collector.COLLECT_PATH_SIM)
+    s = mes.live_snapshot()
+    assert s["simulation"] and "시뮬레이터" in s["simulation"] and "D-174" in s["simulation"]
+
+
 def test_live_API_와_화면_003_022_가_같은_모양을_낸다():
     from fastapi.testclient import TestClient
     from kyungdong.app.main import app

@@ -353,6 +353,14 @@ def live_snapshot(equip_code: str = AUTO_EQUIP, recent: int = 30) -> dict[str, A
     latest_vals = {t.name: (float(last[t.column.lower()]) if last and last[t.column.lower()] is not None else None)
                    for t in tags.numeric_tags()} if last else {}
     laser = next((d for d in st["devices"] if d["device_type"] == "PLC"), None)
+    # 출처 표지 — 등록 IP 선언(D-174)이 없어도 **적재된 행의 COLLECT_PATH 가 시뮬레이터**면 그렇게 말한다.
+    # 사이드카(D-233)는 IP 를 등록하지 않으므로 선언만 보면 시뮬레이터 데이터가 실수집처럼 보인다(D-195 계열).
+    sim_note = device.simulation_note() or None
+    last_path = conn.q1("select COLLECT_PATH from DAT_TIMESERIES where EQUIP_CODE = %s "
+                        "order by MEASURE_DT desc, TS_ID desc limit 1", (equip_code,))
+    if sim_note is None and last_path and last_path["collect_path"] == collector.COLLECT_PATH_SIM:
+        sim_note = (f"시뮬레이터 데이터 — 최근 적재 행의 COLLECT_PATH='{collector.COLLECT_PATH_SIM}' (D-174). "
+                    "실물 장비 신호가 아니다 (도입기업 장비 IP 미제공 D-169)")
     return {
         "checked_at": now.isoformat(sep=" ", timespec="seconds"),
         "equip_code": equip_code,
@@ -363,7 +371,7 @@ def live_snapshot(equip_code: str = AUTO_EQUIP, recent: int = 30) -> dict[str, A
             "seconds_since": (None if laser["seconds_since"] is None else int(laser["seconds_since"])),
             "stale": laser["stale"], "notice": laser["notice"], "signal_cnt": laser["signal_cnt"]},
         "buffer_pending": st["buffer_pending"],
-        "simulation": device.simulation_note() or None,
+        "simulation": sim_note,
         "last": None if last is None else {
             "collect_dt": _iso(last["collect_dt"]), "run_status": last["run_status"],
             "alarm_code": last["alarm_code"] or None,

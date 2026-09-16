@@ -1178,6 +1178,8 @@ URL 도 잡았는데 **검사를 고치지 않고 문구를 바꿨다.**
 | 만든 것 | `Dockerfile` · `docker-compose.yml` · `docker/entrypoint.sh` · `.dockerignore` · `docs/DEPLOY.md` |
 | 잡은 것 | Compose from URL 은 clone+build 까지 한다(환경변수만 빠져 첫 회 실패) · 기본 브랜치 `main` 함정 · `workflow` 토큰 범위 없어 Actions 워크플로 보류 (D-232) |
 | 안 한 것 | HTTPS·prod — 이 VPS 의 443·호스트명은 광성정밀 Caddy 가 쥐고 있다. 절차만 DEPLOY.md 에 적었다(D-231) |
+| **사이드카 (D-233)** | `kyungdong-plc-sim` — 앱 네트워크 공유 · `127.0.0.1:8020` 로 진짜 수집 API · 5초 주기 · 작업지시 WO-2017-0002 진행 전환. 브라우저 실측: 기동 80초 뒤 신호 9 → 14건(10초), 자동 실적 #196 도출, 갱신 2초. 하루 약 26만 행 증가 — 실물 PLC 가 붙으면 `stop plc-sim` |
+| 잡은 것 2 | 실시간 패널의 `시뮬레이터 데이터` 배지가 IP 등록 선언(D-174)만 보고 있어 사이드카 데이터가 실수집처럼 보였다 → 최근 적재 행의 `COLLECT_PATH` 로도 판정(테스트) |
 
 ## 다음에 할 일
 
