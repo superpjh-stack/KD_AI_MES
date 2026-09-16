@@ -148,4 +148,5 @@ def test_구성되면_화면_배지에_모델과_전송_고지가_뜬다(monkeyp
     body = c.get("/agt/038").text
     assert "LLM 구성됨 · anthropic/claude-opus-5" in body
     assert "D-234" in body and "전송" in body
-    assert "LLM 미구성" not in body
+    # 미비 항목 표의 D-08 원문에도 'LLM 미구성' 이 적혀 있다 — **배지**만 본다
+    assert ">LLM 미구성 (D-08)<" not in body
