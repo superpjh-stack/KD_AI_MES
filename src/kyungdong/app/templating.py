@@ -111,6 +111,11 @@ def _followups(request: Request) -> list:
         return []
 
 
+def _llm_state():
+    from ..agent import llm          # 지연 임포트 — templating 이 agent 를 끌고 들어오지 않게
+    return llm.state()
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
     # **prod 비인증은 빈 역할("")이고 메뉴가 없다** (D-211). 전에는 `or "SYSADMIN"` 이라
     # 로그인 화면이 관리자 메뉴 45줄을 통째로 내보냈다 — 인증 전에 화면 지도가 새는 것이다.
@@ -133,7 +138,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         system_name="경동글로벌텍 제조AI 시스템",
         env=s.env,
         search_mode=s.search_mode,
-        llm_configured=s.llm_configured,
+        llm_configured=_llm_state().configured,     # 키까지 본다 — 선언만 보면 거짓 배지다 (D-234)
         csrf_enforced=s.csrf_enforce,
         csrf_token=csrf.issue(request),
         cad_configured=s.cad_configured,

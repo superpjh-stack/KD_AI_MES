@@ -1,24 +1,55 @@
-"""LLM·임베딩 공급자 추상화 (D-08) — **키가 없으면 501. 조용한 폴백 금지.**
+"""LLM·임베딩 공급자 추상화 (D-08 · D-234) — **키가 없으면 501. 조용한 폴백 금지.**
 
-사업계획서 4.7 은 Bedrock 만 적었고 **모델명·임베딩 모델·인덱스 종류가 미정**이다.
+사업계획서 4.7 은 Bedrock 만 적었고 **모델명·임베딩 모델·인덱스 종류가 미정**이다(D-08).
 그래서 여기에는 어떤 모델 이름도 상수로 박지 않는다. `.env` 가 정본이다(§10-1).
 
-  KYUNGDONG_LLM_PROVIDER / KYUNGDONG_LLM_MODEL / KYUNGDONG_EMBED_PROVIDER
+  KYUNGDONG_LLM_PROVIDER=anthropic      공급자 — 구현된 것은 `anthropic` 하나다 (공식 SDK, D-234)
+  KYUNGDONG_LLM_MODEL=claude-opus-5     모델 ID — 도입기업 확정 전까지 .env 값이다
+  KYUNGDONG_LLM_EFFORT=medium           low·medium·high·xhigh·max (답변은 5줄이라 medium 이 기본)
+  ANTHROPIC_API_KEY=…                   키 — 환경변수로만. 저장소·로그·화면에 적지 않는다 (G-29)
+  KYUNGDONG_EMBED_PROVIDER=             임베딩 — **Anthropic 은 임베딩 API 가 없다.** 비우면 tsvector_keyword
 
-**지원 공급자 구현이 아직 없다.** 그러므로 값이 들어와도 `501 LLM 미구성` 이 난다 —
+**폐쇄형과의 관계 (D-234).** 검색은 내부 데이터(`AGT_VECTOR_DOCS` · 운영 DB)만 본다 — 외부 *검색* 은 0건이다.
+그러나 답변 *생성* 은 LLM API 호출이고, **검색된 근거 발췌와 질문이 공급자(api.anthropic.com)로 전송된다.**
+사업계획서 2.4·4.7 이 LLM(Bedrock) 을 AI 서버 구성으로 계상했으므로 설계 안의 통신이지만, 그 사실을 화면·대장에
+숨기지 않는다. 이 모듈이 **제품 코드에서 유일하게 밖으로 나가는 자리**다 — 검사기(G-20·G-26)가 그렇게 센다.
+Bedrock 으로 옮길 때는 `_client()` 만 `AnthropicBedrockMantle` 로 바꾸면 된다(호출 표면 동일).
+
+**`bedrock` 은 계약 이름으로만 남아 있다** — 값이 들어와도 구현이 없으므로 501 이다.
 "구성됐다고 선언했는데 실제로는 없다" 를 조용히 넘기면 그게 §2.5 위반이다.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from ..app.settings import settings
 from ..app.util import http
 
-# 계약이 인정하는 공급자 이름. 구현이 붙으면 여기에 핸들러를 등록한다.
-KNOWN_PROVIDERS: tuple[str, ...] = ("bedrock",)
-_CHAT: dict[str, object] = {}       # provider → callable (아직 비어 있다)
-_EMBED: dict[str, object] = {}
+# 계약이 인정하는 공급자 이름. 구현이 붙은 것만 `_CHAT` 에 등록된다.
+KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "bedrock")
+_CHAT: dict[str, Callable[..., str]] = {}
+_EMBED: dict[str, Callable[[str], list[float]]] = {}
+
+API_KEY_ENV = "ANTHROPIC_API_KEY"          # 공식 SDK 가 읽는 이름 — KYUNGDONG_ 접두를 붙이지 않는다
+EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_EFFORT = "medium"
+MAX_TOKENS = 1024                          # 답변은 최대 5줄(prompts 원칙 6) — 짧은 출력이 계약이다
+EGRESS_NOTE = "답변 생성 시 질문과 검색된 근거 발췌가 LLM API 로 전송된다 (D-234) — 검색 자체는 내부 데이터만"
+
+
+def api_key() -> str:
+    """키는 환경변수로만 받는다. 값은 돌려주되 **어디에도 찍지 않는다**(G-29)."""
+    return os.environ.get(API_KEY_ENV, "").strip()
+
+
+def effort() -> str:
+    """출력 노력 수준. 계약 밖 값은 **422 가 아니라 기동 결함**이다 — .env 를 고친다."""
+    v = os.environ.get("KYUNGDONG_LLM_EFFORT", DEFAULT_EFFORT).strip() or DEFAULT_EFFORT
+    if v not in EFFORT_LEVELS:
+        raise RuntimeError(f"KYUNGDONG_LLM_EFFORT={v!r} — {EFFORT_LEVELS} 중 하나다")
+    return v
 
 
 @dataclass(frozen=True)
@@ -30,7 +61,8 @@ class LlmState:
 
     @property
     def badge(self) -> str:
-        return "LLM 구성됨" if self.configured else "LLM 미구성 (D-08)"
+        return (f"LLM 구성됨 · {self.provider}/{self.model}" if self.configured
+                else "LLM 미구성 (D-08)")
 
 
 def state() -> LlmState:
@@ -44,6 +76,9 @@ def state() -> LlmState:
     if s.llm_provider not in _CHAT:
         return LlmState(False, s.llm_provider, s.llm_model,
                         f"{s.llm_provider} 호출 구현 미착수 — 모델명·엔드포인트 확정 대기 (D-08)")
+    if s.llm_provider == "anthropic" and not api_key():
+        return LlmState(False, s.llm_provider, s.llm_model,
+                        f"{API_KEY_ENV} 가 비어 있다 — 키 없이는 부르지 않는다 (D-08 · D-234)")
     return LlmState(True, s.llm_provider, s.llm_model, "")
 
 
@@ -57,12 +92,15 @@ def require() -> LlmState:
 def complete(instructions: str, question: str, context: str) -> str:
     """LLM 호출. 구현이 없으면 **501** 이다. 대신 문장을 만들어 주지 않는다."""
     st = require()
-    handler = _CHAT[st.provider]
-    return handler(instructions=instructions, question=question, context=context)  # type: ignore[operator]
+    return _CHAT[st.provider](instructions=instructions, question=question, context=context,
+                              model=st.model)
 
 
 def embed(text: str) -> list[float]:
-    """임베딩. 차원은 **1536**(D-31). 구현이 없으면 501 — 0벡터를 돌려주지 않는다."""
+    """임베딩. 차원은 **1536**(D-31). 구현이 없으면 501 — 0벡터를 돌려주지 않는다.
+
+    **Anthropic 은 임베딩 API 를 제공하지 않는다.** 별도 공급자가 정해질 때까지 검색은 `tsvector_keyword` 다.
+    """
     s = settings()
     if s.embed_provider not in _EMBED:
         raise http.fail(
@@ -70,4 +108,57 @@ def embed(text: str) -> list[float]:
             f"임베딩 공급자 {s.embed_provider or '(미설정)'} 호출 구현 미착수 — "
             "검색은 tsvector_keyword 로 내려간다 (D-08)",
         )
-    return _EMBED[s.embed_provider](text)  # type: ignore[operator]
+    return _EMBED[s.embed_provider](text)
+
+
+# ── anthropic — 공식 SDK (D-234) ─────────────────────────────────────────────
+def _client() -> Any:
+    """SDK 클라이언트. 키는 SDK 가 `ANTHROPIC_API_KEY` 에서 읽는다 — 여기서 문자열로 만지지 않는다."""
+    import anthropic                      # 제품 코드의 유일한 외부 통신 모듈 (D-234)
+    return anthropic.Anthropic(max_retries=2, timeout=float(settings().h("RAG_TIMEOUT_SEC").as_int()))
+
+
+def _text_of(message: Any) -> str:
+    return "".join(getattr(b, "text", "") for b in message.content if getattr(b, "type", "") == "text").strip()
+
+
+def anthropic_complete(*, instructions: str, question: str, context: str, model: str) -> str:
+    """근거 발췌 + 질문 → 5줄 답변. **응답이 비정상이면 문장을 만들지 않고 드러낸다.**"""
+    import anthropic
+
+    user = (f"<근거>\n{context}\n</근거>\n\n<질문>\n{question}\n</질문>\n\n"
+            "위 근거와 질문만으로 답한다. 근거에 없는 문서명·조항·수치는 만들지 않는다.")
+    try:
+        msg = _client().messages.create(
+            model=model,
+            max_tokens=MAX_TOKENS,
+            system=instructions,
+            output_config={"effort": effort()},
+            messages=[{"role": "user", "content": user}],
+        )
+    except anthropic.AuthenticationError as e:
+        raise http.fail("llm_unconfigured", f"{API_KEY_ENV} 가 유효하지 않다 — {e.message}") from e
+    except anthropic.PermissionDeniedError as e:
+        raise http.fail("llm_unconfigured", f"키에 권한이 없다 — {e.message}") from e
+    except anthropic.NotFoundError as e:
+        raise http.fail("llm_unconfigured", f"모델 {model!r} 을 찾을 수 없다 — KYUNGDONG_LLM_MODEL 확인 ({e.message})") from e
+    except anthropic.RateLimitError as e:
+        raise http.fail("internal", f"LLM 호출 한도 초과 — 잠시 뒤 다시 질의 ({e.message})") from e
+    except anthropic.APIStatusError as e:
+        raise http.fail("internal", f"LLM 호출 실패 {e.status_code} — {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise http.fail("internal", f"LLM API 에 닿지 못했다 — {e}") from e
+
+    if msg.stop_reason == "refusal":
+        cat = getattr(getattr(msg, "stop_details", None), "category", None)
+        return (f"모델이 이 질문에 대한 답변 생성을 거부했다 (사유 분류 {cat or '미상'}). 담당자 검토가 필요하다.\n"
+                "근거: 확인된 자료 없음")
+    text = _text_of(msg)
+    if not text:
+        raise http.fail("internal", f"LLM 이 빈 응답을 냈다 (stop_reason={msg.stop_reason})")
+    if msg.stop_reason == "max_tokens":
+        text += f"\n(응답이 {MAX_TOKENS} 토큰에서 잘렸다 — 원칙 6 의 5줄 형식을 벗어난 출력이다)"
+    return text
+
+
+_CHAT["anthropic"] = anthropic_complete

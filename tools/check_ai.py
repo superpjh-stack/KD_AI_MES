@@ -467,6 +467,9 @@ def _closed_loop_static() -> list[str]:
     net = re.compile(r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|boto3|openai|socket|urllib\.(?:request|error)|urllib\s*$)",
                      re.M)
     url = re.compile(r"https?://(?!localhost|127\.0\.0\.1)")
+    # **허용된 외부 통신은 하나다** — `agent/llm.py` 의 공식 `anthropic` SDK(답변 생성, D-234).
+    # 검색은 여전히 내부 데이터만이다. 다른 파일이 anthropic 을 import 하면 결함이다.
+    llm_sdk = re.compile(r"^\s*(?:import|from)\s+anthropic\b", re.M)
     for p in sorted((ROOT / "src" / "kyungdong").rglob("*.py")):
         src = p.read_text()
         rel = p.relative_to(ROOT).as_posix()
@@ -474,6 +477,8 @@ def _closed_loop_static() -> list[str]:
             bad.append(f"{rel}: 외부 통신 모듈 import {mod[1]}")
         if url.search(src):
             bad.append(f"{rel}: 외부 URL 문자열")
+        if llm_sdk.search(src) and rel != "src/kyungdong/agent/llm.py":
+            bad.append(f"{rel}: anthropic SDK 는 agent/llm.py 밖에서 쓰지 않는다 (D-234)")
     return bad
 
 
@@ -493,6 +498,8 @@ def gate_20_23(client: TestClient) -> dict[str, Any]:
     closed = _closed_loop_static()
     say(f"  폐쇄형 정적 검사 — 외부 통신 흔적 {len(closed)} 건" +
         ("".join(f"\n     결함 {b}" for b in closed) if closed else " (0건)"))
+    say("  허용 외부 통신 1건 — agent/llm.py 의 LLM API(답변 생성, D-234). 검색은 내부 데이터만. "
+        f"LLM {llm.state().badge}")
 
     log_before = count("AGT_QUERY_LOGS")
     maxid = n1("select coalesce(max(QUERY_ID),0) as n from AGT_QUERY_LOGS")

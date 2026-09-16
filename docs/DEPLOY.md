@@ -119,6 +119,24 @@ docker compose -p kyungdong stop plc-sim         # 멈춤 (앱은 그대로) · 
 값은 전부 시뮬레이션이다 — `COLLECT_PATH='시뮬레이터(PLC→Gateway)'` 로 남고 화면에 `시뮬레이터 데이터 (D-174)` 배지가 뜬다.
 **실물 PLC 가 붙는 날 이 서비스를 멈추고 시뮬레이터 표지가 붙은 행을 정리한다** — 보존·삭제 정책은 D-17 미확정이라 여기서 정하지 않는다.
 
+### 7. LLM — Agent 답변 생성 (D-234)
+
+`.env` 에 세 줄을 더하면 Agent 3종(009 입고 · 020 출하 · 038 통합)이 501 대신 답을 만든다. **키는 .env 에만** 둔다.
+
+```
+KYUNGDONG_LLM_PROVIDER=anthropic
+KYUNGDONG_LLM_MODEL=claude-opus-5        # 도입기업 확정 전까지의 값 (D-08)
+ANTHROPIC_API_KEY=sk-ant-…               # 저장소·로그·화면에 적지 않는다 (G-29)
+```
+
+```bash
+docker compose -p kyungdong up -d app      # 환경변수만 바뀌었으니 재생성만 (빌드 없음)
+```
+
+확인: 038 화면 상단 배지가 `LLM 구성됨 · anthropic/claude-opus-5` 로 바뀌고, 그 옆에
+**"질문과 근거 발췌가 LLM API 로 전송된다"** 고지가 뜬다. 검색은 내부 데이터만 보지만 답변 생성은 외부 API 다 —
+이 경계를 숨기지 않는다. 임베딩은 그대로 `tsvector_keyword` 다(Anthropic 은 임베딩 API 가 없다).
+
 ## 프로파일 — dev 로 올렸다. 그 뜻을 알고 써야 한다
 
 | | dev (지금) | prod |

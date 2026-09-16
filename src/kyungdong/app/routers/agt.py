@@ -177,6 +177,7 @@ def _agent_badges() -> list[dict[str, str]]:
     st = agent_llm.state()
     return [
         {"text": st.badge, "kind": "bad" if not st.configured else "notice"},
+        *([{"text": agent_llm.EGRESS_NOTE, "kind": "undetermined"}] if st.configured else []),
         {"text": f"검색 모드 {s.search_mode}", "kind": "notice"},
         {"text": s.h("RAG_CONFIDENCE_MIN").badge, "kind": "undetermined"},
         {"text": "폐쇄형 — 외부 검색 0", "kind": "notice"},
