@@ -85,6 +85,12 @@ class DxfMeasure:
     # CIRCLE 의 (중심x, 중심y, 반지름) — group code 10·20·40 을 **읽던 그대로** 담는다.
     # 박스를 만들지 않는다: 박스가 필요한 쪽(G-14 라벨셋)이 [x-r, y-r, x+r, y+r] 로 만든다.
     circles: list[tuple[float, float, float]] = field(default_factory=list)
+    # DIMENSION 의 (문자 위치x, 위치y, 실측 치수값 | None) — TD5 객체 유형 `치수문자` 의 원천 (D-235).
+    # 위치는 group 11·21(치수문자 중점), 없으면 10·20. 값은 group 42(actual measurement)가
+    # **양수일 때만** 담는다 — libredwg 는 모르는 값을 `-1.0` 으로 쓰고, 원본 DXF 는 42 를 아예
+    # 빼기도 한다(표본: DWG 변환 8건 중 42 있음 5 · 그중 -1.0 이 2 · 원본 DXF 3건은 전부 없음).
+    # 없는 값은 `None` 이다. group 1(덮어쓴 문자)로 숫자를 지어 넣지 않는다.
+    dimensions: list[tuple[float | None, float | None, float | None]] = field(default_factory=list)
     line_len: float = 0.0
     arc_len: float = 0.0
     poly_len: float = 0.0
@@ -279,6 +285,12 @@ def parse(path: Path | str, *, encoding: str | None = None) -> DxfMeasure:
         elif kind == "SEQEND" and in_polyline:
             _add_poly(m, poly_pts, poly_closed)
             in_polyline, poly_pts, poly_closed = False, [], False
+        elif kind == "DIMENSION":
+            x, y = (g.get(11) or [None])[0], (g.get(21) or [None])[0]
+            if x is None or y is None:
+                x, y = (g.get(10) or [None])[0], (g.get(20) or [None])[0]
+            v = (g.get(42) or [None])[0]
+            m.dimensions.append((x, y, v if (v is not None and v > 0) else None))
         elif kind == "INSERT":
             m.inserts += 1
         elif kind in ("TEXT", "MTEXT", "ATTRIB", "ATTDEF"):
@@ -319,7 +331,7 @@ def parse(path: Path | str, *, encoding: str | None = None) -> DxfMeasure:
                 texts.append(val)
                 continue
             c = int(code) if code.lstrip("-").isdigit() else None
-            if c in (10, 20, 11, 21, 40, 50, 51, 70, 90):
+            if c in (10, 20, 11, 21, 40, 42, 50, 51, 70, 90):
                 v = _f(val)
                 if v is not None:
                     g.setdefault(c, []).append(v)

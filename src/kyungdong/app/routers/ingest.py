@@ -229,7 +229,10 @@ async def cad_upload(request: Request) -> dict[str, Any]:
     return {"cad_if_id": cad_if_id, "file_name": name, "size": len(raw),
             "excluded_reason": excluded,
             "note": "원본은 보관하지 않았다 — Data Lake(Object Storage) 미구성. "
-                    "분석 실행은 CAD Parsing 미구성으로 501 이다 (D-05)."}
+                    + ("분석 실행은 010 화면의 행 버튼이다 — dwg2dxf 파서 (D-235). 업로드 원본은 보관하지 "
+                       "않으므로 아카이브에 있는 도면만 분석된다."
+                       if __import__("kyungdong.cad.provider", fromlist=["x"]).parsing_configured()
+                       else "분석 실행은 CAD Parsing 미구성으로 501 이다 (D-05).")}
 
 
 @router.get("/api/cad/import-logs")

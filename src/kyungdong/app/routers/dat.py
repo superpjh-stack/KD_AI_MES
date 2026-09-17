@@ -39,7 +39,7 @@ RUNNABLE: dict[str, str] = {
     "ERP(이카운트)": "",          # Excel 적재 실적을 실측해 기록한다
     "레이저커팅기 PLC": "수집 API 는 개발3 의 ingest(MES-TD4-047) 소관이다 — 여기서 실행하지 않는다 (D-06)",
     "현장POP(터치PC)": "현장POP 입력은 공정실적 화면(개발2)이 받는다 — 여기서 실행하지 않는다 (D-06)",
-    "CAD 도면함": "CAD Parsing 미구성 — Autodesk API·YOLOv8 미확보 (D-05)",
+    "CAD 도면함": "도면 분석은 010 화면 행 버튼이다 — Parsing 은 KYUNGDONG_CAD_PARSER(dxf=dwg2dxf 파서, D-235) 에 따르고 Vision(YOLOv8) 은 미확보 (D-05)",
     "외부 표준문서": "문서 임베딩은 개발3 의 MES-TD4-049 소관이다 (D-08)",
 }
 

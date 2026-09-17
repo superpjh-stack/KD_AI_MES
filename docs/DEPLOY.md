@@ -137,6 +137,14 @@ docker compose -p kyungdong up -d app      # 환경변수만 바뀌었으니 재
 **"질문과 근거 발췌가 LLM API 로 전송된다"** 고지가 뜬다. 검색은 내부 데이터만 보지만 답변 생성은 외부 API 다 —
 이 경계를 숨기지 않는다. 임베딩은 그대로 `tsvector_keyword` 다(Anthropic 은 임베딩 API 가 없다).
 
+### 8. CAD Parsing — dwg2dxf 변환 파서 (D-235)
+
+로컬은 `KYUNGDONG_CAD_PARSER=dxf` 로 010 화면의 행 버튼 `분석 실행` 이 돈다(`brew install libredwg`).
+**컨테이너 이미지에는 `dwg2dxf` 가 없다** — Debian bookworm 에 libredwg 패키지가 없다(2026-09-17 실측).
+`.env` 에 `dxf` 를 둬도 앱은 변환기 유무를 실측해 `CAD Parsing 미구성 (D-05)` 배지를 그대로 띄운다 — 있는 척하지 않는다.
+붙이려면 Dockerfile 에 GNU libredwg 소스 빌드(`https://ftp.gnu.org/gnu/libredwg/`, `./configure && make install`,
+build-essential 필요)를 넣어야 한다. 아직 하지 않았다. Vision(YOLOv8+OCR) 은 어느 환경에서도 미구성이다.
+
 ## 프로파일 — dev 로 올렸다. 그 뜻을 알고 써야 한다
 
 | | dev (지금) | prod |
@@ -170,6 +178,6 @@ TLS 버전·암호 스위트는 사업계획서에 값이 없다(D-15) — 도�
 |---|---|---|
 | 장비 IP · PLC 태그맵 (D-169 · D-176) | 수집 API 는 prod 에서 403 · 시뮬레이터로만 | 레이저커팅기 PLC · 현장POP IP, 태그 ↔ 레지스터 주소 |
 | LLM · 임베딩 (D-08) | 501 "LLM 미구성" · `tsvector_keyword` | 공급자·모델·키 |
-| CAD 파서 (D-05) | 501 + 명시 배지 | Autodesk API · YOLOv8 · OCR |
+| CAD 파서 (D-05 · D-235) | 로컬: Parsing 은 dwg2dxf 파서로 돈다 · 컨테이너: dwg2dxf 없어 501 + 배지 | 이미지에 libredwg 소스 빌드 · Vision 은 YOLOv8 가중치 · OCR |
 | 표준 작업조건 (D-59 · D-225) | 임계 비교 차단 | 공정별 표준값·허용범위 |
 | TLS · 백업 · 보존기간 (D-15 · D-17) | 정책 없음 | 도입기업 기준 |

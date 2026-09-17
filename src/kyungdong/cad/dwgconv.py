@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from functools import lru_cache
 import subprocess
 import tempfile
 from contextlib import contextmanager
@@ -53,8 +54,9 @@ def available() -> bool:
     return which() is not None
 
 
+@lru_cache(maxsize=1)
 def version() -> str | None:
-    """변환기 버전 문자열. 없으면 `None` — 있는 척하지 않는다."""
+    """변환기 버전 문자열. 없으면 `None` — 있는 척하지 않는다. 화면마다 부르므로 1회만 잰다."""
     if not available():
         return None
     try:

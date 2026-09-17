@@ -81,5 +81,10 @@ def test_LLM_CAD_미구성이_숨지_않는다():
     """API 키·CAD 파서가 없으면 화면이 그 사실을 말해야 한다 (§2.5 · D-05 · D-08)."""
     body = client.get("/").text
     assert "LLM 미구성" in body
-    assert "CAD Parsing 미구성" in body
+    # Parsing 이 dwg2dxf 로 구성된 장비(D-235)에서는 Vision 미구성이 드러나야 한다 — 배지가 사라지면 안 된다
+    from kyungdong.cad import provider
+    if provider.parsing_configured():
+        assert "CAD Vision 미구성" in body and "Parsing 만" in body
+    else:
+        assert "CAD Parsing 미구성" in body
     assert "tsvector_keyword" in body

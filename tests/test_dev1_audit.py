@@ -272,13 +272,18 @@ def test_쪽번호_앵커는_20개_미만이다(path):
 
 def test_쪽_넘김_링크는_첫쪽과_끝쪽을_남긴다():
     # 가운데 쪽에서 본다 — 마지막 쪽에 서 있으면 마지막 쪽은 링크가 아니라 **현재 쪽(굵게)** 이다.
-    # 전에는 `?page=300` 을 청해 표가 6,000행을 넘던 DB 에서만 통과했다(db-reset 뒤 172쪽 → 실패).
-    html = get("/sys/027?page=300").text
+    # 고정 번호(`?page=300`)를 청하면 로그 크기에 따라 판정이 뒤집힌다 — 172쪽이던 DB 에서는 범위 밖,
+    # 시뮬레이터가 돈 뒤 662쪽이 된 DB 에서는 범위 안이었다. **실제 마지막 쪽을 읽고 그 너머를 청한다.**
+    m = re.search(r"(\d+)/(\d+) 쪽", get("/sys/027").text)
+    assert m, "쪽 표시가 없다"
+    last = m.group(2)
+    assert int(last) > 2, f"쪽이 {last}개뿐이라 첫·끝 링크를 잴 수 없다 — 시드가 줄었는가"
+    beyond = int(last) + 100
+    html = get(f"/sys/027?page={beyond}").text
     m = re.search(r"(\d+)/(\d+) 쪽", html)
     assert m, "쪽 표시가 없다"
     cur, last = m.group(1), m.group(2)
-    assert int(last) > 2, f"쪽이 {last}개뿐이라 첫·끝 링크를 잴 수 없다 — 시드가 줄었는가"
-    assert cur == last, "page=300 은 마지막 쪽으로 붙여야 한다(범위 밖 쪽 번호는 끝으로 붙인다)"
+    assert cur == last, f"page={beyond} 은 마지막 쪽으로 붙여야 한다(범위 밖 쪽 번호는 끝으로 붙인다)"
     assert f"<b>{last}</b>" in html, "마지막 쪽에 서 있으면 마지막 쪽이 현재 쪽으로 굵게 표시돼야 한다"
     assert "page=1\"" in html, "첫 쪽으로 가는 링크가 없다"
     html = get("/sys/027?page=2").text

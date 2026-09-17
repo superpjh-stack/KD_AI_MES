@@ -139,15 +139,21 @@ def test_g14_evaluator_moves_with_threshold():
 
 
 def test_g14_detectors_are_unconfigured_and_raise_501():
-    """0건 경로: 공급자 미구성. **빈 리스트를 돌려주면 '0건 인식'과 구분이 안 된다** → 501 이어야 한다."""
+    """0건 경로: 공급자 미구성. **빈 리스트를 돌려주면 '0건 인식'과 구분이 안 된다** → 501 이어야 한다.
+
+    **Parsing 이 구성된 장비(D-235, `KYUNGDONG_CAD_PARSER=dxf`)에서는** Parsing 은 없는 파일에
+    422 를, Vision 은 그대로 501 을 낸다 — 둘을 섞지 않는다. G-14 는 그래도 열리지 않는다:
+    파서는 홀·치수문자 좌표를 낼 뿐 IoU 를 잴 경계상자·정답 라벨이 없다.
+    """
     avail = cadprov.availability()
     assert len(avail) == 2
-    assert all(not a.configured for a in avail), \
-        "CAD 공급자가 구성됐다 — G-14 를 실제로 잴 수 있다. 리포트를 갱신하라"
-    for det in (cadprov.parsing_detector(), cadprov.vision_detector()):
-        with pytest.raises(Exception) as e:
-            det.detect("(없는 파일)")
-        assert getattr(e.value, "status_code", None) == 501
+    assert not avail[1].configured, "Vision 이 구성됐다 — G-14 를 실제로 잴 수 있다. 리포트를 갱신하라"
+    with pytest.raises(Exception) as e:
+        cadprov.vision_detector().detect("(없는 파일)")
+    assert getattr(e.value, "status_code", None) == 501
+    with pytest.raises(Exception) as e:
+        cadprov.parsing_detector().detect("(없는 파일)")
+    assert getattr(e.value, "status_code", None) == (422 if avail[0].configured else 501)
 
 
 # ── G-15~G-18 Label·학습 전제 ────────────────────────────────────────────
@@ -195,7 +201,11 @@ def test_g19_stage1_blocks_and_feature_stays_zero():
     before = n1("select count(*) as n from EST_CAD_DRAWINGS")
     stages = cadpipe.stage_status()
     assert len(stages) == 5
-    assert stages[0]["blocked"] is True, "1단계 인식이 열렸다 — G-19 를 실측으로 다시 재라"
+    parsing_on = cadprov.parsing_configured()
+    # Parsing 이 구성되면(D-235) 1단계는 **열린다** — 그때 비고에 Vision 미구성·정합성 없음이 적혀야 한다.
+    assert stages[0]["blocked"] is (not parsing_on), "1단계 판정이 공급자 구성 상태와 어긋난다"
+    if parsing_on:
+        assert "D-235" in stages[0]["note"] and "Vision" in stages[0]["note"]
 
     row = conn.q1(
         "insert into EST_CAD_DRAWINGS (DRAWING_NO, FILE_TYPE, FILE_PATH, FILE_SIZE, "
@@ -205,8 +215,10 @@ def test_g19_stage1_blocks_and_feature_stays_zero():
     try:
         with pytest.raises(Exception) as e:
             cadpipe.analyze(did)
-        assert getattr(e.value, "status_code", None) == 501, \
-            "도면이 있어도 인식은 501 이어야 한다 (조용한 합성 Feature 금지 — D-05)"
+        # 미구성 → 501. Parsing 구성(D-235) → probe 는 파일이 없어 422 — 어느 쪽도 객체를 만들지 않는다.
+        assert getattr(e.value, "status_code", None) == (422 if parsing_on else 501), \
+            "도면이 있어도 인식은 501(미구성) 또는 422(파일 없음)이어야 한다 (조용한 합성 금지 — D-05)"
+        assert n1("select count(*) as n from EST_CAD_OBJECTS where DRAWING_ID = %s", (did,)) == 0
         feat = cadpipe.build_features(did)
         assert feat["confirmed_objects"] == 0 and feat["created"] == 0
         assert len(feat["blocked"]) == 5, "차단 Feature 5종이 유지돼야 한다"
@@ -344,7 +356,15 @@ def test_g24_confirm_yn_has_exactly_one_write_path():
             if check_ai.WRITE_SQL.search(line):
                 hits.append((p.relative_to(ROOT).as_posix(), i))
     objs = [h for h in hits if "pipeline.py" in h[0]]
-    assert len(objs) == 1, f"EST_CAD_OBJECTS 쓰기 경로가 {objs} 다 — 하나여야 한다"
+    # `analyze()` 의 insert 는 **CONFIRM_YN='N'** 고정이다(D-235) — 인식 결과 제안이지 확정이 아니다.
+    # CONFIRM_YN 을 **바꾸는**(update) 경로는 여전히 `review_object()` 하나여야 한다.
+    src = (ROOT / "src/kyungdong/cad/pipeline.py").read_text().splitlines()
+    updates = [h for h in objs if src[h[1] - 1].lower().lstrip('" ').startswith("update")]
+    inserts = [h for h in objs if h not in updates]
+    assert len(updates) == 1, f"EST_CAD_OBJECTS 의 CONFIRM_YN 을 바꾸는 경로가 {updates} 다 — 하나여야 한다"
+    for _f, i in inserts:
+        tail = " ".join(src[i - 1: i + 3])
+        assert "'N'" in tail and "'Y'" not in tail, f"pipeline.py:{i} insert 가 확정('Y') 을 만든다"
 
 
 def test_g24_inspections_write_path_is_one_and_guarded(client):

@@ -60,7 +60,12 @@ def test_확정_대상_표를_쓰는_함수는_승인_검사를_지난다():
             proposal = (m.group(2).upper() == "AGT_RECOMMENDATIONS" and m.group(1).lower() != "update"
                         and ("REVIEW_INITIAL" in after or "'미검토'" in after)
                         and "REVIEWER_ID" not in after.split("values")[0])
-            if proposal:
+            # `EST_CAD_OBJECTS` 에 **CONFIRM_YN='N'** 행을 넣는 것(인식 결과)도 제안이지 확정이 아니다 —
+            # 확정은 `review_object()` 의 update 한 곳이다 (D-235). 'Y' 를 넣는 insert 는 여전히 위반이다.
+            detection = (m.group(2).upper() == "EST_CAD_OBJECTS" and m.group(1).lower() != "update"
+                         and "'N'" in after.split("values")[0] + after.split("values")[1][:200]
+                         and "'Y'" not in after[:600])
+            if proposal or detection:
                 continue
             if "can_approve" not in body and "forbidden" not in body:
                 line = txt[:m.start()].count("\n") + 1

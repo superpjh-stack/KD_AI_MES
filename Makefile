@@ -2,7 +2,7 @@
 .PHONY: setup gen-schema db-schema db-seed db-reset run simulate cad-ingest cad-archive test \
 	plc-scan plc-poll plc-status plc-register plc-unregister plc-run plc-wo-start plc-wo-finish demo check-decisions \
 	run-prod ops-accounts ops-password \
-        check-routes check-trace check-schema check-data check-ingest check-ai check-security \
+        check-routes check-trace check-schema check-data check-ingest check-ai check-security check-llm \
         gate gate-full contracts
 
 DB   ?= kyungdong_db
@@ -100,6 +100,7 @@ check-data:;     uv run python tools/check_data.py
 check-ingest:;   uv run python tools/check_ingest.py
 check-ai:;       uv run python tools/check_ai.py
 check-security:; uv run python tools/check_security.py
+check-llm:;      uv run python tools/llm_ping.py     ## LLM 연결 1회 실호출 (과금·외부 전송, D-236) — gate 에 넣지 않는다
 
 gate:                           ## 읽기 전용 판정표 — 루프가 매 회전 부르는 것
 	uv run python tools/gate.py

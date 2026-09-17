@@ -20,7 +20,8 @@
   {% endif %}
   {% if not kiosk %}
   {% if not llm_configured %}<span class="badge bad" title="LLM API 키가 없다 — Agent 질의는 501 로 답한다">LLM 미구성 (D-08)</span>{% endif %}
-  {% if not cad_configured %}<span class="badge bad" title="Autodesk API·YOLOv8 미확보 — CAD 인식은 501 로 답한다">CAD Parsing 미구성 (D-05)</span>{% endif %}
+  {% if not cad_parsing_configured %}<span class="badge bad" title="CAD 파서가 없다 — CAD 인식은 501 로 답한다. KYUNGDONG_CAD_PARSER=dxf 로 dwg2dxf 파서를 붙일 수 있다 (D-235)">CAD Parsing 미구성 (D-05)</span>
+  {% elif not cad_vision_configured %}<span class="badge notice" title="Parsing 은 dwg2dxf 변환 파서로 돈다(D-235). YOLOv8 가중치·OCR 이 없어 Vision 은 미구성 — Parsing↔Vision 정합성 검증(CROSS_CHECK_RESULT)은 NULL 이다">CAD Vision 미구성 (D-05) · Parsing 만</span>{% endif %}
   <span class="badge notice" title="임베딩 모델이 없어 키워드 검색으로 돈다">검색 모드 {{ search_mode }}</span>
   {% if not csrf_enforced %}<span class="badge bad">CSRF 미적용 (D-60)</span>{% endif %}
   {% if synthetic_note %}<span class="badge synthetic" title="자재LOT·작업지시·공정실적·LOT추적·검사·출하는 원천이 없는 합성 데이터다">{{ synthetic_note }}</span>{% endif %}

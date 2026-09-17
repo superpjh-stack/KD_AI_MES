@@ -389,8 +389,10 @@ def main() -> int:
     for t in ("IF_CAD_FILES", "IF_CAD_IMPORT_LOGS", "EST_CAD_DRAWINGS", "DAT_DATASET_ITEMS"):
         print(f"  {t:<22} {conn.q1(f'select count(*) as n from {t}')['n']:,}")
     print()
-    print("분석 실행(Parsing·Vision)은 **501 CAD Parsing 미구성 (D-05)** 이다 — "
-          "객체·Feature 를 만들어 채우지 않는다.")
+    from kyungdong.cad import provider as cadprov
+    pa = cadprov.parsing_detector().available()
+    print(f"분석 실행(Parsing): {'구성됨 — ' + pa.method + ' (D-235). 화면 010 행 버튼으로 돌린다' if pa.configured else '**501 CAD Parsing 미구성 (D-05)**'} "
+          "— 객체·Feature 를 만들어 채우지 않는다. Vision(YOLOv8) 은 미구성이다.")
     print("단 `.dxf` 는 예외다 — 순수 텍스트라 group code 로 읽힌다(D-110-b). "
           f"이 인벤토리의 dxf 는 {st['ext'].get('dxf', 0)} 건 / 전체 {st['total']:,} 건이다. "
           "`--source archive` 로 원본 실측을 본다.")

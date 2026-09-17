@@ -265,10 +265,14 @@ def test_501_LLM_미구성은_조용히_폴백하지_않는다():
 def test_501_CAD_미구성은_합성_Feature_를_내지_않는다():
     """D-05 — Autodesk·YOLOv8 미확보. 빈 리스트도 0건 인식과 구분이 안 되므로 501 이다."""
     avail = cad_provider.availability()
-    assert avail and all(not a.configured for a in avail), "CAD 공급자가 구성되어 있다"
-    for det in (cad_provider.parsing_detector(), cad_provider.vision_detector()):
+    assert len(avail) == 2 and not avail[1].configured, "Vision 이 구성되어 있다 — D-05 판정을 다시 잰다"
+    # Parsing 은 dwg2dxf 파서로 구성될 수 있다(D-235) — 그때 없는 파일은 **422** 다. 501(미구성)과 섞지 않는다.
+    for det, av in zip((cad_provider.parsing_detector(), cad_provider.vision_detector()), avail):
         with pytest.raises(Exception) as e:
             det.detect("QA1-없는파일.dwg")
+        if av.configured:
+            assert e.value.status_code == 422, "구성된 파서가 없는 파일에 501 을 내면 원인을 못 찾는다"
+            continue
         assert e.value.status_code == 501
         assert MSG_CAD.split(" (")[0] in e.value.detail["message"]
 

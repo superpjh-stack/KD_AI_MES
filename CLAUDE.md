@@ -78,7 +78,7 @@ Parsing(Autodesk API) + Vision AI(**YOLOv8**+OCR) 병렬 → 객체인식 결과
 - `uv` 0.12.1 / Python 3.12(`/opt/homebrew/bin/python3.12`). 시스템 `python3`(3.9)는 쓰지 않는다.
 - FastAPI + Jinja2 + psycopg. Docker 없음. Node 24 있음. **개발 서버 포트 8020** (8000·8010 은 점유 중).
 - API 키 없음 → Agent 는 **501 "LLM 미구성"** 명시 렌더링(D-08). 조용한 폴백 금지. 임베딩 없으면 `tsvector_keyword` 모드 라벨.
-- CAD 파서(Autodesk API·YOLOv8) 미확보 → **501 또는 명시 배지**(D-05). 조용히 합성 Feature 금지.
+- CAD 파서 — **Parsing 은 `KYUNGDONG_CAD_PARSER=dxf`(dwg2dxf 변환 + 자체 DXF 파서, D-123·D-235)로 돈다.** 내는 객체는 홀·치수문자 2종 · 신뢰도 없음 · DETECT_METHOD 는 `Parsing(dwg2dxf+DXF)`. Autodesk API·YOLOv8(Vision) 은 미확보 → **501 또는 명시 배지**(D-05), 정합성 검증 NULL. 조용히 합성 Feature 금지.
 - 환경변수 접두 `KYUNGDONG_` (`.env.example`).
 - 이웃 DB `kwangsung_db` `kkotsuni_db` `songwol_db` `koryo_solder_db` `mes_db` 는 **건드리지 않는다**.
 

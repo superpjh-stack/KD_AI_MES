@@ -34,8 +34,14 @@
     </table>
   </div>
   <p class="meta">
+    {% if parsing_configured %}
+    Parsing 은 <b>dwg2dxf 변환 + DXF group code 파싱</b> 으로 돈다 (D-123 · D-235) — 내는 객체는
+    홀(CIRCLE)·치수문자(DIMENSION) 2종이고 신뢰도는 없다(결정적 파싱). Vision(YOLOv8+OCR) 은 미구성이라
+    Parsing↔Vision 정합성 검증은 <b>없다</b>. 승인 전에는 확정이 아니다 (G-24).
+    {% else %}
     `.dwg` 는 바이너리다. 파서·가중치가 없으면 <b>분석 실행은 501 CAD Parsing 미구성 (D-05)</b> 이다 —
     합성 Feature 를 만들어 정상인 것처럼 보이게 하지 않는다.
+    {% endif %}
   </p>
 </div>
 

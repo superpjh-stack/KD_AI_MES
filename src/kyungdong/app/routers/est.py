@@ -230,25 +230,59 @@ async def cad_analysis(request: Request):
         stats, inv_err = None, f"도면 인벤토리를 읽지 못했다: {e}"
     audit(request, screen.id, "조회")
     result_link = "/est/011" + (f"?project={_urlq(f['q1'])}" if f["q1"] else "")
+    from ...cad import provider as cad_provider
+    parsing = cad_provider.parsing_detector().available()
+    can_analyze = parsing.configured and rbac.can_write(role, EST_AREA)
+    if parsing.configured:
+        analyze_note = (f"행마다 '분석 실행' — {parsing.method} (D-235). 결과는 CONFIRM_YN='N' 으로 "
+                        "들어가고 011 에서 사람이 확정한다 (G-24). Vision 미구성이라 정합성 검증은 없다")
+    else:
+        analyze_note = f"501 CAD Parsing 미구성 (D-05) — {parsing.reason}"
+    row_form = {
+        "title": "분석 실행", "action": "/est/010/analyze", "id_name": "drawing_id",
+        "selects": [], "texts": [], "button": "분석 실행", "can": can_analyze,
+        "note": (analyze_note if not parsing.configured
+                 else (f"{EST_AREA} 등록 권한 없음 (G-28)" if not can_analyze else "")),
+    }
     return render(
         request, "est/010.html", screen=screen, current=screen, td3=td3, mockup=m,
         filters=f, rows=grid, total=total,
         empty_note=EMPTY + " — `make cad-ingest` 로 도면을 수집한다",
         badges=_cad_badges(), notices=[],
         actions={"도면 업로드": "아래 '도면 파일 업로드' 카드에서 한다 (MES-TD4-048)",
-                 "분석 실행": "501 CAD Parsing 미구성 (D-05) — Autodesk API·YOLOv8 미확보",
+                 "분석 실행": analyze_note,
                  "결과보기": "011 객체인식 결과관리로 이동 — 지금 건 프로젝트 조건을 싣고 간다",
                  "엑셀": "다운로드는 권한 통제 대상 (9.2 ①) — 개발1 036 화면"},
         button_links={"결과보기": result_link},
+        row_form=row_form, parsing_configured=parsing.configured,
         stages=cad_pipeline.stage_status(), config=cad_pipeline.config_badges(),
         inventory=stats, inventory_error=inv_err,
         can_upload=rbac.can_write(role, EST_AREA),
         upload_note=(
             "업로드는 인터페이스 MES-TD4-048 `POST /api/cad/files` 가 받는다 — **화면이 없는 "
             "연계**라 응답은 HTML 이 아니라 등록 결과 JSON 이다. 원본 바이너리는 보관하지 "
-            "않는다(Data Lake 미구성). 분석 실행은 501 CAD Parsing 미구성 (D-05)."),
+            "않는다(Data Lake 미구성). 분석 실행은 그리드 행의 버튼이다 — " + analyze_note),
         upload_types=sorted(cad_inventory.FILE_TYPES),
     )
+
+
+@router.post("/est/010/analyze")
+async def run_analysis(request: Request):
+    """분석 실행 — ① 인식 (MES-TD4-010 'Parsing·Vision 병렬 실행 → 객체 DB 저장').
+
+    검사 순서는 **CSRF → 권한 → 입력값** 이다(계약 §4.0). 등록 권한이 없으면 403.
+    Parsing 미구성이면 **501** 그대로 — 화면이 버튼을 죽여 두지만 직접 POST 해도 같은 답이다.
+    결과는 CONFIRM_YN='N' 이고 011 로 보낸다 — 확정은 거기서 사람이 한다 (G-24).
+    """
+    form = await request.form()
+    csrf.require(request, csrf.token_of(request, form))   # 핸들러 첫 줄 (contracts §5 · G-26)
+    screen, _td3, role = _guard(request, "MES-TD3-010")
+    drawing_id = _form_int(form, "drawing_id")
+    if not rbac.can_write(role, EST_AREA):
+        raise http.fail("forbidden", f"{EST_AREA} 등록 권한 없음 — 분석을 실행할 수 없다 (G-28)")
+    r = cad_pipeline.analyze(drawing_id)
+    audit(request, screen.id, f"분석실행:{r['detected']}건", log_type="변경")
+    return RedirectResponse(f"/est/011?drawing={_urlq(r['drawing_no'])}", status_code=303)
 
 
 # ── 011 객체인식 결과관리 ─────────────────────────────────────────────────

@@ -222,23 +222,73 @@ def import_inventory(*, limit: int | None = None, scope: str = "product",
 
 
 def analyze(drawing_id: int) -> dict[str, Any]:
-    """① Parsing + Vision **병렬** 인식 → `EST_CAD_OBJECTS`.
+    """① Parsing (+ Vision) 인식 → `EST_CAD_OBJECTS` (CONFIRM_YN='N').
 
-    두 공급자 중 하나라도 미구성이면 **501** 이다 — 한쪽만으로 정합성 검증(Parsing↔Vision)을
-    할 수 없고, 없는 값을 만들어 채우면 D-05 위반이다.
+    **Parsing 이 미구성이면 501** 이다 — 없는 값을 만들어 채우면 D-05 위반이다.
+    **Parsing 만 구성됐으면 Parsing 만 돈다 (D-235).** Vision 이 없으니 Parsing↔Vision 정합성
+    검증은 할 수 없고 `CROSS_CHECK_RESULT` 는 NULL 로 남는다 — 결과 dict 의 `vision` 에 그 사유를
+    그대로 싣고 화면 011 은 그 칸을 `미수집 (D-05)` 로 보인다. 한쪽만으로 '일치' 를 적지 않는다.
+
+    · 확정(CONFIRM_YN='Y') 객체가 있는 도면은 **재분석하지 않는다(422)** — 사람 승인을 지우게 된다(G-24).
+    · 미확정 객체는 같은 방식(DETECT_METHOD) 것만 지우고 다시 넣는다(재분석 = 교체).
+    · `ANALYSIS_STATUS` 는 대기 → 분석중 → 완료, 실패하면 오류 (TD5 어휘).
+    · 변환·파싱·파일 부재는 **422** 다 — 501(미구성)과 구분한다.
     """
-    row = conn.q1("select DRAWING_ID, DRAWING_NO, FILE_PATH from EST_CAD_DRAWINGS where DRAWING_ID = %s",
-                  (drawing_id,))
+    row = conn.q1("select DRAWING_ID, DRAWING_NO, FILE_TYPE, FILE_PATH, ANALYSIS_STATUS "
+                  "from EST_CAD_DRAWINGS where DRAWING_ID = %s", (drawing_id,))
     if row is None:
         raise http.fail("validation", f"도면 {drawing_id} 가 없다")
-    avail = provider.availability()
-    missing = [a for a in avail if not a.configured]
-    if missing:
+    parsing, vision = provider.parsing_detector(), provider.vision_detector()
+    pa, va = parsing.available(), vision.available()
+    if not pa.configured:
+        missing = [a for a in (pa, va) if not a.configured]
         raise http.fail("cad_unconfigured", " / ".join(f"{a.method}: {a.reason}" for a in missing))
+    confirmed = int(conn.q1("select count(*) as n from EST_CAD_OBJECTS "
+                            "where DRAWING_ID = %s and CONFIRM_YN = 'Y'", (drawing_id,))["n"])
+    if confirmed:
+        raise http.fail("validation",
+                        f"도면 {row['drawing_no']} 에 확정 객체 {confirmed}건이 있다 — 재분석은 사람 승인을 "
+                        "지우므로 하지 않는다 (G-24). 확정을 반려한 뒤 다시 돌린다")
+    detectors = [parsing] + ([vision] if va.configured else [])
+    methods = [d.method for d in detectors]
+    conn.x("update EST_CAD_DRAWINGS set ANALYSIS_STATUS = '분석중', UPDATED_DT = now() "
+           "where DRAWING_ID = %s", (drawing_id,))
     objects: list[provider.DetectedObject] = []
-    for det in (provider.parsing_detector(), provider.vision_detector()):
-        objects += det.detect(row["file_path"])
-    return {"drawing_id": drawing_id, "detected": len(objects)}
+    try:
+        for det in detectors:
+            objects += det.detect(row["file_path"])
+    except http.HTTPException:
+        conn.x("update EST_CAD_DRAWINGS set ANALYSIS_STATUS = '오류', UPDATED_DT = now() "
+               "where DRAWING_ID = %s", (drawing_id,))
+        raise
+    by_type: dict[str, int] = {}
+    for o in objects:
+        if o.object_type not in provider.OBJECT_TYPES:       # 어휘 밖 객체는 만들지 않는다
+            raise http.fail("internal", f"객체 유형 어휘 위반: {o.object_type!r} (TD5 {provider.OBJECT_TYPES})")
+        by_type[o.object_type] = by_type.get(o.object_type, 0) + 1
+    with conn.tx() as cur:
+        cur.execute("delete from EST_CAD_OBJECTS where DRAWING_ID = %s and CONFIRM_YN = 'N' "
+                    "and DETECT_METHOD = any(%s)", (drawing_id, methods))
+        replaced = cur.rowcount
+        method = parsing.method
+        cur.executemany(
+            "insert into EST_CAD_OBJECTS (DRAWING_ID, DETECT_METHOD, OBJECT_TYPE, POS_X, POS_Y, "
+            " DIMENSION_VALUE, CONFIDENCE_SCORE, CROSS_CHECK_RESULT, CONFIRM_YN, CREATED_DT) "
+            "values (%s,%s,%s,%s,%s,%s,%s,NULL,'N', now())",
+            [(drawing_id, method, o.object_type, o.pos_x, o.pos_y, o.dimension_value, o.confidence)
+             for o in objects],
+        )
+        cur.execute("update EST_CAD_DRAWINGS set ANALYSIS_STATUS = '완료', UPDATED_DT = now() "
+                    "where DRAWING_ID = %s", (drawing_id,))
+    return {
+        "drawing_id": drawing_id, "drawing_no": row["drawing_no"], "detected": len(objects),
+        "by_type": by_type, "methods": methods, "replaced": replaced,
+        "cross_check": None if not va.configured else "가능",
+        "vision": None if va.configured else va.reason,
+        "confidence": "없음 — 결정적 파싱은 IoU 신뢰도가 없다 (D-235)",
+        "note": ("승인 전에는 확정이 아니다 (G-24) — 011 에서 사람이 검토한다. "
+                 "홀은 CIRCLE 전량이라 지름 필터 없이 들어 있다 (D-110-b)"),
+    }
 
 
 def review_object(object_id: int, *, reviewer_id: int, role_code: str, result: str,
@@ -442,11 +492,19 @@ def stage_status() -> list[dict[str, Any]]:
         return int(row["n"]) if row else 0
 
     avail = provider.availability()
+    pa, va = avail[0], avail[1]
+    if pa.configured:
+        note1 = (f"{pa.method} 구성됨 (D-235) — 홀·치수문자 2종, 신뢰도 없음. "
+                 f"{va.method} — {va.reason} → 정합성 검증(CROSS_CHECK_RESULT) 은 NULL"
+                 if not va.configured else "Parsing·Vision 구성됨")
+    else:
+        note1 = " / ".join(f"{a.method} — {a.reason}" for a in avail if not a.configured)
     return [
         {"no": 1, "name": "수집·인식", "table": "IF_CAD_FILES → EST_CAD_OBJECTS",
          "count": one("select count(*) as n from EST_CAD_OBJECTS"),
-         "blocked": not all(a.configured for a in avail),
-         "note": " / ".join(f"{a.method} — {a.reason}" for a in avail if not a.configured)},
+         # Parsing 만 구성돼도 인식은 **돈다** — 차단이 아니다. Vision 부재는 비고에 적는다 (D-235).
+         "blocked": not pa.configured,
+         "note": note1},
         {"no": 2, "name": "HITL 검증", "table": "EST_OBJECT_REVIEWS",
          "count": one("select count(*) as n from EST_OBJECT_REVIEWS"),
          "blocked": False, "note": "승인 전에는 확정이 아니다 (G-24)"},

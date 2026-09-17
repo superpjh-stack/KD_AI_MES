@@ -54,7 +54,8 @@ services:
       KYUNGDONG_LLM_EFFORT: ${KYUNGDONG_LLM_EFFORT:-medium}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       KYUNGDONG_EMBED_PROVIDER: ${KYUNGDONG_EMBED_PROVIDER:-}
-      # D-05 미확보. 비우면 CAD 인식은 501 + 명시 배지.
+      # D-05 미확보. 비우면 CAD 인식은 501 + 명시 배지. `dxf`(D-235)는 컨테이너에 `dwg2dxf` 가 있어야 구성으로
+      # 잡힌다 — 이 이미지에는 없다(Debian 패키지 없음, 소스 빌드 필요 · docs/DEPLOY.md §8). 없으면 화면이 그 사실을 적는다.
       KYUNGDONG_CAD_PARSER: ${KYUNGDONG_CAD_PARSER:-}
       # 실시간 패널·시뮬레이터 주기(가설 D-06). VPS 에서는 2초가 알맞다.
       KYUNGDONG_PLC_POLL_SEC: ${KYUNGDONG_PLC_POLL_SEC:-2}

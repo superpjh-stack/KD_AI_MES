@@ -7,6 +7,7 @@
   KYUNGDONG_LLM_MODEL=claude-opus-5     모델 ID — 도입기업 확정 전까지 .env 값이다
   KYUNGDONG_LLM_EFFORT=medium           low·medium·high·xhigh·max (답변은 5줄이라 medium 이 기본)
   ANTHROPIC_API_KEY=…                   키 — 환경변수로만. 저장소·로그·화면에 적지 않는다 (G-29)
+                                        SDK 가 인정하는 다른 자격도 통한다 — `ANTHROPIC_AUTH_TOKEN` · `ant auth login` 프로필 (D-237)
   KYUNGDONG_EMBED_PROVIDER=             임베딩 — **Anthropic 은 임베딩 API 가 없다.** 비우면 tsvector_keyword
 
 **폐쇄형과의 관계 (D-234).** 검색은 내부 데이터(`AGT_VECTOR_DOCS` · 운영 DB)만 본다 — 외부 *검색* 은 0건이다.
@@ -35,13 +36,32 @@ _EMBED: dict[str, Callable[[str], list[float]]] = {}
 API_KEY_ENV = "ANTHROPIC_API_KEY"          # 공식 SDK 가 읽는 이름 — KYUNGDONG_ 접두를 붙이지 않는다
 EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_EFFORT = "medium"
-MAX_TOKENS = 1024                          # 답변은 최대 5줄(prompts 원칙 6) — 짧은 출력이 계약이다
+AUTH_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"     # SDK 가 두 번째로 읽는 이름
+MAX_TOKENS = 4096                          # 답변은 최대 5줄(prompts 원칙 6)이지만 Opus 5 는 thinking 이 기본이라
+                                           # 그 토큰까지 이 상한에 든다 — 1024 면 답이 나오기 전에 잘린다 (D-237)
+PING_MAX_TOKENS = 256                      # 연결 확인도 같은 이유로 16 이 아니다
 EGRESS_NOTE = "답변 생성 시 질문과 검색된 근거 발췌가 LLM API 로 전송된다 (D-234) — 검색 자체는 내부 데이터만"
 
 
 def api_key() -> str:
     """키는 환경변수로만 받는다. 값은 돌려주되 **어디에도 찍지 않는다**(G-29)."""
     return os.environ.get(API_KEY_ENV, "").strip()
+
+
+def has_credential() -> bool:
+    """SDK 가 실제로 쓸 자격이 있는가 — `ANTHROPIC_API_KEY` → `ANTHROPIC_AUTH_TOKEN` → `ant auth login` 프로필 (D-237).
+
+    환경변수 하나만 보면 프로필로 로그인한 장비에서 501 을 내고, 반대로 SDK 가 못 쓰는 값을 "있다" 고 한다.
+    그래서 마지막 단계는 **SDK 자신에게 묻는다**(네트워크 없음 — 생성자는 자격을 해석만 한다). 값은 돌려주지 않는다.
+    """
+    if api_key() or os.environ.get(AUTH_TOKEN_ENV, "").strip():
+        return True
+    try:
+        import anthropic
+        c = anthropic.Anthropic()
+        return bool(c.api_key or getattr(c, "auth_token", None))
+    except Exception:                     # 프로필 파일 결함 등 — 자격 없음으로 본다. 사유는 state() 가 이름으로 말한다
+        return False
 
 
 def effort() -> str:
@@ -76,9 +96,10 @@ def state() -> LlmState:
     if s.llm_provider not in _CHAT:
         return LlmState(False, s.llm_provider, s.llm_model,
                         f"{s.llm_provider} 호출 구현 미착수 — 모델명·엔드포인트 확정 대기 (D-08)")
-    if s.llm_provider == "anthropic" and not api_key():
+    if s.llm_provider == "anthropic" and not has_credential():
         return LlmState(False, s.llm_provider, s.llm_model,
-                        f"{API_KEY_ENV} 가 비어 있다 — 키 없이는 부르지 않는다 (D-08 · D-234)")
+                        f"{API_KEY_ENV} 가 비어 있다 ({AUTH_TOKEN_ENV} · `ant auth login` 프로필도 없음) — "
+                        "자격 없이는 부르지 않는다 (D-08 · D-234 · D-237)")
     return LlmState(True, s.llm_provider, s.llm_model, "")
 
 
@@ -162,3 +183,42 @@ def anthropic_complete(*, instructions: str, question: str, context: str, model:
 
 
 _CHAT["anthropic"] = anthropic_complete
+
+
+def ping() -> dict[str, Any]:
+    """연결 확인 1회 — **가장 작은 실제 호출**. `make check-llm` 이 부른다 (D-236).
+
+    구성이 안 됐으면 501 을 그대로 낸다(문장으로 덮지 않는다). 성공하면 모델·요청 ID·지연·토큰을
+    돌려준다 — 키 문자열은 어디에도 넣지 않는다(G-29). 이 함수도 anthropic 을 이 파일 밖에서
+    import 하지 않으려고 여기 있다(check_ai 정적 검사).
+    """
+    import time
+    import anthropic
+
+    st = require()
+    t0 = time.perf_counter()
+    try:
+        msg = _client().messages.create(
+            model=st.model, max_tokens=PING_MAX_TOKENS,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": "연결 확인. '확인' 한 단어만 답한다."}],
+        )
+    except anthropic.AuthenticationError as e:
+        raise http.fail("llm_unconfigured", f"{API_KEY_ENV} 가 유효하지 않다 — {e.message}") from e
+    except anthropic.PermissionDeniedError as e:
+        raise http.fail("llm_unconfigured", f"키에 권한이 없다 — {e.message}") from e
+    except anthropic.NotFoundError as e:
+        raise http.fail("llm_unconfigured", f"모델 {st.model!r} 을 찾을 수 없다 — KYUNGDONG_LLM_MODEL 확인 ({e.message})") from e
+    except anthropic.RateLimitError as e:
+        raise http.fail("internal", f"LLM 호출 한도 초과 — 잠시 뒤 다시 ({e.message})") from e
+    except anthropic.APIStatusError as e:
+        raise http.fail("internal", f"LLM 호출 실패 {e.status_code} — {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise http.fail("internal", f"LLM API 에 닿지 못했다 — {e}") from e
+    return {
+        "provider": st.provider, "model": msg.model, "request_id": getattr(msg, "_request_id", None),
+        "latency_ms": round((time.perf_counter() - t0) * 1000),
+        "stop_reason": msg.stop_reason, "text": _text_of(msg),
+        "input_tokens": msg.usage.input_tokens, "output_tokens": msg.usage.output_tokens,
+        "effort": effort(), "egress": EGRESS_NOTE,
+    }

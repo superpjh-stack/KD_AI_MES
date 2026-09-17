@@ -116,6 +116,11 @@ def _llm_state():
     return llm.state()
 
 
+def _cad_availability():
+    from ..cad import provider
+    return provider.availability()
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
     # **prod 비인증은 빈 역할("")이고 메뉴가 없다** (D-211). 전에는 `or "SYSADMIN"` 이라
     # 로그인 화면이 관리자 메뉴 45줄을 통째로 내보냈다 — 인증 전에 화면 지도가 새는 것이다.
@@ -141,7 +146,10 @@ def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> H
         llm_configured=_llm_state().configured,     # 키까지 본다 — 선언만 보면 거짓 배지다 (D-234)
         csrf_enforced=s.csrf_enforce,
         csrf_token=csrf.issue(request),
-        cad_configured=s.cad_configured,
+        # 선언(.env 값)이 아니라 **실측**(변환기 유무)을 본다 — LLM 배지와 같은 이유 (D-234 · D-235)
+        cad_parsing_configured=_cad_availability()[0].configured,
+        cad_vision_configured=_cad_availability()[1].configured,
+        cad_configured=all(a.configured for a in _cad_availability()),
         synthetic_note=_synthetic_note(),
         sample_note=_sample_note(),
         signed_in_id=getattr(sess, "login_id", None),

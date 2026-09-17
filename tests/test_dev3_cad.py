@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "db"))
 
 import conn                                              # noqa: E402
 from kyungdong.app.util import assumed, http             # noqa: E402
+from kyungdong.app import settings as settings_mod      # noqa: E402
 from kyungdong.cad import archive                         # noqa: E402
 from kyungdong.cad import dwgconv                        # noqa: E402
 from kyungdong.cad import inventory as inv               # noqa: E402
@@ -122,31 +123,55 @@ def test_확정_정본이_없으면_고객사는_0건이고_하드코딩으로_�
     assert len(archive.known_customers()) >= 19, "원상복구되지 않았다"
 
 
-def test_인식_공급자가_미구성이다():
+def test_인식_공급자_상태는_설정과_일치한다():
+    """Vision 은 가중치가 없어 **항상 미구성**이다. Parsing 은 `KYUNGDONG_CAD_PARSER=dxf` 일 때만
+    구성이고(D-235) 그때도 `configured()`(둘 다)는 False 다 — 정합성 검증이 안 되기 때문이다."""
     avail = provider.availability()
     assert len(avail) == 2
-    assert not any(a.configured for a in avail), "자격정보가 없는데 구성됐다고 말하면 안 된다"
-    assert not provider.configured()
+    assert not avail[1].configured, "가중치가 없는데 Vision 이 구성됐다고 말하면 안 된다"
+    assert avail[0].configured == provider.parsing_configured()
+    assert not provider.configured(), "Vision 없이 '둘 다 구성' 이 True 면 정합성 검증을 지어내게 된다"
 
 
-def test_미구성_공급자를_부르면_501_이다():
+@pytest.fixture()
+def no_parser(monkeypatch):
+    """**0건 경로를 명시로 만든다** — 설정을 비워 두 공급자 모두 미구성인 상태."""
+    monkeypatch.setenv("KYUNGDONG_CAD_PARSER", "")
+    monkeypatch.setenv("KYUNGDONG_CAD_VISION_MODEL", "")
+    settings_mod.settings.cache_clear()
+    yield
+    settings_mod.settings.cache_clear()
+
+
+def test_미구성_공급자를_부르면_501_이다(no_parser):
     for det in (provider.parsing_detector(), provider.vision_detector()):
         with pytest.raises(http.HTTPException) as e:
             det.detect("x.dwg")
         assert e.value.status_code == 501
         assert e.value.detail["message"] == "CAD Parsing 미구성 (D-05)"
+    assert not provider.parsing_configured()
 
 
-def test_미구성_공급자는_빈_리스트를_돌려주지_않는다():
+def test_모르는_파서_값은_미구성이고_그_사실을_사유에_적는다(monkeypatch):
+    monkeypatch.setenv("KYUNGDONG_CAD_PARSER", "magic")
+    settings_mod.settings.cache_clear()
+    try:
+        av = provider.parsing_detector().available()
+        assert not av.configured and "magic" in av.reason and "D-235" in av.reason
+    finally:
+        settings_mod.settings.cache_clear()
+
+
+def test_미구성_공급자는_빈_리스트를_돌려주지_않는다(no_parser):
     """빈 리스트는 '0건 인식' 과 구분되지 않는다 — 그래서 예외여야 한다."""
     det = provider.parsing_detector()
     with pytest.raises(http.HTTPException):
         det.detect("x.dwg")
 
 
-def test_분석_실행은_501_이고_객체를_만들지_않는다():
+def test_분석_실행은_미구성이면_501_이고_객체를_만들지_않는다(no_parser):
     """0건 경로도 **명시적으로 단언한다** — `skip` 하면 게이트에서 영원히 검증되지 않는다
-    (§10-4 · DEF-QA2-010 · D-62)."""
+    (§10-4 · DEF-QA2-010 · D-62). 설정을 비워 미구성으로 만든 뒤 잰다."""
     row = conn.q1("select DRAWING_ID from EST_CAD_DRAWINGS order by DRAWING_ID limit 1")
     before = conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]
     if row is None:
@@ -162,6 +187,137 @@ def test_분석_실행은_501_이고_객체를_만들지_않는다():
     assert e.value.status_code == 501
     after = conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]
     assert before == after, "501 을 내면서 객체를 만들면 D-05 위반이다"
+
+
+# ══ D-235 — dwg2dxf 파서를 인식 공급자로 붙였다 ═══════════════════════════════
+# 손으로 계산한 정답: CIRCLE 2개(중심 (1,1)·(4,4), r 2.5 → 지름 5) · DIMENSION 2개
+# (하나는 42=280 이라 치수값 280, 하나는 42=-1.0(libredwg 미상 표지) → None).
+DETECT_DXF = "\n".join([
+    "0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", "4", "0", "ENDSEC",
+    "0", "SECTION", "2", "ENTITIES",
+    "0", "CIRCLE", "10", "1.0", "20", "1.0", "40", "2.5",
+    "0", "CIRCLE", "10", "4.0", "20", "4.0", "40", "2.5",
+    "0", "DIMENSION", "10", "0.0", "20", "0.0", "11", "7.5", "21", "9.0", "42", "280.0", "70", "32",
+    "0", "DIMENSION", "10", "2.0", "20", "3.0", "42", "-1.0", "70", "160",
+    "0", "LINE", "10", "0.0", "20", "0.0", "11", "3.0", "21", "4.0",
+    "0", "ENDSEC", "0", "EOF", ""])
+
+
+@pytest.fixture()
+def dxf_parser(monkeypatch):
+    monkeypatch.setenv("KYUNGDONG_CAD_PARSER", "dxf")
+    monkeypatch.setenv("KYUNGDONG_CAD_VISION_MODEL", "")
+    settings_mod.settings.cache_clear()
+    yield provider.parsing_detector()
+    settings_mod.settings.cache_clear()
+
+
+def test_dxf_파서_공급자는_변환기가_있을_때만_구성이다(dxf_parser):
+    av = dxf_parser.available()
+    assert dxf_parser.method == provider.PARSING_DXF == "Parsing(dwg2dxf+DXF)"
+    assert len(dxf_parser.method) <= 30, "DETECT_METHOD 는 VARCHAR(30) 이다"
+    assert av.configured is dwgconv.available()
+    assert "D-235" in av.reason or "D-123" in av.reason
+    assert not provider.configured(), "Vision 없이 둘 다 구성이라 말하면 안 된다"
+
+
+def test_dxf_파서는_홀과_치수문자만_내고_신뢰도는_없다(dxf_parser, tmp_path):
+    if not dwgconv.available():
+        pytest.skip(f"{dwgconv.BINARY} 미설치 — 이 장비에서는 D-05 그대로다")
+    p = tmp_path / "detect.dxf"
+    p.write_text(DETECT_DXF, encoding="utf-8")
+    objs = dxf_parser.detect(str(p))
+    assert [o.object_type for o in objs] == ["홀", "홀", "치수문자", "치수문자"]
+    assert set(o.object_type for o in objs) <= set(provider.OBJECT_TYPES)
+    holes = [o for o in objs if o.object_type == "홀"]
+    assert (holes[0].pos_x, holes[0].pos_y, holes[0].dimension_value) == (1.0, 1.0, 5.0)
+    dims = [o for o in objs if o.object_type == "치수문자"]
+    assert (dims[0].pos_x, dims[0].pos_y, dims[0].dimension_value) == (7.5, 9.0, 280.0)
+    assert dims[1].dimension_value is None, "libredwg 의 -1.0 표지를 치수값으로 적으면 지어낸 값이다"
+    assert all(o.confidence is None for o in objs), "결정적 파싱에 신뢰도를 지어내지 않는다"
+
+
+def test_dxf_파서는_없는_파일과_대상_아닌_형식에_422_다(dxf_parser, tmp_path):
+    if not dwgconv.available():
+        pytest.skip(f"{dwgconv.BINARY} 미설치")
+    with pytest.raises(http.HTTPException) as e:
+        dxf_parser.detect(str(tmp_path / "없다.dwg"))
+    assert e.value.status_code == 422
+    cad = tmp_path / "x.cad"
+    cad.write_bytes(b"V10.00" + b"\x00" * 32)
+    with pytest.raises(http.HTTPException) as e:
+        dxf_parser.detect(str(cad))
+    assert e.value.status_code == 422 and "V10.00" in e.value.detail["detail"]
+    bogus = tmp_path / "bogus.dwg"
+    bogus.write_bytes(b"V10.00" + b"\x00" * 64)
+    with pytest.raises(http.HTTPException) as e:
+        dxf_parser.detect(str(bogus))
+    assert e.value.status_code == 422 and "변환 실패" in e.value.detail["detail"]
+
+
+def test_분석_실행은_미확정_객체를_만들고_재분석은_교체하며_확정이_있으면_거부한다(dxf_parser, tmp_path):
+    """D-235 N건 경로. CONFIRM_YN='N' · CROSS_CHECK_RESULT NULL(Vision 없음) · 상태 완료.
+    확정 객체가 생기면 재분석은 422 — 사람 승인을 지우지 않는다 (G-24)."""
+    if not dwgconv.available():
+        pytest.skip(f"{dwgconv.BINARY} 미설치")
+    p = tmp_path / "detect.dxf"
+    p.write_text(DETECT_DXF, encoding="utf-8")
+    row = conn.q1(
+        "insert into EST_CAD_DRAWINGS (DRAWING_NO, FILE_TYPE, FILE_PATH, FILE_SIZE, "
+        " ANALYSIS_STATUS, DUPLICATE_YN, CREATED_DT) "
+        "values ('DEV3-D235','DXF',%s,%s,'대기','N', now()) returning DRAWING_ID", (str(p), p.stat().st_size))
+    did = int(row["drawing_id"])
+    admin = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'admin'")
+    try:
+        r = pipeline.analyze(did)
+        assert r["detected"] == 4 and r["by_type"] == {"홀": 2, "치수문자": 2}
+        assert r["methods"] == [provider.PARSING_DXF] and r["cross_check"] is None
+        assert "D-05" in r["vision"], "Vision 미구성 사유가 결과에 실려야 한다"
+        objs = conn.q("select DETECT_METHOD, OBJECT_TYPE, CONFIRM_YN, CROSS_CHECK_RESULT, CONFIDENCE_SCORE "
+                      "from EST_CAD_OBJECTS where DRAWING_ID = %s order by OBJECT_ID", (did,))
+        assert len(objs) == 4
+        assert {o["confirm_yn"] for o in objs} == {"N"}, "승인 전에는 확정이 아니다 (G-24)"
+        assert all(o["cross_check_result"] is None and o["confidence_score"] is None for o in objs)
+        assert {o["detect_method"] for o in objs} == {provider.PARSING_DXF}
+        assert conn.q1("select ANALYSIS_STATUS from EST_CAD_DRAWINGS where DRAWING_ID = %s",
+                       (did,))["analysis_status"] == "완료"
+        # 재분석 = 미확정 교체. 행이 불어나지 않는다
+        r2 = pipeline.analyze(did)
+        assert r2["replaced"] == 4 and r2["detected"] == 4
+        assert conn.q1("select count(*) as n from EST_CAD_OBJECTS where DRAWING_ID = %s", (did,))["n"] == 4
+        # Feature 는 확정 0건이면 0건이다
+        assert pipeline.build_features(did)["created"] == 0
+        # 하나를 사람이 확정하면 재분석은 422 — 승인 이력을 지우지 않는다
+        oid = int(conn.q1("select min(OBJECT_ID) as o from EST_CAD_OBJECTS where DRAWING_ID = %s", (did,))["o"])
+        pipeline.review_object(oid, reviewer_id=int(admin["user_id"]), role_code="SYSADMIN", result="승인")
+        with pytest.raises(http.HTTPException) as e:
+            pipeline.analyze(did)
+        assert e.value.status_code == 422 and "G-24" in e.value.detail["detail"]
+        assert conn.q1("select count(*) as n from EST_CAD_OBJECTS where DRAWING_ID = %s", (did,))["n"] == 4
+    finally:
+        conn.x("delete from EST_CAD_FEATURES where DRAWING_ID = %s", (did,))
+        conn.x("delete from EST_OBJECT_REVIEWS where OBJECT_ID in "
+               "(select OBJECT_ID from EST_CAD_OBJECTS where DRAWING_ID = %s)", (did,))
+        conn.x("delete from EST_CAD_OBJECTS where DRAWING_ID = %s", (did,))
+        conn.x("delete from EST_CAD_DRAWINGS where DRAWING_ID = %s", (did,))
+
+
+def test_분석_실행_라우트는_CSRF_권한_입력값_순서로_막는다(dxf_parser):
+    """`POST /est/010/analyze` — 토큰 없으면 403 · 등록 권한 없으면 403 · 없는 도면은 422."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fastapi.testclient import TestClient
+    from conftest import csrf_post
+    from kyungdong.app.main import app
+    client = TestClient(app, raise_server_exceptions=False)
+    r = client.post("/est/010/analyze", data={"drawing_id": "999999"},
+                    headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
+    assert r.status_code == 403, "CSRF 토큰 없는 POST 는 403 이다 (G-26)"
+    r = csrf_post(client, "/est/010/analyze", {"drawing_id": "999999"},
+                  headers={"x-kyungdong-role": "OPERATOR"}, follow_redirects=False)
+    assert r.status_code == 403, "등록 권한 없는 역할은 403 이다 (G-28)"
+    r = csrf_post(client, "/est/010/analyze", {"drawing_id": "999999"},
+                  headers={"x-kyungdong-role": "SYSADMIN"}, follow_redirects=False)
+    assert r.status_code == 422, f"없는 도면은 422 다: {r.status_code}"
 
 
 def test_집계_불가_Feature_는_차단으로_남는다():
@@ -268,6 +424,8 @@ def test_HITL_승인이_확정을_만들고_그_확정으로만_Feature_가_생�
     did = int(row["drawing_id"])
     admin = conn.q1("select USER_ID from SYS_USERS where LOGIN_ID = 'admin'")
     feat0 = int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"])
+    rev0 = int(conn.q1("select count(*) as n from EST_OBJECT_REVIEWS")["n"])
+    obj0 = int(conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"])
     obj = conn.q1(
         "insert into EST_CAD_OBJECTS "
         "(DRAWING_ID, DETECT_METHOD, OBJECT_TYPE, CONFIDENCE_SCORE, CONFIRM_YN, CREATED_DT) "
@@ -303,8 +461,9 @@ def test_HITL_승인이_확정을_만들고_그_확정으로만_Feature_가_생�
         conn.x("delete from EST_OBJECT_REVIEWS where OBJECT_ID = %s", (oid,))
         conn.x("delete from EST_CAD_OBJECTS where OBJECT_ID = %s", (oid,))
     assert int(conn.q1("select count(*) as n from EST_CAD_FEATURES")["n"]) == feat0
-    assert int(conn.q1("select count(*) as n from EST_OBJECT_REVIEWS")["n"]) == 0
-    assert int(conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]) == 0
+    assert int(conn.q1("select count(*) as n from EST_OBJECT_REVIEWS")["n"]) == rev0
+    # 분석 실행(D-235)으로 미확정 객체가 있을 수 있다 — 전역 0 이 아니라 **시작 전과 같음**을 잰다
+    assert int(conn.q1("select count(*) as n from EST_CAD_OBJECTS")["n"]) == obj0
 
 
 # ══ 단위 가정 (D-150) — 표지 없이 단위만 바뀌면 거짓 실측이다 ══════════════

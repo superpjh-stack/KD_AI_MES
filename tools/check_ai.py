@@ -212,9 +212,10 @@ def gate_14() -> None:
     vocab = assumed.label_vocab()
     why = (f"정답 박스 0건 — 확정 어휘 {list(vocab) or '미확인'} (D-160 ④) 의 사람 라벨이 "
            "docs/cad 에 없다 (Label Studio 내보내기 없음. 라벨링 가이드는 'MVP 100장 → "
-           "권장 300장' 계획 단계) · 예측 0건 (Autodesk API·YOLOv8 가중치 미확보 D-05 · "
-           "우리 파서는 표제란·BOM표·리비전표의 **경계상자를 만들지 못한다**) · "
-           "EST_CAD_OBJECTS 0건")
+           "권장 300장' 계획 단계) · 예측 0건 (YOLOv8 가중치 미확보 D-05 · "
+           "dwg2dxf 파서(D-235)는 홀·치수문자 좌표만 내고 표제란·BOM표·리비전표의 "
+           "**경계상자를 만들지 못한다**) · "
+           f"EST_CAD_OBJECTS {objs}건")
 
     # ── 가정 답변 선언 (D-150) ─────────────────────────────────────────
     # **고지 문구를 여기 박지 않는다.** `SYS_CONFIGS('시스템설정','ASSUMED_ANSWERS')` 선언과
@@ -277,7 +278,7 @@ def gate_14() -> None:
             f"{TARGETS['G-14']} / {note} · IoU {thr} TP {tp} FP {fp} FN {fn} "
             f"P {prec:.4f} R {rec:.4f} F1 {f1:.4f} · 도면 {len(imgs)}건 · "
             f"라벨·예측을 같은 DXF 파싱에서 파생(순환) — 정확도 증거 아님. "
-            f"실제 탐지기는 여전히 501 미구성(D-05)이고 EST_CAD_OBJECTS {objs}행이다"
+            f"실제 탐지기는 {'Parsing 만 구성(D-235, 경계상자 없음)' if cadprov.parsing_configured() else '501 미구성(D-05)'}이고 EST_CAD_OBJECTS {objs}행이다"
             if f1 is not None else
             f"{TARGETS['G-14']} / {note} · TP {tp} FP {fp} FN {fn} — P/R/F1 계산 불가")
     say()
@@ -386,8 +387,11 @@ def gate_19(client: TestClient) -> None:
     probe_no = "QA3-PROBE-G19"
     created = None
     try:
-        if drawings == 0:
+        parsing_on = cadprov.parsing_configured()
+        if drawings == 0 or parsing_on:
             # N건 경로를 **명시 단언**하려고 도면 1건을 임시로 넣는다. 끝나고 지운다.
+            # Parsing 이 구성됐으면(D-235) **실도면으로 돌리지 않는다** — 게이트는 읽기 전용이라
+            # EST_CAD_OBJECTS 에 행을 남기면 안 된다. probe 는 파일이 없어 422 로 끝난다.
             row = conn.q1(
                 "insert into EST_CAD_DRAWINGS (DRAWING_NO, FILE_TYPE, FILE_PATH, FILE_SIZE, "
                 " ANALYSIS_STATUS, DUPLICATE_YN, CREATED_DT) "
@@ -398,13 +402,16 @@ def gate_19(client: TestClient) -> None:
         say(f"  ② N건 경로: 도면 #{target} 으로 cad.pipeline.analyze() 실행")
         try:
             r = cadpipe.analyze(target)
-            say(f"     인식 결과 {r} — **501 이 아니라 통과했다. 공급자 구성 확인 필요**")
+            say(f"     인식 결과 {r} — **501 이 아니라 통과했다."
+                + (" Parsing 구성됨 (D-235)**" if parsing_on else " 공급자 구성 확인 필요**"))
             stage1 = True
         except Exception as e:                       # noqa: BLE001 — 계약 오류를 그대로 본다
             code = getattr(e, "status_code", None)
             detail = getattr(e, "detail", {})
             msg = detail.get("message", "") if isinstance(detail, dict) else str(detail)
-            say(f"     → HTTP {code} {msg} (기대: 501 CAD Parsing 미구성 — 조용한 합성 금지)")
+            want = ("422 원본 파일 없음 — probe 도면이라 그렇다. Parsing 은 구성됨 (D-235)" if parsing_on
+                    else "501 CAD Parsing 미구성 — 조용한 합성 금지")
+            say(f"     → HTTP {code} {msg} (기대: {want})")
             stage1 = False
         feat = cadpipe.build_features(target)
         say(f"     Feature 생성: 확정객체 {feat['confirmed_objects']} → 생성 {feat['created']} "
@@ -435,11 +442,18 @@ def gate_19(client: TestClient) -> None:
     say(f"  3단계 Feature {n_feat} 행 중 **단위 가정 (D-150) 표지가 붙은 것 {n_assumed} 행** "
         "— 표지 없이 단위만 바뀐 행이 있으면 그것이 거짓 실측이다")
     head = f"{note} · 3단계 Feature {n_feat}행(단위 가정 표지 {n_assumed}행) · " if note else ""
+    n_obj = count("EST_CAD_OBJECTS")
+    n_conf = n1("select count(*) as n from EST_CAD_OBJECTS where CONFIRM_YN = 'Y'")
+    if cadprov.parsing_configured():
+        stage1_txt = (f"1단계 Parsing 은 dwg2dxf 변환 파서로 **돈다** (D-235) — EST_CAD_OBJECTS {n_obj}행 · "
+                      f"확정 {n_conf}행 · Vision 미구성이라 정합성 검증 없음. 종단이 막히는 곳은 "
+                      "4단계 견적(D-04 Label 부재)이다. ")
+    else:
+        stage1_txt = ("1단계(인식)가 501 CAD Parsing 미구성(D-05)에서 멈춘다. "
+                      "가정 답변은 Autodesk API·YOLOv8 가중치를 주지 않으므로 1단계는 **가정으로 열리지 않는다**. ")
     verdict("G-19", BLOCKED,
-            head +
-            "5단계 종단 통과 0건 — 1단계(인식)가 501 CAD Parsing 미구성(D-05)에서 멈춘다. "
-            f"확정객체 0 → 견적 0 → SHAP 0. 가정 답변은 Autodesk API·YOLOv8 가중치를 주지 "
-            f"않으므로 1단계는 **가정으로 열리지 않는다**. 화면 Confidence·근거 표기 "
+            head + "5단계 종단 통과 0건 — " + stage1_txt +
+            f"확정객체 {n_conf} → 견적 0 → SHAP 0. 화면 Confidence·근거 표기 "
             f"{sum(found.values())}/{len(found)} 화면")
     say()
 
@@ -734,7 +748,12 @@ def gate_24(client: TestClient) -> None:
                     hits.append((p.relative_to(ROOT).as_posix(), i, m.group(2).upper()))
     say(f"  ① 승인 필요 표를 바꾸는 코드 위치 {len(hits)} 곳")
     for f, i, t in hits:
-        say(f"     {f}:{i}  {t}")
+        # `EST_CAD_OBJECTS` 에 **CONFIRM_YN='N'** 행을 넣는 것은 인식 결과 제안이지 확정이 아니다 (D-235).
+        # 확정은 `review_object()` 의 update 하나뿐이다 — 그 구분을 판정 줄에 적는다.
+        tail = " ".join((ROOT / f).read_text().splitlines()[i - 1: i + 3])
+        tag = ("  (미확정 제안 — CONFIRM_YN='N', 승인 아님 D-235)"
+               if t == "EST_CAD_OBJECTS" and "insert" in tail.lower() and "'N'" in tail else "")
+        say(f"     {f}:{i}  {t}{tag}")
     per_table = {t: sum(1 for _f, _i, x in hits if x == t) for t in APPROVAL_TABLES}
     say(f"     표별: {per_table}")
     no_path = [t for t, n in per_table.items() if n == 0]
@@ -753,6 +772,9 @@ def gate_24(client: TestClient) -> None:
         ("POST", "/shp/016/approve", {"shipment_id": "999999"}, "출하물류관리", "approve"),
         ("POST", "/api/agent/recommend/999999/adopt", {"decision": "승인"},
          "AI Agent 통합관리", "approve"),
+        # 010 분석 실행 — CONFIRM_YN='N' 객체를 만드는 등록 경로다(D-235). 등록 권한 없는 역할은 403,
+        # 있는 역할은 권한 문 뒤에서 422(없는 도면) 또는 501(Parsing 미구성)이다.
+        ("POST", "/est/010/analyze", {"drawing_id": "999999"}, "수주견적AI관리", "write"),
         # SHP_SHIPMENTS 에 행을 만드는 경로 — 확정(SHIP_DT·APPROVER_ID)이 아니라 '승인대기' 생성이다.
         ("POST", "/shp/016", {"lot_trace_id": "999999", "plan_dt": ""},
          "출하물류관리", "write"),

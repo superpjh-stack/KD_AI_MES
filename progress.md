@@ -1181,6 +1181,39 @@ URL 도 잡았는데 **검사를 고치지 않고 문구를 바꿨다.**
 | **사이드카 (D-233)** | `kyungdong-plc-sim` — 앱 네트워크 공유 · `127.0.0.1:8020` 로 진짜 수집 API · 5초 주기 · 작업지시 WO-2017-0002 진행 전환. 브라우저 실측: 기동 80초 뒤 신호 9 → 14건(10초), 자동 실적 #196 도출, 갱신 2초. 하루 약 26만 행 증가 — 실물 PLC 가 붙으면 `stop plc-sim` |
 | 잡은 것 2 | 실시간 패널의 `시뮬레이터 데이터` 배지가 IP 등록 선언(D-174)만 보고 있어 사이드카 데이터가 실수집처럼 보였다 → 최근 적재 행의 `COLLECT_PATH` 로도 판정(테스트) |
 
+## LLM 연결 · CAD Parsing 구성 (D-235 · D-236)
+
+> 2026-09-17. 사용자: *"LLM 연결과 CAD Parsing 구성해줘"*
+
+| | 실측 |
+|---|---|
+| **LLM (D-236)** | `.env` 생성 — `anthropic` / `claude-opus-5` / `medium`. **`ANTHROPIC_API_KEY` 는 비어 있다** — 이 장비에 키가 없어 실호출 미실시. `make check-llm` → `LLM 미구성 (D-08) — ANTHROPIC_API_KEY 가 비어 있다` exit 1 (실측). 키를 넣으면 같은 명령이 모델·요청 ID·지연·토큰을 찍는다 |
+| **CAD Parsing (D-235)** | `KYUNGDONG_CAD_PARSER=dxf` → `Parsing(dwg2dxf+DXF) 구성됨` · Vision 은 미구성 그대로. 헤더 배지 `CAD Vision 미구성 (D-05) · Parsing 만` (`/` 실측) |
+| 분석 실행 실측 | 도면 #1 `GD170402-01-콘베어-L.dwg`(AC1015 R2000) → **53 객체 = 홀 34 · 치수문자 19** · 치수값 0/19(변환 DXF 에 group 42 없음) · `CONFIRM_YN` 전부 N · `CROSS_CHECK_RESULT` 전부 NULL · 상태 완료 · 재분석 = 교체 53. 실측 뒤 **행은 지웠다**(전역 0행 전제의 게이트 분모를 흐리지 않으려고) |
+| DIMENSION 표본 | 변환 DWG 8건: DIMENSION 있음 5건, 그중 group 42 있음 5 · `-1.0`(libredwg 미상 표지) 2 → 치수값은 42 가 양수일 때만 · 원본 DXF 3건은 42 전부 없음 |
+| 화면 | 010 행마다 `분석 실행`(`POST /est/010/analyze`, CSRF→등록권한→입력값) · 010 인식 공급자 표에 D-235 사유 · 011 은 `Parsing(dwg2dxf+DXF)` 행을 보인다. 010 실측 200 · 분석 폼 20행 |
+| 테스트 | `tests/test_dev3_cad.py` +7 (파서 객체 2종·신뢰도 없음·422 구분·분석 e2e·재분석 교체·확정 시 422·라우트 403/403/422) · 미구성 0건 경로는 `monkeypatch` 로 설정을 비워 **명시로** 잰다 · qa1·qa3·hitl·arch_smoke 는 구성 여부로 갈라 판정 |
+| 검사기 | `check_ai` G-19 ②: Parsing 구성 시 probe 도면만(읽기 전용) · G-24 ① `CONFIRM_YN='N'` insert 는 제안으로 표기 · ② `/est/010/analyze` write probe 추가 · G-14 문구 실측화 |
+| **G-14 는 그대로 차단** | 정답 라벨 0건 · 파서는 경계상자를 만들지 못한다. Parsing 구성으로 바뀐 것은 **1단계가 돈다**는 것뿐이다 |
+| 안 한 것 | 컨테이너 이미지의 dwg2dxf — Debian 에 libredwg 패키지가 없다(실측). VPS 는 `dxf` 로 둬도 배지가 미구성을 말한다. 소스 빌드는 DEPLOY.md §8 · 서버측 `fallbacks` 미적용(조용한 폴백) |
+
+## LLM 자격 판정·토큰 상한 정정 + CAD Parsing 재실측 (D-237)
+
+> 2026-09-17. 사용자: *"LLM 구성과 CAD 파싱을 구성해줘. 실제 돌아가도록 해줘"*
+
+| | 실측 |
+|---|---|
+| **자격** | 이 장비에 여전히 없다 — `ANTHROPIC_API_KEY`·`ANTHROPIC_AUTH_TOKEN` 빈 값, `~/.config/anthropic` 없음, `ant` CLI 없음. SDK 생성자 실측: `api_key=None` → 요청 시 `Could not resolve authentication method`. **실호출은 이번에도 하지 못했다** — 키는 사용자만 넣을 수 있다 |
+| **CAD Parsing** | `dwg2dxf 0.14` 있음 · `availability()` = `Parsing(dwg2dxf+DXF) 구성됨` / `Vision 미구성`. `pipeline.analyze(1)` 실행 → **53객체(홀 34 · 치수문자 19)** · `confidence_score` 전부 NULL · `confirm_yn` N · `cross_check_result` NULL · 상태 완료. 확인 뒤 행 53 삭제(0행 복귀) — 화면 010 의 `분석 실행` 이 같은 결과를 만든다 |
+| **어댑터 결함 3건 (D-237)** | 공식 SDK 레퍼런스와 대조. ① 자격을 env 하나로만 판정 → `has_credential()` (env 2종 → SDK 생성자, 네트워크 없음) ② Opus 5 는 thinking 이 기본이라 핑 `max_tokens=16`·답변 1024 가 잘린다 → 256 · 4096 ③ 핑에 403·429 분기 추가. `anthropic` import 는 여전히 `agent/llm.py` 하나(실측) |
+| 테스트 | `test_dev3_llm`·`test_qa3_ai` 36 passed. 전체 1건 FAIL 은 **테스트가 낡은 것** — `test_dev1_audit` 쪽 넘김이 고정 `page=300` 을 청했는데 시뮬레이터가 돈 뒤 접속 로그가 662쪽이라 범위 안이 됐다 → 실제 마지막 쪽을 읽고 그 너머를 청하도록 고침(제품 코드 무변경) |
+| **게이트** | **PASS 21 · FAIL 0 · 차단 11 · 미구현 0 / 32** · 빌드 **1,426 passed · 2 xfailed**. `make check-decisions` 되열림 0 · 미닫힘 0 |
+| 검증 명령 | `make check-llm`(자격 없으면 exit 1 + 3경로 사유) · `make gate` |
+| **실호출 (키 투입 뒤)** | 사용자가 키를 주어 `.env` 에 넣었다(gitignore, 저장소·로그에 없음). `make check-llm` → **연결 성공** `claude-opus-5` · 요청 ID `req_011Cf8irzv7C2TLqora7WywW` · 2,420ms · 입력 27 / 출력 4 토큰 · 응답 "확인". **키가 이 세션 대화에 붙여넣어졌으므로 재발급을 권한다**(D-232 의 비밀번호와 같은 결) |
+| **Agent e2e** | `POST /agt/038` 3건(CSRF·dev 세션·감사 기록). 신뢰도 0.35 · 0.60 → 임계 0.7(가설 D-10) 미달이라 **LLM 미호출 · `검토 필요 — 근거 부족`**(설계대로, 임계는 낮추지 않았다) · 골드셋 상위 질문 "문서 누락 자재는 격리구역에 두는가" 0.7692 → **LLM 호출 · 5줄 답변 · `근거: material_receiving_sop.md`** · `AGT_QUERY_LOGS #368` · 4,948ms(검색 7ms 포함). 어댑터 첫 실호출에서 형식 오류 없음. **단 답변 4줄째 "투입 재개는 담당자 승인이 필요합니다" 는 원문에 없는 문장**이다(원문 대조: 격리·차단·예외 입력·감사로그까지만) — 근거 밖 추론 1건. 프롬프트 원칙(근거에 없는 것은 만들지 않는다)이 문장 단위로는 안 지켜졌다 → 다음 회전에서 프롬프트·검증 항목으로 다룬다 |
+
+**키를 넣는 방법** (셋 중 하나, 저장소에는 적지 않는다): `.env` 의 `ANTHROPIC_API_KEY=` 채우기 · 셸 `export ANTHROPIC_API_KEY=…` · `ant auth login`. 넣은 뒤 `make check-llm` 이 모델·요청 ID·지연·토큰을 찍으면 Agent 3종(009·020·038)이 501 대신 답을 만든다.
+
 ## 다음에 할 일
 
 **열린 항목은 `make check-decisions` 가 항상 실측으로 답한다**(현재 **29건**) — 이 목록을
@@ -1203,6 +1236,8 @@ URL 도 잡았는데 **검사를 고치지 않고 문구를 바꿨다.**
 
 ### 우리 손에서 끝나는 것
 
+0. **LLM 키 재발급** — 이번 키는 세션 대화에 남았다. console 에서 새 키를 만들어 `.env` 만 바꾼다(D-237). 실호출은 확인됐다
+0-b. **근거 밖 문장 1건** — 첫 실답변에서 원문에 없는 "투입 재개는 담당자 승인" 이 나왔다. 프롬프트 강화 또는 답변 문장별 근거 대조(citations) 로 잡는다
 9. **`/est/011`·`012`·`013`·`/agt/040` 에 `csrf_field()`** — 지금은 `<form>` 이 없어 넣으면
    죽은 코드다. **쓰기 버튼이 살아나는 순간** 필요하고, 빠뜨리면 그 화면만 403 이다
    (D-172 검사가 form 단위로 잡는다)
